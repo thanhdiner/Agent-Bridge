@@ -210,6 +210,40 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FilesReadScope_CallingFsBatchStat_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_batch_stat",
+            arguments: new { deviceId = "missing-test-device", paths = new[] { "C:/test.txt", "C:/missing" } }
+        );
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("AGENT_OFFLINE", body);
+    }
+
+    [Fact]
+    public async Task FilesWriteScope_CallingFsBatchStat_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_batch_stat",
+            arguments: new { deviceId = "missing-test-device", paths = new[] { "C:/test.txt" } }
+        );
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("FORBIDDEN", body);
+    }
+
+    [Fact]
     public async Task FilesReadScope_CallingFsWrite_ReturnsForbidden()
     {
         await StartServerAsync();

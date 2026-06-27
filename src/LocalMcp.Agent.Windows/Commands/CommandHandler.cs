@@ -81,6 +81,10 @@ public sealed class CommandHandler
         {
             return await HandleStatAsync(statCommand, cancellationToken);
         }
+        else if (command is BatchStatCommand batchStatCommand)
+        {
+            return await HandleBatchStatAsync(batchStatCommand, cancellationToken);
+        }
         else if (command is MoveCommand moveCommand)
         {
             return await HandleMoveAsync(moveCommand, cancellationToken);
@@ -511,6 +515,114 @@ public sealed class CommandHandler
             Success = true,
             Data = dataJson
         };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleBatchStatAsync(
+        BatchStatCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (command.Paths is null || command.Paths.Count < 1 || command.Paths.Count > 100)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InvalidRequest, "paths must contain between 1 and 100 entries.")
+            };
+        }
+
+        var items = new BatchStatItemResult[command.Paths.Count];
+        using var concurrencyGate = new SemaphoreSlim(initialCount: 8, maxCount: 8);
+
+        try
+        {
+            var tasks = command.Paths.Select((path, index) => ProcessPathAsync(path, index)).ToArray();
+            await Task.WhenAll(tasks);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected batch stat failure. CommandId: {CommandId}", command.CommandId);
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while retrieving batch status.")
+            };
+        }
+
+        var result = new BatchStatResult
+        {
+            Items = items,
+            Succeeded = items.Count(item => item.Success),
+            Failed = items.Count(item => !item.Success)
+        };
+
+        var dataJson = JsonSerializer.SerializeToElement(result, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+
+        async Task ProcessPathAsync(string? path, int index)
+        {
+            var itemPath = path ?? string.Empty;
+            await concurrencyGate.WaitAsync(cancellationToken);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var statResult = await _fileSystemExecutor.StatAsync(
+                        itemPath,
+                        command.CommandId,
+                        cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var itemSucceeded = statResult.Success && statResult.Data is not null;
+                    items[index] = new BatchStatItemResult
+                    {
+                        Path = itemPath,
+                        Success = itemSucceeded,
+                        Data = itemSucceeded ? statResult.Data : null,
+                        Error = itemSucceeded
+                            ? null
+                            : statResult.Error ?? new CommandError(
+                                ErrorCodes.InternalError,
+                                "Path status did not return a result.")
+                    };
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unexpected batch stat item failure at index {Index}. CommandId: {CommandId}", index, command.CommandId);
+                    items[index] = new BatchStatItemResult
+                    {
+                        Path = itemPath,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while retrieving path status.")
+                    };
+                }
+            }
+            finally
+            {
+                concurrencyGate.Release();
+            }
+        }
     }
 
     private async Task<CommandResult<JsonElement>> HandleMoveAsync(

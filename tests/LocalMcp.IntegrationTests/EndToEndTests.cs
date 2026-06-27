@@ -264,6 +264,43 @@ public sealed class EndToEndTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FsBatchStat_EndToEndFlow_ReturnsOrderedMixedResults()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var filePath = Path.Combine(_tempRoot, "batch-file.txt");
+        var directoryPath = Path.Combine(_tempRoot, "batch-directory");
+        var missingPath = Path.Combine(_tempRoot, "batch-missing.txt");
+        await File.WriteAllTextAsync(filePath, "batch");
+        Directory.CreateDirectory(directoryPath);
+
+        var tools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>());
+
+        var response = await tools.BatchStatAsync(
+            _deviceId,
+            new List<string> { directoryPath, missingPath, filePath });
+
+        Assert.False(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<BatchStatResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal(3, data.Succeeded);
+        Assert.Equal(0, data.Failed);
+        Assert.Equal(new[] { directoryPath, missingPath, filePath }, data.Items.Select(item => item.Path).ToArray());
+        Assert.Equal("directory", data.Items[0].Data!.Type);
+        Assert.False(data.Items[1].Data!.Exists);
+        Assert.Equal("file", data.Items[2].Data!.Type);
+    }
+
+    [Fact]
     public async Task FsMove_EndToEndFlow_MovesFileSuccessfully()
     {
         await InitializeAsync();
