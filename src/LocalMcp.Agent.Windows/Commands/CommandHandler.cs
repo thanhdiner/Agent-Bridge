@@ -70,6 +70,10 @@ public sealed class CommandHandler
         {
             return await HandleCopyAsync(copyCommand, cancellationToken);
         }
+        else if (command is DeleteCommand deleteCommand)
+        {
+            return await HandleDeleteAsync(deleteCommand, cancellationToken);
+        }
 
         _logger.LogWarning("Unsupported command type received: {CommandType}", command.GetType().Name);
         return new CommandResult<JsonElement>
@@ -496,6 +500,37 @@ public sealed class CommandHandler
             command.Destination,
             command.Overwrite,
             command.ExpectedSourceSha256,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!result.Success || result.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleDeleteAsync(
+        DeleteCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _fileSystemExecutor.DeleteAsync(
+            command.Path,
+            command.ExpectedSha256,
+            command.MissingOk,
             command.CommandId,
             cancellationToken
         );

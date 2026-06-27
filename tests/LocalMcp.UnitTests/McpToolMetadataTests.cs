@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 using ModelContextProtocol.Server;
 using LocalMcp.Gateway.Mcp;
@@ -35,6 +36,7 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_stat", true, false, true, false)]
     [InlineData("fs_move", false, false, false, false)]
     [InlineData("fs_copy", false, false, false, false)]
+    [InlineData("fs_delete", false, true, false, false)]
     public void ValidateToolAnnotations(
         string toolName,
         bool expectReadOnly,
@@ -48,6 +50,14 @@ public sealed class McpToolMetadataTests
         Assert.Equal(expectDestructive, attr.Destructive);
         Assert.Equal(expectIdempotent, attr.Idempotent);
         Assert.Equal(expectOpenWorld, attr.OpenWorld);
+    }
+
+    [Fact]
+    public void FsDelete_DescriptionRequiresUserConfirmation()
+    {
+        var description = GetToolMethod("fs_delete").GetCustomAttribute<DescriptionAttribute>();
+        Assert.NotNull(description);
+        Assert.Contains("Ask the user for confirmation", description!.Description, StringComparison.OrdinalIgnoreCase);
     }
 
     // ── Schema / Parameter Assertions ────────────────────────────────────────
@@ -91,6 +101,7 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsStat_NoInternalParameters() => AssertNoInternalParams("fs_stat");
     [Fact] public void FsMove_NoInternalParameters() => AssertNoInternalParams("fs_move");
     [Fact] public void FsCopy_NoInternalParameters() => AssertNoInternalParams("fs_copy");
+    [Fact] public void FsDelete_NoInternalParameters() => AssertNoInternalParams("fs_delete");
 
     [Fact]
     public void FsRead_HasExactSchema()
@@ -198,5 +209,16 @@ public sealed class McpToolMetadataTests
         Assert.Contains("overwrite", names);
         Assert.Contains("expectedSourceSha256", names);
         Assert.Equal(5, names.Count);
+    }
+
+    [Fact]
+    public void FsDelete_HasExactSchema()
+    {
+        var names = GetParamNames("fs_delete").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("expectedSha256", names);
+        Assert.Contains("missingOk", names);
+        Assert.Equal(4, names.Count);
     }
 }

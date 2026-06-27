@@ -294,6 +294,37 @@ public sealed class EndToEndTests : IAsyncDisposable
         Assert.Equal(text, await File.ReadAllTextAsync(dstFile));
     }
 
+    [Fact]
+    public async Task FsDelete_EndToEndFlow_RemovesFileSuccessfully()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var filePath = Path.Combine(_tempRoot, "remove-test.txt");
+        const string text = "Remove test content";
+        await File.WriteAllTextAsync(filePath, text);
+
+        var tools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>());
+
+        var response = await tools.DeleteAsync(_deviceId, filePath, expectedSha256: null, missingOk: false);
+
+        Assert.False(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<DeleteResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal(filePath, data.Path);
+        Assert.Equal((long)text.Length, data.BytesDeleted);
+        Assert.NotNull(data.Sha256);
+        Assert.False(File.Exists(filePath));
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_agentConnection is not null)

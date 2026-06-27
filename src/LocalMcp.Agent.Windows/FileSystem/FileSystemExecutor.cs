@@ -1899,4 +1899,223 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             }
         };
     }
+
+    // ── fs_delete ────────────────────────────────────────────────────────────
+
+    public async Task<CommandResult<DeleteResult>> DeleteAsync(
+        string path,
+        string? expectedSha256,
+        bool missingOk,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+        }
+
+        var policyError = _pathPolicy.AuthorizeDeleteFile(path, missingOk, out var physicalPath);
+        if (policyError is not null)
+            return new CommandResult<DeleteResult> { CommandId = commandId, Success = false, Error = policyError };
+
+        if (Directory.Exists(physicalPath))
+        {
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "Deleting directories is not supported.")
+            };
+        }
+
+        if (!File.Exists(physicalPath))
+        {
+            if (!missingOk)
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileNotFound, "The requested file was not found.")
+                };
+            }
+
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new DeleteResult
+                {
+                    Path = physicalPath,
+                    BytesDeleted = 0,
+                    Sha256 = null
+                }
+            };
+        }
+
+        try
+        {
+            var attributes = File.GetAttributes(physicalPath);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the delete path.")
+                };
+            }
+
+            if (attributes.HasFlag(FileAttributes.ReadOnly))
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileReadOnly, "The target file is read-only.")
+                };
+            }
+
+            long bytesDeleted;
+            string initialHash;
+            using (var stream = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+            {
+                bytesDeleted = stream.Length;
+                initialHash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+            }
+
+            if (!string.IsNullOrWhiteSpace(expectedSha256) &&
+                !string.Equals(initialHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Target file has changed since the expected SHA-256 was computed.")
+                };
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var revalidationError = _pathPolicy.AuthorizeDeleteFile(physicalPath, missingOk: false, out var revalidatedPath);
+            if (revalidationError is not null)
+                return new CommandResult<DeleteResult> { CommandId = commandId, Success = false, Error = revalidationError };
+
+            if (!string.Equals(physicalPath, revalidatedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Target path changed during delete validation.")
+                };
+            }
+
+            string finalHash;
+            long finalLength;
+            using (var stream = new FileStream(revalidatedPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+            {
+                finalLength = stream.Length;
+                finalHash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+            }
+
+            if (finalLength != bytesDeleted || !string.Equals(finalHash, initialHash, StringComparison.Ordinal))
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Target file changed during delete validation.")
+                };
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Delete(revalidatedPath);
+
+            if (File.Exists(revalidatedPath))
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.WriteError, "The file still exists after the delete operation.")
+                };
+            }
+
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new DeleteResult
+                {
+                    Path = revalidatedPath,
+                    BytesDeleted = bytesDeleted,
+                    Sha256 = initialHash
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+        }
+        catch (FileNotFoundException)
+        {
+            if (missingOk)
+            {
+                return new CommandResult<DeleteResult>
+                {
+                    CommandId = commandId,
+                    Success = true,
+                    Data = new DeleteResult { Path = physicalPath, BytesDeleted = 0, Sha256 = null }
+                };
+            }
+
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.FileNotFound, "The requested file was not found.")
+            };
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied during delete. CommandId: {CommandId}", commandId);
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "Access was denied when attempting to delete the file.")
+            };
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error during delete. CommandId: {CommandId}", commandId);
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.WriteError, "Failed to delete the file due to an IO error.")
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during delete. CommandId: {CommandId}", commandId);
+            return new CommandResult<DeleteResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while deleting the file.")
+            };
+        }
+    }
 }

@@ -54,6 +54,7 @@ public sealed class CommandDeserializerTests
                 nameof(StatCommand) => JsonSerializer.Deserialize<StatCommand>(payload, JsonOptions.Default),
                 nameof(MoveCommand) => JsonSerializer.Deserialize<MoveCommand>(payload, JsonOptions.Default),
                 nameof(CopyCommand) => JsonSerializer.Deserialize<CopyCommand>(payload, JsonOptions.Default),
+                nameof(DeleteCommand) => JsonSerializer.Deserialize<DeleteCommand>(payload, JsonOptions.Default),
                 _ => null
             };
         }
@@ -241,6 +242,35 @@ public sealed class CommandDeserializerTests
         var copyCmd = Assert.IsType<CopyCommand>(command);
         Assert.False(copyCmd.Overwrite);
         Assert.Null(copyCmd.ExpectedSourceSha256);
+    }
+
+    [Fact]
+    public void Deserialize_DeleteCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"DeleteCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/a.txt\",\"expectedSha256\":\"abc123\",\"missingOk\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var deleteCmd = Assert.IsType<DeleteCommand>(command);
+        Assert.Equal("C:/src/a.txt", deleteCmd.Path);
+        Assert.Equal("abc123", deleteCmd.ExpectedSha256);
+        Assert.True(deleteCmd.MissingOk);
+    }
+
+    [Fact]
+    public void Deserialize_DeleteCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"DeleteCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\\\\a.txt\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var deleteCmd = Assert.IsType<DeleteCommand>(command);
+        Assert.Null(deleteCmd.ExpectedSha256);
+        Assert.False(deleteCmd.MissingOk);
     }
 
     [Fact]

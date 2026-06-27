@@ -789,6 +789,110 @@ public sealed class PathPolicy : IPathPolicy
         return null;
     }
 
+    public CommandError? AuthorizeDeleteFile(string rawPath, bool missingOk, out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+
+        if (_options.WritableRoots == null || _options.WritableRoots.Count == 0)
+            return new CommandError(ErrorCodes.WritableRootNotConfigured, "No writable roots are configured on the agent.");
+
+        var pathError = ValidateBasicPath(rawPath, out var fullPath);
+        if (pathError is not null)
+            return pathError;
+
+        var reparseError = VerifyNoReparsePointsInOriginalPath(fullPath);
+        if (reparseError is not null)
+            return reparseError;
+
+        if (Directory.Exists(fullPath))
+            return new CommandError(ErrorCodes.AccessDenied, "Deleting directories is not supported.");
+
+        string physicalPath;
+        try
+        {
+            if (File.Exists(fullPath))
+            {
+                var attributes = File.GetAttributes(fullPath);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the delete path.");
+
+                physicalPath = ResolvePhysicalPath(fullPath);
+            }
+            else
+            {
+                var ancestor = Path.GetDirectoryName(fullPath);
+                while (!string.IsNullOrEmpty(ancestor) && !Directory.Exists(ancestor) && !File.Exists(ancestor))
+                {
+                    var parent = Path.GetDirectoryName(ancestor);
+                    if (string.IsNullOrEmpty(parent) || string.Equals(parent, ancestor, StringComparison.OrdinalIgnoreCase))
+                        break;
+                    ancestor = parent;
+                }
+
+                if (!string.IsNullOrEmpty(ancestor) && File.Exists(ancestor))
+                    return new CommandError(ErrorCodes.DirectoryNotFound, "A parent path component is a file, not a directory.");
+
+                if (!string.IsNullOrEmpty(ancestor) && Directory.Exists(ancestor))
+                {
+                    var resolvedAncestor = ResolvePhysicalPath(ancestor);
+                    var relative = Path.GetRelativePath(ancestor, fullPath);
+                    physicalPath = Path.GetFullPath(Path.Combine(resolvedAncestor, relative));
+                }
+                else
+                {
+                    physicalPath = fullPath;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical delete path.");
+        }
+
+        if (GetMatchingWritableRoot(physicalPath) is null || GetMatchingWritableRoot(fullPath) is null)
+            return new CommandError(ErrorCodes.WriteNotAllowed, "The requested path lies outside the configured writable root directories.");
+
+        if (GetMatchingAllowedRoot(physicalPath) is null || GetMatchingAllowedRoot(fullPath) is null)
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The requested path lies outside the configured allowed root directories.");
+
+        foreach (var segment in physicalPath.Split(
+                     new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (_options.DeniedSegments.Any(ds => string.Equals(ds, segment, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to delete path containing segment '{segment}'.");
+        }
+
+        var fileName = Path.GetFileName(physicalPath);
+        if (!string.IsNullOrEmpty(fileName))
+        {
+            if (_options.DeniedFileNames.Any(df => MatchFileName(fileName, df)) ||
+                _options.DeniedWriteFileNames.Any(dw => MatchFileName(fileName, dw)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to delete file '{fileName}'.");
+
+            var extension = Path.GetExtension(physicalPath);
+            if (!string.IsNullOrEmpty(extension) &&
+                _options.DeniedWriteExtensions.Any(de => string.Equals(de, extension, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to delete file with extension '{extension}'.");
+        }
+
+        if (File.Exists(physicalPath))
+        {
+            var attributes = File.GetAttributes(physicalPath);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the delete path.");
+            if (attributes.HasFlag(FileAttributes.ReadOnly))
+                return new CommandError(ErrorCodes.FileReadOnly, "The target file is read-only.");
+        }
+        else if (!missingOk)
+        {
+            return new CommandError(ErrorCodes.FileNotFound, "The requested file was not found.");
+        }
+
+        normalizedPath = physicalPath;
+        return null;
+    }
+
     private CommandError? VerifyNoReparsePointsInOriginalPath(string fullPath)
     {
         var current = fullPath;
