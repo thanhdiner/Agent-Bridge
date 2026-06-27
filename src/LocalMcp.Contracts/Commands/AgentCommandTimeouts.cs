@@ -9,6 +9,14 @@ public static class AgentCommandTimeouts
         if (command is GitLogCommand or GitShowCommand)
             return TimeSpan.FromSeconds(90);
 
+        if (command is PowerShellExecuteCommand powerShellCommand)
+        {
+            var requestedPowerShellSeconds = Math.Clamp(
+                powerShellCommand.TimeoutSeconds,
+                1,
+                900);
+            return TimeSpan.FromSeconds(requestedPowerShellSeconds + 15);
+        }
         if (command is not ProjectCheckCommand projectCommand)
             return DefaultTimeout;
 

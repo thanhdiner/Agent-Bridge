@@ -114,6 +114,14 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<PowerShellExecuteResult>> PowerShellExecuteAsync(
+        string workingDirectory,
+        string script,
+        int timeoutSeconds,
+        int maxOutputBytes,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
     Task<CommandResult<WriteFileResult>> WriteFileAsync(
         string path,
         string content,
