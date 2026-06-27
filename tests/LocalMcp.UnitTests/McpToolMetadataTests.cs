@@ -35,6 +35,8 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_search_context", true, false, true, false)]
     [InlineData("git_status", true, false, true, false)]
     [InlineData("git_diff", true, false, true, false)]
+    [InlineData("git_log", true, false, true, false)]
+    [InlineData("git_show", true, false, true, false)]
     [InlineData(ExecutionToolName, false, true, false, true)]
     [InlineData("fs_write", false, true, false, false)]
     [InlineData("fs_patch", false, true, false, false)]
@@ -123,6 +125,8 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsSearchContext_NoInternalParameters() => AssertNoInternalParams("fs_search_context");
     [Fact] public void GitStatus_NoInternalParameters() => AssertNoInternalParams("git_status");
     [Fact] public void GitDiff_NoInternalParameters() => AssertNoInternalParams("git_diff");
+    [Fact] public void GitLog_NoInternalParameters() => AssertNoInternalParams("git_log");
+    [Fact] public void GitShow_NoInternalParameters() => AssertNoInternalParams("git_show");
     [Fact] public void ProjectCheck_NoInternalParameters() => AssertNoInternalParams(ExecutionToolName);
     [Fact] public void FsWrite_NoInternalParameters() => AssertNoInternalParams("fs_write");
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
@@ -228,6 +232,22 @@ public sealed class McpToolMetadataTests
         Assert.Contains("contextLines", names);
         Assert.Contains("maxBytes", names);
         Assert.Equal(7, names.Count);
+    }
+
+    [Fact]
+    public void GitLog_HasExactSchema()
+    {
+        var names = GetParamNames("git_log").ToHashSet();
+        var expected = new[] { "deviceId", "path", "maxCount", "skip", "pathSpec", "author", "since", "until", "includeStats" }.ToHashSet();
+        Assert.True(expected.SetEquals(names));
+    }
+
+    [Fact]
+    public void GitShow_HasExactSchema()
+    {
+        var names = GetParamNames("git_show").ToHashSet();
+        var expected = new[] { "deviceId", "path", "revision", "pathSpecs", "includePatch", "includeStats", "contextLines", "maxBytes" }.ToHashSet();
+        Assert.True(expected.SetEquals(names));
     }
 
     [Fact]

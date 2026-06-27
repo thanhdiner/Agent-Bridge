@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
@@ -342,6 +343,104 @@ public sealed class FileSystemTools
         };
 
         return await DispatchAsync<GitDiffResult>(command, "git_diff", deviceId, GetCancellationToken());
+    }
+
+    [McpServerTool(Name = "git_log", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Returns bounded Git commit history with optional author, ISO-date, literal path, and short-stat filters. Repository paths are filtered through the file-access policy. Requires Git on the agent and files:read scope.")]
+    public async Task<CallToolResult> GitLogAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute directory path inside the Git working tree")] string path,
+        [Description("Maximum commits to return (default: 20, hard limit: 100)")] int maxCount = 20,
+        [Description("Number of matching commits to skip (default: 0)")] int skip = 0,
+        [Description("Optional authorized repository-relative literal path used to filter history")] string? pathSpec = null,
+        [Description("Optional Git author pattern (maximum 256 characters)")] string? author = null,
+        [Description("Optional inclusive lower authored-date bound in ISO format")] string? since = null,
+        [Description("Optional inclusive upper authored-date bound in ISO format")] string? until = null,
+        [Description("Whether to include files-changed, insertion, and deletion totals (default: false)")] bool includeStats = false)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+        if (maxCount is < 1 or > 100)
+            return CreateErrorResult("INVALID_REQUEST", "maxCount must be between 1 and 100.");
+        if (skip is < 0 or > 1_000_000)
+            return CreateErrorResult("INVALID_REQUEST", "skip must be between 0 and 1000000.");
+        if (pathSpec is not null && (string.IsNullOrWhiteSpace(pathSpec) || pathSpec.Length > 512 || pathSpec.Contains('\0')))
+            return CreateErrorResult("INVALID_REQUEST", "pathSpec must be non-empty and at most 512 characters when provided.");
+        if (author is not null && (author.Length > 256 || author.Contains('\0')))
+            return CreateErrorResult("INVALID_REQUEST", "author must be at most 256 characters.");
+        if (!IsValidIsoDate(since))
+            return CreateErrorResult("INVALID_REQUEST", "since must be a valid ISO date.");
+        if (!IsValidIsoDate(until))
+            return CreateErrorResult("INVALID_REQUEST", "until must be a valid ISO date.");
+
+        var command = new GitLogCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            MaxCount = maxCount,
+            Skip = skip,
+            PathSpec = pathSpec,
+            Author = author,
+            Since = since,
+            Until = until,
+            IncludeStats = includeStats
+        };
+
+        return await DispatchAsync<GitLogResult>(command, "git_log", deviceId, GetCancellationToken());
+    }
+
+    [McpServerTool(Name = "git_show", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Returns metadata, optional statistics, and a bounded patch for one Git commit. Only policy-authorized repository files are included. External diff drivers, text conversion, pagers, prompts, fsmonitor, and submodule recursion are disabled. Requires Git on the agent and files:read scope.")]
+    public async Task<CallToolResult> GitShowAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute directory path inside the Git working tree")] string path,
+        [Description("Commit revision such as a hash, HEAD, or HEAD~1")] string revision,
+        [Description("Optional Git pathspecs used to narrow the commit (maximum 100)")] List<string>? pathSpecs = null,
+        [Description("Whether to include the unified patch (default: true)")] bool includePatch = true,
+        [Description("Whether to include files-changed, insertion, and deletion totals (default: true)")] bool includeStats = true,
+        [Description("Unified diff context lines (default: 3, hard limit: 20)")] int contextLines = 3,
+        [Description("Maximum UTF-8 patch bytes returned (default: 1048576, hard limit: 4194304)")] int maxBytes = 1_048_576)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+        if (string.IsNullOrWhiteSpace(revision) || revision.Length > 256 || revision.Any(char.IsControl))
+            return CreateErrorResult("INVALID_REQUEST", "revision is required and must be at most 256 characters without control characters.");
+        if (contextLines is < 0 or > 20)
+            return CreateErrorResult("INVALID_REQUEST", "contextLines must be between 0 and 20.");
+        if (maxBytes is < 1 or > 4_194_304)
+            return CreateErrorResult("INVALID_REQUEST", "maxBytes must be between 1 and 4194304.");
+        if (pathSpecs is { Count: > 100 } ||
+            (pathSpecs?.Any(spec => string.IsNullOrWhiteSpace(spec) || spec.Length > 512 || spec.Contains('\0')) ?? false) ||
+            (pathSpecs?.Sum(spec => spec.Length) ?? 0) > 16_384)
+        {
+            return CreateErrorResult(
+                "INVALID_REQUEST",
+                "pathSpecs may contain at most 100 non-empty entries of at most 512 characters and 16384 characters in total.");
+        }
+
+        var command = new GitShowCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            Revision = revision,
+            PathSpecs = pathSpecs?.ToList() ?? [],
+            IncludePatch = includePatch,
+            IncludeStats = includeStats,
+            ContextLines = contextLines,
+            MaxBytes = maxBytes
+        };
+
+        return await DispatchAsync<GitShowResult>(command, "git_show", deviceId, GetCancellationToken());
     }
 
     [McpServerTool(Name = "project_verify", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description("Detects a supported project type and runs fixed build, test, lint, or typecheck steps on the target Windows agent. Supports .NET, Node.js, Rust, and PHP/Laravel projects. This executes project-defined code and may generate build artifacts. Requires dev:execute scope. Ask the user for confirmation before executing.")]
@@ -733,6 +832,14 @@ public sealed class FileSystemTools
     // ──────────────────────────────────────────────
     // Private transport and auth helpers
     // ──────────────────────────────────────────────
+
+    private static bool IsValidIsoDate(string? value) =>
+        value is null ||
+        (value.Length <= 64 && DateTimeOffset.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out _));
 
     private async Task<bool> AuthorizeScopeAsync(string policyName)
     {

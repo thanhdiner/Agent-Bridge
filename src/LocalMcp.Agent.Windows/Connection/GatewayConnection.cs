@@ -136,6 +136,8 @@ public sealed class GatewayConnection : IAsyncDisposable
                         nameof(SearchContextCommand) => JsonSerializer.Deserialize<SearchContextCommand>(rawJson, JsonOptions.Default),
                         nameof(GitStatusCommand) => JsonSerializer.Deserialize<GitStatusCommand>(rawJson, JsonOptions.Default),
                         nameof(GitDiffCommand) => JsonSerializer.Deserialize<GitDiffCommand>(rawJson, JsonOptions.Default),
+                        nameof(GitLogCommand) => JsonSerializer.Deserialize<GitLogCommand>(rawJson, JsonOptions.Default),
+                        nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(rawJson, JsonOptions.Default),
                         nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(rawJson, JsonOptions.Default),
                         nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(rawJson, JsonOptions.Default),
                         nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(rawJson, JsonOptions.Default),
