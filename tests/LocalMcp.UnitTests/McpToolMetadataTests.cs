@@ -33,6 +33,8 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_patch", false, true, false, false)]
     [InlineData("fs_mkdir", false, false, true, false)]
     [InlineData("fs_stat", true, false, true, false)]
+    [InlineData("fs_move", false, false, false, false)]
+    [InlineData("fs_copy", false, false, false, false)]
     public void ValidateToolAnnotations(
         string toolName,
         bool expectReadOnly,
@@ -87,6 +89,8 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
     [Fact] public void FsMkdir_NoInternalParameters() => AssertNoInternalParams("fs_mkdir");
     [Fact] public void FsStat_NoInternalParameters() => AssertNoInternalParams("fs_stat");
+    [Fact] public void FsMove_NoInternalParameters() => AssertNoInternalParams("fs_move");
+    [Fact] public void FsCopy_NoInternalParameters() => AssertNoInternalParams("fs_copy");
 
     [Fact]
     public void FsRead_HasExactSchema()
@@ -170,5 +174,29 @@ public sealed class McpToolMetadataTests
         Assert.Contains("deviceId", names);
         Assert.Contains("path", names);
         Assert.Equal(2, names.Count);
+    }
+
+    [Fact]
+    public void FsMove_HasExactSchema()
+    {
+        var names = GetParamNames("fs_move").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("destination", names);
+        Assert.Contains("overwrite", names);
+        Assert.Contains("expectedSha256", names);
+        Assert.Equal(5, names.Count);
+    }
+
+    [Fact]
+    public void FsCopy_HasExactSchema()
+    {
+        var names = GetParamNames("fs_copy").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("destination", names);
+        Assert.Contains("overwrite", names);
+        Assert.Contains("expectedSourceSha256", names);
+        Assert.Equal(5, names.Count);
     }
 }

@@ -309,6 +309,75 @@ public sealed class FileSystemTools
         return await DispatchAsync<StatResult>(command, "fs_stat", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_move", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Moves or renames a file or directory on a target Windows agent device. Both source and destination must be within configured writable roots. Cross-volume moves are not supported. Requires files:write scope. Ask the user for confirmation before executing.")]
+    public async Task<CallToolResult> MoveAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the source file or directory")] string path,
+        [Description("The absolute path of the move destination")] string destination,
+        [Description("Whether to overwrite the destination file if it already exists (default: false). Directory overwrite is never allowed.")] bool overwrite = false,
+        [Description("Optional SHA-256 hex digest of the source file. If provided, the move is aborted when the actual hash does not match (concurrency guard, files only).")] string? expectedSha256 = null)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(destination))
+            return CreateErrorResult("INVALID_REQUEST", "destination parameter is required.");
+
+        var command = new MoveCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            Destination = destination,
+            Overwrite = overwrite,
+            ExpectedSha256 = string.IsNullOrWhiteSpace(expectedSha256) ? null : expectedSha256
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<MoveResult>(command, "fs_move", deviceId, cancellationToken);
+    }
+
+    [McpServerTool(Name = "fs_copy", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Copies a file to a new location on a target Windows agent device. Directories are not supported in Phase One. The source must be within AllowedRoots. The destination must be within WritableRoots. The copy is performed via a temporary file with a durable flush before atomic rename. Requires files:write scope. Ask the user for confirmation before executing.")]
+    public async Task<CallToolResult> CopyAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the source file to copy")] string path,
+        [Description("The absolute path of the copy destination")] string destination,
+        [Description("Whether to overwrite the destination file if it already exists (default: false)")] bool overwrite = false,
+        [Description("Optional SHA-256 hex digest of the source file. If provided, the copy is aborted when the actual hash does not match (concurrency guard).")] string? expectedSourceSha256 = null)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(destination))
+            return CreateErrorResult("INVALID_REQUEST", "destination parameter is required.");
+
+        var command = new CopyCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            Destination = destination,
+            Overwrite = overwrite,
+            ExpectedSourceSha256 = string.IsNullOrWhiteSpace(expectedSourceSha256) ? null : expectedSourceSha256
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<CopyResult>(command, "fs_copy", deviceId, cancellationToken);
+    }
 
     // ──────────────────────────────────────────────
     // Private transport and auth helpers
