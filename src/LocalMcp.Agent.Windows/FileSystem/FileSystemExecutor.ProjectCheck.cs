@@ -1155,7 +1155,7 @@ public sealed partial class FileSystemExecutor
                     continue;
 
                 var info = new FileInfo(candidate);
-                if (info.Exists && !info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                if (info.Exists && (!info.Attributes.HasFlag(FileAttributes.ReparsePoint) || !info.Attributes.HasFlag(FileAttributes.Directory)))
                     return candidate;
             }
             catch (Exception ex) when (

@@ -20,6 +20,7 @@ public sealed partial class CommandHandler
     private readonly ILogger<CommandHandler> _logger;
 
     internal Func<string, Task>? OnBeforeMultiFileEditHook { get; set; }
+    internal Action<PowerShellSessionState?>? OnSessionCreatedForTest { get; set; }
 
     public CommandHandler(
         IPathPolicy pathPolicy,
@@ -1680,6 +1681,8 @@ public sealed partial class CommandHandler
 
         if (session is null)
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest, registryError!));
+
+        OnSessionCreatedForTest?.Invoke(session);
 
         // Check cancellationToken again before starting the background process
         if (cancellationToken.IsCancellationRequested)

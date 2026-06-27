@@ -109,25 +109,80 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
 
     public void CancelAll()
     {
+        List<PowerShellSessionState> runningSessions;
         lock (_registryLock)
         {
             _logger.LogInformation("Cancelling all active PowerShell sessions on shutdown.");
-            var runningSessions = _sessions.Values.Where(s => s.State == PowerShellSessionStateValue.Running).ToList();
+            runningSessions = _sessions.Values.Where(s => s.State == PowerShellSessionStateValue.Running).ToList();
             foreach (var session in runningSessions)
             {
                 TryCancelSession(session);
             }
+        }
 
-            // Bounded wait up to 5s for running sessions to cleanly stop
-            if (runningSessions.Count > 0)
+        // Bounded wait up to 5s for running sessions to cleanly stop
+        if (runningSessions.Count > 0)
+        {
+            bool cleanExit = false;
+            try
             {
+                cleanExit = Task.WhenAll(runningSessions.Select(s => s.CompletionTask)).Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Timeout or error waiting for running sessions to stop during shutdown.");
+            }
+
+            if (!cleanExit)
+            {
+                _logger.LogWarning("Some sessions did not exit cleanly during shutdown. Force killing remaining processes.");
+
+                // Force kill entire process tree for any session that hasn't finished
+                foreach (var session in runningSessions)
+                {
+                    var proc = session.Process;
+                    if (proc != null)
+                    {
+                        try
+                        {
+                            if (!proc.HasExited)
+                            {
+                                _logger.LogInformation("Force killing process tree for session {SessionId}.", session.SessionId);
+                                proc.Kill(entireProcessTree: true);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to force kill process tree for session {SessionId}.", session.SessionId);
+                        }
+                    }
+                }
+
+                // Final bounded wait for killed processes to exit
                 try
                 {
-                    Task.WhenAll(runningSessions.Select(s => s.CompletionTask)).Wait(TimeSpan.FromSeconds(5));
+                    Task.WhenAll(runningSessions.Select(s => s.CompletionTask)).Wait(TimeSpan.FromSeconds(2));
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Timeout or error waiting for running sessions to stop during shutdown.");
+                    _logger.LogWarning(ex, "Timeout during final wait for forced kill processes.");
+                }
+
+                // Check and log critical if still running
+                foreach (var session in runningSessions)
+                {
+                    var proc = session.Process;
+                    if (proc != null)
+                    {
+                        try
+                        {
+                            if (!proc.HasExited)
+                            {
+                                _logger.LogCritical("CRITICAL: Process tree for session {SessionId} (PID {Pid}) failed to exit after forced kill.", session.SessionId, proc.Id);
+                            }
+                        }
+                        catch {}
+                    }
                 }
             }
         }
@@ -193,16 +248,27 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
 
     public void Dispose()
     {
+        bool performCleanup = false;
         lock (_registryLock)
         {
-            if (_disposed) return;
-            _disposed = true;
-            CancelAll();
-            foreach (var session in _sessions.Values)
+            if (!_disposed)
             {
-                session.Dispose();
+                _disposed = true;
+                performCleanup = true;
             }
-            _sessions.Clear();
+        }
+
+        if (performCleanup)
+        {
+            CancelAll();
+            lock (_registryLock)
+            {
+                foreach (var session in _sessions.Values)
+                {
+                    session.Dispose();
+                }
+                _sessions.Clear();
+            }
         }
     }
 }

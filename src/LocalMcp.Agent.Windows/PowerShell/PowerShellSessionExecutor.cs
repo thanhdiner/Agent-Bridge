@@ -10,7 +10,7 @@ namespace LocalMcp.Agent.Windows.PowerShell;
 /// The method returns immediately after the process starts; output is streamed
 /// into the session's bounded buffer in background tasks.
 /// </summary>
-internal sealed class PowerShellSessionExecutor
+internal class PowerShellSessionExecutor
 {
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -32,7 +32,7 @@ internal sealed class PowerShellSessionExecutor
     /// background tasks for stdout/stderr draining and process monitoring.
     /// Returns immediately; callers should not await the background work.
     /// </summary>
-    public void StartBackground(
+    public virtual void StartBackground(
         PowerShellSessionState session,
         string executable,
         string workingDirectory,
