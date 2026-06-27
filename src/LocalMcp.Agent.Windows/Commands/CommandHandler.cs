@@ -34,6 +34,10 @@ public sealed class CommandHandler
         {
             return await HandleReadFileAsync(readFileCommand, cancellationToken);
         }
+        else if (command is ReadRangeCommand readRangeCommand)
+        {
+            return await HandleReadRangeAsync(readRangeCommand, cancellationToken);
+        }
         else if (command is ListDirectoryCommand listDirectoryCommand)
         {
             return await HandleListDirectoryAsync(listDirectoryCommand, cancellationToken);
@@ -297,6 +301,37 @@ public sealed class CommandHandler
 
         var dataJson = JsonSerializer.SerializeToElement(readResult.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
 
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleReadRangeAsync(
+        ReadRangeCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _fileSystemExecutor.ReadRangeAsync(
+            command.Path,
+            command.StartLine,
+            command.LineCount,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!result.Success || result.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
         return new CommandResult<JsonElement>
         {
             CommandId = command.CommandId,

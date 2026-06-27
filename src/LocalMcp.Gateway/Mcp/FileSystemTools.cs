@@ -61,6 +61,45 @@ public sealed class FileSystemTools
         return await DispatchAsync<ReadFileResult>(command, "fs_read", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_read_range", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Reads a bounded range of lines from a UTF-8 text file on a target Windows agent device without loading the whole file into memory. Requires files:read scope.")]
+    public async Task<CallToolResult> ReadRangeAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the UTF-8 text file to read")] string path,
+        [Description("The one-based line number at which to start reading (default: 1)")] long startLine = 1,
+        [Description("The maximum number of lines to return (default: 200, hard limit: 1000)")] int lineCount = 200)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        if (startLine < 1)
+            return CreateErrorResult("INVALID_REQUEST", "startLine must be greater than or equal to 1.");
+
+        if (lineCount < 1 || lineCount > 1000)
+            return CreateErrorResult("INVALID_REQUEST", "lineCount must be between 1 and 1000.");
+
+        if (startLine > long.MaxValue - lineCount)
+            return CreateErrorResult("INVALID_REQUEST", "The requested line range is too large.");
+
+        var command = new ReadRangeCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            StartLine = startLine,
+            LineCount = lineCount
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<ReadRangeResult>(command, "fs_read_range", deviceId, cancellationToken);
+    }
+
     [McpServerTool(Name = "fs_tree", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Returns a bounded directory tree for a path inside an allowed root. Requires files:read scope.")]
     public async Task<CallToolResult> GetTreeAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,

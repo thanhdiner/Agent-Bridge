@@ -130,6 +130,7 @@ public sealed class GatewayConnection : IAsyncDisposable
                     command = typeName switch
                     {
                         nameof(ReadFileCommand) => JsonSerializer.Deserialize<ReadFileCommand>(rawJson, JsonOptions.Default),
+                        nameof(ReadRangeCommand) => JsonSerializer.Deserialize<ReadRangeCommand>(rawJson, JsonOptions.Default),
                         nameof(ListDirectoryCommand) => JsonSerializer.Deserialize<ListDirectoryCommand>(rawJson, JsonOptions.Default),
                         nameof(SearchFilesCommand) => JsonSerializer.Deserialize<SearchFilesCommand>(rawJson, JsonOptions.Default),
                         nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(rawJson, JsonOptions.Default),

@@ -27,6 +27,7 @@ public sealed class McpToolMetadataTests
 
     [Theory]
     [InlineData("fs_read", true, false, true, false)]
+    [InlineData("fs_read_range", true, false, true, false)]
     [InlineData("fs_list", true, false, true, false)]
     [InlineData("fs_tree", true, false, true, false)]
     [InlineData("fs_search", true, false, true, false)]
@@ -92,6 +93,7 @@ public sealed class McpToolMetadataTests
     }
 
     [Fact] public void FsRead_NoInternalParameters() => AssertNoInternalParams("fs_read");
+    [Fact] public void FsReadRange_NoInternalParameters() => AssertNoInternalParams("fs_read_range");
     [Fact] public void FsList_NoInternalParameters() => AssertNoInternalParams("fs_list");
     [Fact] public void FsTree_NoInternalParameters() => AssertNoInternalParams("fs_tree");
     [Fact] public void FsSearch_NoInternalParameters() => AssertNoInternalParams("fs_search");
@@ -110,6 +112,17 @@ public sealed class McpToolMetadataTests
         Assert.Contains("deviceId", names);
         Assert.Contains("path", names);
         Assert.Equal(2, names.Count);
+    }
+
+    [Fact]
+    public void FsReadRange_HasExactSchema()
+    {
+        var names = GetParamNames("fs_read_range").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("startLine", names);
+        Assert.Contains("lineCount", names);
+        Assert.Equal(4, names.Count);
     }
 
     [Fact]

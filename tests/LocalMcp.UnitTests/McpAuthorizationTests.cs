@@ -238,6 +238,32 @@ public sealed class McpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ReadRangeTool_WithoutReadScope_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:write");
+
+        var result = await tools.ReadRangeAsync("test-device", "C:\\test.txt", 1, 20);
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.Contains("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadRangeTool_WithReadScope_Proceeds()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:read");
+
+        var result = await tools.ReadRangeAsync("test-device", "C:\\nonexistent.txt", 1, 20);
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.DoesNotContain("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task WriteTool_WithReadScopeOnly_ReturnsForbidden()
     {
         await StartServerAsync();
