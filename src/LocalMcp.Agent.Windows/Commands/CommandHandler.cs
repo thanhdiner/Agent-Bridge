@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using LocalMcp.Contracts.Commands;
 using LocalMcp.Contracts.Results;
@@ -84,6 +85,10 @@ public sealed class CommandHandler
         else if (command is BatchStatCommand batchStatCommand)
         {
             return await HandleBatchStatAsync(batchStatCommand, cancellationToken);
+        }
+        else if (command is BatchReadCommand batchReadCommand)
+        {
+            return await HandleBatchReadAsync(batchReadCommand, cancellationToken);
         }
         else if (command is MoveCommand moveCommand)
         {
@@ -623,6 +628,233 @@ public sealed class CommandHandler
                 concurrencyGate.Release();
             }
         }
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleBatchReadAsync(
+        BatchReadCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (command.Paths is null || command.Paths.Count < 1 || command.Paths.Count > 20)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InvalidRequest, "paths must contain between 1 and 20 entries.")
+            };
+        }
+
+        if (command.MaxBytesPerFile < 1 || command.MaxBytesPerFile > 1_048_576)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InvalidRequest, "maxBytesPerFile must be between 1 and 1048576.")
+            };
+        }
+
+        if (command.MaxTotalBytes < 1 || command.MaxTotalBytes > 8_388_608)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InvalidRequest, "maxTotalBytes must be between 1 and 8388608.")
+            };
+        }
+
+        var items = new BatchReadItemResult[command.Paths.Count];
+        using var concurrencyGate = new SemaphoreSlim(initialCount: 4, maxCount: 4);
+        var budgetTurns = Enumerable.Range(0, command.Paths.Count + 1)
+            .Select(_ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously))
+            .ToArray();
+        budgetTurns[0].TrySetResult(true);
+        long remainingTotalBytes = command.MaxTotalBytes;
+
+        try
+        {
+            var tasks = command.Paths.Select((path, index) => ProcessPathAsync(path, index)).ToArray();
+            await Task.WhenAll(tasks);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected batch read failure. CommandId: {CommandId}", command.CommandId);
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while reading the batch.")
+            };
+        }
+
+        var batchResult = new BatchReadResult
+        {
+            Items = items,
+            Succeeded = items.Count(item => item.Success),
+            Failed = items.Count(item => !item.Success),
+            TotalBytesReturned = command.MaxTotalBytes - remainingTotalBytes
+        };
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                batchResult,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+
+        async Task ProcessPathAsync(string? path, int index)
+        {
+            var itemPath = path ?? string.Empty;
+            BatchReadItemResult item;
+            var gateEntered = false;
+
+            try
+            {
+                await concurrencyGate.WaitAsync(cancellationToken);
+                gateEntered = true;
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var policyError = _pathPolicy.AuthorizeReadFile(itemPath, out var normalizedPath);
+                if (policyError is not null)
+                {
+                    item = new BatchReadItemResult
+                    {
+                        Path = itemPath,
+                        Success = false,
+                        Error = policyError
+                    };
+                }
+                else
+                {
+                    var readResult = await _fileSystemExecutor.ReadFileAsync(
+                        normalizedPath,
+                        command.CommandId,
+                        cancellationToken);
+
+                    if (!readResult.Success || readResult.Data is null)
+                    {
+                        item = new BatchReadItemResult
+                        {
+                            Path = itemPath,
+                            Success = false,
+                            Error = readResult.Error ?? new CommandError(
+                                ErrorCodes.InternalError,
+                                "The file read did not return a result.")
+                        };
+                    }
+                    else
+                    {
+                        var fullContentBytes = Encoding.UTF8.GetByteCount(readResult.Data.Content);
+                        var (content, bytesReturned) = TruncateUtf8(
+                            readResult.Data.Content,
+                            command.MaxBytesPerFile);
+
+                        item = new BatchReadItemResult
+                        {
+                            Path = itemPath,
+                            Success = true,
+                            Data = new BatchReadFileResult
+                            {
+                                Path = readResult.Data.Path,
+                                Content = content,
+                                Encoding = readResult.Data.Encoding,
+                                Size = readResult.Data.Size,
+                                Sha256 = readResult.Data.Sha256,
+                                BytesReturned = bytesReturned,
+                                Truncated = bytesReturned < fullContentBytes
+                            }
+                        };
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                item = new BatchReadItemResult
+                {
+                    Path = itemPath,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.CommandCancelled, "The file read operation was cancelled.")
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected batch read item failure at index {Index}. CommandId: {CommandId}", index, command.CommandId);
+                item = new BatchReadItemResult
+                {
+                    Path = itemPath,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while reading the file.")
+                };
+            }
+            finally
+            {
+                if (gateEntered)
+                    concurrencyGate.Release();
+            }
+
+            await budgetTurns[index].Task;
+            try
+            {
+                if (item.Success && item.Data is not null)
+                {
+                    var allowedBytes = (int)Math.Min(item.Data.BytesReturned, remainingTotalBytes);
+                    if (allowedBytes < item.Data.BytesReturned)
+                    {
+                        var originalBytes = item.Data.BytesReturned;
+                        var (content, bytesReturned) = TruncateUtf8(item.Data.Content, allowedBytes);
+                        item = item with
+                        {
+                            Data = item.Data with
+                            {
+                                Content = content,
+                                BytesReturned = bytesReturned,
+                                Truncated = item.Data.Truncated || bytesReturned < originalBytes
+                            }
+                        };
+                    }
+
+                    remainingTotalBytes -= item.Data!.BytesReturned;
+                }
+
+                items[index] = item;
+            }
+            finally
+            {
+                budgetTurns[index + 1].TrySetResult(true);
+            }
+        }
+    }
+
+    private static (string Content, int BytesReturned) TruncateUtf8(string content, int maxBytes)
+    {
+        if (maxBytes <= 0 || content.Length == 0)
+            return (string.Empty, 0);
+
+        var builder = new StringBuilder(Math.Min(content.Length, maxBytes));
+        var bytesReturned = 0;
+        foreach (var rune in content.EnumerateRunes())
+        {
+            if (bytesReturned + rune.Utf8SequenceLength > maxBytes)
+                break;
+
+            builder.Append(rune.ToString());
+            bytesReturned += rune.Utf8SequenceLength;
+        }
+
+        return (builder.ToString(), bytesReturned);
     }
 
     private async Task<CommandResult<JsonElement>> HandleMoveAsync(
