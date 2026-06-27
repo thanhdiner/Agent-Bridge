@@ -443,11 +443,11 @@ public sealed class FileSystemTools
         return await DispatchAsync<GitShowResult>(command, "git_show", deviceId, GetCancellationToken());
     }
 
-    [McpServerTool(Name = "project_verify", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description("Detects a supported project type and runs fixed build, test, lint, or typecheck steps on the target Windows agent. Supports .NET, Node.js, Rust, and PHP/Laravel projects. This executes project-defined code and may generate build artifacts. Requires dev:execute scope. Ask the user for confirmation before executing.")]
+    [McpServerTool(Name = "project_verify", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description("Detects a supported project type and runs fixed build, test, lint, or typecheck steps on the target Windows agent. Supports .NET, Node.js, Rust, PHP/Laravel, Python, and Go projects. This executes project-defined code and may generate build artifacts. Requires dev:execute scope. Ask the user for confirmation before executing.")]
     public async Task<CallToolResult> ProjectCheckAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("An absolute project directory inside an allowed root")] string path,
-        [Description("Project type: auto, dotnet, node, rust, or php (default: auto)")] string projectType = "auto",
+        [Description("Project type: auto, dotnet, node, rust, php, python, or go (default: auto)")] string projectType = "auto",
         [Description("Verification steps chosen from build, test, lint, and typecheck (default: build and test)")] List<string>? steps = null,
         [Description("Build configuration: Debug or Release (default: Debug)")] string configuration = "Debug",
         [Description("Overall execution timeout in seconds (default: 300, hard limit: 900)")] int timeoutSeconds = 300,
@@ -461,8 +461,8 @@ public sealed class FileSystemTools
             return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
 
         var normalizedProjectType = projectType?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (normalizedProjectType is not ("auto" or "dotnet" or "node" or "rust" or "php"))
-            return CreateErrorResult("INVALID_REQUEST", "projectType must be auto, dotnet, node, rust, or php.");
+        if (normalizedProjectType is not ("auto" or "dotnet" or "node" or "rust" or "php" or "python" or "go"))
+            return CreateErrorResult("INVALID_REQUEST", "projectType must be auto, dotnet, node, rust, php, python, or go.");
 
         var requestedSteps = steps?
             .Select(step => step?.Trim().ToLowerInvariant() ?? string.Empty)

@@ -74,7 +74,7 @@ graph TD
 
 | Tool | Description |
 |---|---|
-| <code>project_verify</code> | Detects .NET, Node.js, Rust, or PHP/Laravel projects and runs fixed `build`, `test`, `lint`, or `typecheck` steps with bounded output and timeout controls. |
+| <code>project_verify</code> | Detects .NET, Node.js, Rust, PHP/Laravel, Python, or Go projects and runs fixed `build`, `test`, `lint`, or `typecheck` steps with bounded output and timeout controls. Python prefers `.venv\Scripts` tools and uses fixed fallbacks; Go disables automatic toolchain and module downloads. |
 
 > [!CAUTION]
 > Project verification executes repository-defined code and may generate build artifacts. It is not an operating-system sandbox. Grant `dev:execute` only to trusted clients and run it only against trusted projects. Execution is denied entirely when `Security:AuthenticationEnabled=false`.
@@ -136,7 +136,7 @@ Every filesystem operation passes through `PathPolicy` before executing:
 11. **WritableRoots check** — write operations require the resolved path to be inside a writable root.
 12. **Size validation** — `fs_read` rejects files > `MaxReadBytes` (default 2 MB); `fs_read_range` may scan larger files but bounds the returned range to `MaxReadBytes`; writes reject content > `MaxWriteBytes` (default 512 KB); directory copy additionally enforces caller-supplied `maxEntries` and `maxTotalBytes` limits with hard caps of 5000 entries and 1 GiB.
 13. **Git inspection hardening** — Git tools are read-only, disable external diff drivers, text conversion, pagers, prompts, fsmonitor, and submodule recursion. They reject executable clean/process filters configured by the repository itself, while ignoring unrelated global filters such as Git LFS, bound process output/time, and omit paths denied by `PathPolicy`.
-14. **Project execution hardening** — Project verification accepts no arbitrary command or argument string. It selects fixed commands from project adapters, resolves toolchains from `PATH`, requires `dev:execute`, bounds output and runtime, disables interactive and color features, and kills the complete process tree on timeout or cancellation.
+14. **Project execution hardening** — Project verification accepts no arbitrary command or argument string. It selects fixed commands from project adapters, resolves trusted `.venv\Scripts` executables or external toolchains from `PATH`, requires `dev:execute`, bounds output and runtime, disables interactive and color features, prevents Go toolchain/module auto-downloads, and kills the complete process tree on timeout or cancellation.
 
 ### Device token (Agent → Gateway SignalR)
 

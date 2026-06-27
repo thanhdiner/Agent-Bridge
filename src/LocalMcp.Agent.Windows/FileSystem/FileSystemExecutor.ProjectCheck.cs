@@ -20,7 +20,7 @@ public sealed partial class FileSystemExecutor
         throwOnInvalidBytes: true);
 
     private static readonly HashSet<string> SupportedProjectTypes = new(
-        ["auto", "dotnet", "node", "rust", "php"],
+        ["auto", "dotnet", "node", "rust", "php", "python", "go"],
         StringComparer.Ordinal);
 
     private static readonly HashSet<string> SupportedProjectSteps = new(
@@ -128,9 +128,9 @@ public sealed partial class FileSystemExecutor
 
             var toolchain = string.Join(
                 "+",
-                plans
-                    .Where(plan => plan.Supported)
-                    .Select(plan => plan.Toolchain)
+                results
+                    .Select(result => result.Toolchain)
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
                     .Distinct(StringComparer.OrdinalIgnoreCase));
 
             if (string.IsNullOrWhiteSpace(toolchain))
@@ -188,11 +188,15 @@ public sealed partial class FileSystemExecutor
             return "dotnet";
         if (File.Exists(Path.Combine(path, "Cargo.toml")))
             return "rust";
+        if (File.Exists(Path.Combine(path, "go.mod")))
+            return "go";
         if (File.Exists(Path.Combine(path, "composer.json")) ||
             File.Exists(Path.Combine(path, "artisan")))
         {
             return "php";
         }
+        if (HasPythonMarker(path))
+            return "python";
         if (File.Exists(Path.Combine(path, "package.json")))
             return "node";
 
@@ -211,6 +215,8 @@ public sealed partial class FileSystemExecutor
             "node" => BuildNodePlans(path, steps),
             "rust" => BuildRustPlans(steps, configuration),
             "php" => BuildPhpPlans(path, steps),
+            "python" => BuildPythonPlans(path, steps),
+            "go" => BuildGoPlans(steps),
             _ => throw new ProjectCheckException(
                 ErrorCodes.InvalidRequest,
                 "Unsupported project type.")
@@ -228,7 +234,7 @@ public sealed partial class FileSystemExecutor
         {
             return new CommandError(
                 ErrorCodes.InvalidRequest,
-                "projectType must be auto, dotnet, node, rust, or php.");
+                "projectType must be auto, dotnet, node, rust, php, python, or go.");
         }
 
         if (steps.Count is < 1 or > 4 ||
@@ -293,8 +299,16 @@ public sealed partial class FileSystemExecutor
             "rust" => File.Exists(Path.Combine(path, "Cargo.toml")),
             "php" => File.Exists(Path.Combine(path, "composer.json")) ||
                 File.Exists(Path.Combine(path, "artisan")),
+            "python" => HasPythonMarker(path),
+            "go" => File.Exists(Path.Combine(path, "go.mod")),
             _ => false
         };
+
+    private static bool HasPythonMarker(string path) =>
+        File.Exists(Path.Combine(path, "pyproject.toml")) ||
+        File.Exists(Path.Combine(path, "requirements.txt")) ||
+        File.Exists(Path.Combine(path, "setup.py")) ||
+        File.Exists(Path.Combine(path, "setup.cfg"));
 
     private static bool HasDotNetMarker(string path) =>
         Directory
@@ -408,6 +422,232 @@ public sealed partial class FileSystemExecutor
                         $"script_not_found:{scriptName}");
             })
             .ToList();
+    }
+
+    private static IReadOnlyList<ProjectStepPlan> BuildPythonPlans(
+        string path,
+        IReadOnlyList<string> steps)
+    {
+        var plans = new List<ProjectStepPlan>(steps.Count);
+
+        foreach (var step in steps)
+        {
+            switch (step)
+            {
+                case "build":
+                    if (File.Exists(Path.Combine(path, "pyproject.toml")) ||
+                        File.Exists(Path.Combine(path, "setup.py")))
+                    {
+                        plans.Add(CreatePlanFromCandidates(
+                            step,
+                            BuildPythonInterpreterCandidates(
+                                path,
+                                "python-build",
+                                ["-m", "build", "--no-isolation"])));
+                    }
+                    else
+                    {
+                        plans.Add(CreateSkippedPlan(
+                            step,
+                            "python",
+                            "build_manifest_not_found"));
+                    }
+                    break;
+
+                case "test":
+                {
+                    var candidates = new List<ProjectCommandCandidate>();
+                    AddProjectVenvCandidate(
+                        path,
+                        candidates,
+                        "pytest",
+                        "pytest.exe",
+                        []);
+                    candidates.Add(new ProjectCommandCandidate(
+                        "pytest",
+                        "pytest.exe",
+                        []));
+                    candidates.AddRange(BuildPythonInterpreterCandidates(
+                        path,
+                        "python-unittest",
+                        ["-m", "unittest", "discover"]));
+                    plans.Add(CreatePlanFromCandidates(step, candidates));
+                    break;
+                }
+
+                case "lint":
+                {
+                    var candidates = new List<ProjectCommandCandidate>();
+                    AddProjectVenvCandidate(
+                        path,
+                        candidates,
+                        "ruff",
+                        "ruff.exe",
+                        ["check", "."]);
+                    candidates.Add(new ProjectCommandCandidate(
+                        "ruff",
+                        "ruff.exe",
+                        ["check", "."]));
+                    AddProjectVenvCandidate(
+                        path,
+                        candidates,
+                        "flake8",
+                        "flake8.exe",
+                        ["."]);
+                    candidates.Add(new ProjectCommandCandidate(
+                        "flake8",
+                        "flake8.exe",
+                        ["."]));
+                    plans.Add(CreatePlanFromCandidates(step, candidates));
+                    break;
+                }
+
+                case "typecheck":
+                {
+                    var candidates = new List<ProjectCommandCandidate>();
+                    AddProjectVenvCandidate(
+                        path,
+                        candidates,
+                        "mypy",
+                        "mypy.exe",
+                        ["."]);
+                    candidates.Add(new ProjectCommandCandidate(
+                        "mypy",
+                        "mypy.exe",
+                        ["."]));
+                    AddProjectVenvCandidate(
+                        path,
+                        candidates,
+                        "pyright",
+                        "pyright.exe",
+                        []);
+                    AddProjectVenvCandidate(
+                        path,
+                        candidates,
+                        "pyright",
+                        "pyright.cmd",
+                        []);
+                    candidates.Add(new ProjectCommandCandidate(
+                        "pyright",
+                        "pyright.cmd",
+                        []));
+                    candidates.Add(new ProjectCommandCandidate(
+                        "pyright",
+                        "pyright.exe",
+                        []));
+                    plans.Add(CreatePlanFromCandidates(step, candidates));
+                    break;
+                }
+            }
+        }
+
+        return plans;
+    }
+
+    private static IReadOnlyList<ProjectStepPlan> BuildGoPlans(
+        IReadOnlyList<string> steps)
+    {
+        return steps
+            .Select(step =>
+            {
+                var arguments = step switch
+                {
+                    "build" => new List<string> { "build", "./..." },
+                    "test" => new List<string> { "test", "./..." },
+                    "lint" => new List<string> { "vet", "./..." },
+                    "typecheck" => new List<string> { "test", "-run=^$", "./..." },
+                    _ => []
+                };
+
+                return CreatePlan(step, "go", "go.exe", arguments);
+            })
+            .ToList();
+    }
+
+    private static List<ProjectCommandCandidate> BuildPythonInterpreterCandidates(
+        string path,
+        string toolchain,
+        IReadOnlyList<string> arguments)
+    {
+        var candidates = new List<ProjectCommandCandidate>();
+        AddProjectVenvCandidate(
+            path,
+            candidates,
+            toolchain,
+            "python.exe",
+            arguments);
+        candidates.Add(new ProjectCommandCandidate(
+            toolchain,
+            "python.exe",
+            arguments));
+        candidates.Add(new ProjectCommandCandidate(
+            toolchain,
+            "py.exe",
+            new[] { "-3" }.Concat(arguments).ToList()));
+        return candidates;
+    }
+
+    private static void AddProjectVenvCandidate(
+        string path,
+        ICollection<ProjectCommandCandidate> candidates,
+        string toolchain,
+        string executableName,
+        IReadOnlyList<string> arguments)
+    {
+        var relativePath = Path.Combine(".venv", "Scripts", executableName);
+        var fullPath = Path.GetFullPath(Path.Combine(path, relativePath));
+        if (IsTrustedProjectLocalExecutable(path, fullPath))
+        {
+            candidates.Add(new ProjectCommandCandidate(
+                toolchain,
+                relativePath,
+                arguments));
+        }
+    }
+
+    private static bool IsTrustedProjectLocalExecutable(
+        string workingDirectory,
+        string candidate)
+    {
+        try
+        {
+            var root = Path.GetFullPath(workingDirectory);
+            var fullCandidate = Path.GetFullPath(candidate);
+            if (!IsPathWithinRoot(root, fullCandidate))
+                return false;
+
+            var relativePath = Path.GetRelativePath(root, fullCandidate);
+            var segments = relativePath.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length != 3 ||
+                !string.Equals(segments[0], ".venv", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(segments[1], "Scripts", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var current = root;
+            foreach (var segment in segments)
+            {
+                current = Path.Combine(current, segment);
+                if (!File.Exists(current) && !Directory.Exists(current))
+                    return false;
+                if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                    return false;
+            }
+
+            return File.Exists(fullCandidate);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or
+            NotSupportedException or
+            PathTooLongException or
+            IOException or
+            UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static IReadOnlyList<ProjectStepPlan> BuildRustPlans(
@@ -696,11 +936,15 @@ public sealed partial class FileSystemExecutor
         CancellationToken timeoutCancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var executable = ResolveToolExecutable(plan.Executable, workingDirectory);
-        if (executable is null)
+        var resolvedStep = ResolveProjectStep(plan, workingDirectory);
+        if (resolvedStep is null)
             return CreateToolMissingStep(plan, stopwatch.ElapsedMilliseconds, maxOutputBytes);
 
-        var startInfo = CreateProjectProcessStartInfo(workingDirectory, plan, executable);
+        var selectedPlan = resolvedStep.Plan;
+        var startInfo = CreateProjectProcessStartInfo(
+            workingDirectory,
+            selectedPlan,
+            resolvedStep.Executable);
         using var process = new Process { StartInfo = startInfo };
 
         try
@@ -715,7 +959,7 @@ public sealed partial class FileSystemExecutor
             _logger.LogWarning(
                 ex,
                 "Unable to start project toolchain {Toolchain}",
-                plan.Toolchain);
+                selectedPlan.Toolchain);
             return CreateToolMissingStep(plan, stopwatch.ElapsedMilliseconds, maxOutputBytes);
         }
 
@@ -751,9 +995,9 @@ public sealed partial class FileSystemExecutor
 
         return new ProjectVerifyStepResult
         {
-            Name = plan.Name,
-            Toolchain = plan.Toolchain,
-            DisplayCommand = plan.DisplayCommand,
+            Name = selectedPlan.Name,
+            Toolchain = selectedPlan.Toolchain,
+            DisplayCommand = selectedPlan.DisplayCommand,
             Executed = true,
             Success = exitCode == 0,
             Skipped = false,
@@ -817,14 +1061,80 @@ public sealed partial class FileSystemExecutor
         startInfo.Environment["NPM_CONFIG_UPDATE_NOTIFIER"] = "false";
         startInfo.Environment["CARGO_TERM_COLOR"] = "never";
         startInfo.Environment["COMPOSER_NO_INTERACTION"] = "1";
+        startInfo.Environment["PYTHONUTF8"] = "1";
+        startInfo.Environment["PYTHONUNBUFFERED"] = "1";
+        startInfo.Environment["PIP_NO_INPUT"] = "1";
+        startInfo.Environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1";
+        startInfo.Environment["GOTOOLCHAIN"] = "local";
+        startInfo.Environment["GOPROXY"] = "off";
+        startInfo.Environment["GOSUMDB"] = "off";
 
         return startInfo;
+    }
+
+    private static ResolvedProjectStep? ResolveProjectStep(
+        ProjectStepPlan plan,
+        string workingDirectory)
+    {
+        var candidates = new[]
+        {
+            new ProjectCommandCandidate(
+                plan.Toolchain,
+                plan.Executable,
+                plan.Arguments)
+        }.Concat(plan.Alternatives);
+
+        foreach (var candidate in candidates)
+        {
+            var executable = ResolveToolExecutable(
+                candidate.Executable,
+                workingDirectory);
+            if (executable is null)
+                continue;
+
+            return new ResolvedProjectStep(
+                plan with
+                {
+                    Toolchain = candidate.Toolchain,
+                    Executable = candidate.Executable,
+                    Arguments = candidate.Arguments,
+                    Alternatives = []
+                },
+                executable);
+        }
+
+        return null;
     }
 
     private static string? ResolveToolExecutable(
         string executable,
         string workingDirectory)
     {
+        if (executable.Contains(Path.DirectorySeparatorChar) ||
+            executable.Contains(Path.AltDirectorySeparatorChar))
+        {
+            try
+            {
+                var localCandidate = Path.GetFullPath(Path.Combine(
+                    workingDirectory,
+                    executable));
+                return IsTrustedProjectLocalExecutable(
+                    workingDirectory,
+                    localCandidate)
+                        ? localCandidate
+                        : null;
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException or
+                NotSupportedException or
+                PathTooLongException or
+                IOException or
+                UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
         var pathValue = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrWhiteSpace(pathValue))
             return null;
@@ -964,7 +1274,10 @@ public sealed partial class FileSystemExecutor
         long durationMs,
         int maxOutputBytes)
     {
-        var message = $"Toolchain '{plan.Toolchain}' is not available on the Windows agent.";
+        var toolchains = new[] { plan.Toolchain }
+            .Concat(plan.Alternatives.Select(candidate => candidate.Toolchain))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var message = $"Project toolchains '{string.Join(", ", toolchains)}' are not available on the Windows agent.";
         var bounded = TruncateProjectUtf8(message, maxOutputBytes);
 
         return new ProjectVerifyStepResult
@@ -1014,6 +1327,26 @@ public sealed partial class FileSystemExecutor
             Supported: true,
             SkipReason: null);
 
+    private static ProjectStepPlan CreatePlanFromCandidates(
+        string name,
+        IReadOnlyList<ProjectCommandCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+            throw new InvalidOperationException("At least one project command candidate is required.");
+
+        var primary = candidates[0];
+        return new ProjectStepPlan(
+            Name: name,
+            Toolchain: primary.Toolchain,
+            Executable: primary.Executable,
+            Arguments: primary.Arguments,
+            Supported: true,
+            SkipReason: null)
+        {
+            Alternatives = candidates.Skip(1).ToList()
+        };
+    }
+
     private static ProjectStepPlan CreateSkippedPlan(
         string name,
         string toolchain,
@@ -1062,6 +1395,11 @@ public sealed partial class FileSystemExecutor
         Error = new CommandError(code, message)
     };
 
+    internal sealed record ProjectCommandCandidate(
+        string Toolchain,
+        string Executable,
+        IReadOnlyList<string> Arguments);
+
     internal sealed record ProjectStepPlan(
         string Name,
         string Toolchain,
@@ -1070,11 +1408,17 @@ public sealed partial class FileSystemExecutor
         bool Supported,
         string? SkipReason)
     {
+        public IReadOnlyList<ProjectCommandCandidate> Alternatives { get; init; } = [];
+
         public string DisplayCommand =>
             Supported
                 ? FormatProjectCommand(Executable, Arguments)
                 : string.Empty;
     }
+
+    private sealed record ResolvedProjectStep(
+        ProjectStepPlan Plan,
+        string Executable);
 
     private sealed record ProjectBoundedOutput(byte[] Bytes, bool Truncated);
 
