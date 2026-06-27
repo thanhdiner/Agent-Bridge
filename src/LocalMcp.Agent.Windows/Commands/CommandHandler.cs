@@ -1684,7 +1684,7 @@ public sealed partial class CommandHandler
         // Check cancellationToken again before starting the background process
         if (cancellationToken.IsCancellationRequested)
         {
-            session.Dispose();
+            _sessionRegistry.Remove(session.SessionId);
             throw new OperationCanceledException(cancellationToken);
         }
 
@@ -1735,20 +1735,21 @@ public sealed partial class CommandHandler
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
                 "stdoutOffset and stderrOffset must be >= 0."));
 
-        if (command.MaxOutputBytes is < 1 or > 262_144)
+        if (command.MaxOutputBytes is < 4 or > 262_144)
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
-                "maxOutputBytes must be between 1 and 262144."));
+                "maxOutputBytes must be between 4 and 262144."));
 
         var snapshot = session.ReadOutput(command.StdoutOffset, command.StderrOffset, command.MaxOutputBytes);
         var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+        var stateSnapshot = session.GetSnapshot();
 
         var result = new PowerShellSessionResult
         {
             SessionId = session.SessionId,
-            State = SessionStateStrings[(int)session.State],
+            State = SessionStateStrings[(int)stateSnapshot.State],
             StartedAt = session.StartedAt,
-            CompletedAt = session.CompletedAt,
-            ExitCode = session.ExitCode,
+            CompletedAt = stateSnapshot.CompletedAt,
+            ExitCode = stateSnapshot.ExitCode,
             Stdout = utf8.GetString(snapshot.StdoutBytes),
             Stderr = utf8.GetString(snapshot.StderrBytes),
             NextStdoutOffset = snapshot.NextStdoutOffset,
@@ -1784,8 +1785,8 @@ public sealed partial class CommandHandler
             return SessionError(command.CommandId, "SESSION_NOT_FOUND",
                 $"Session {command.SessionId} was not found.");
 
-        // If running, cancel it
-        if (session.State == PowerShellSessionStateValue.Running)
+        var initialSnapshot = session.GetSnapshot();
+        if (initialSnapshot.State == PowerShellSessionStateValue.Running)
         {
             _sessionRegistry.Cancel(session);
 
@@ -1797,8 +1798,15 @@ public sealed partial class CommandHandler
             }
             catch (OperationCanceledException)
             {
-                // Timeout elapsed, just return the current state
+                // Timeout elapsed
             }
+        }
+
+        var finalSnapshot = session.GetSnapshot();
+        if (finalSnapshot.State == PowerShellSessionStateValue.Running)
+        {
+            return SessionError(command.CommandId, "CANCEL_TIMEOUT",
+                "The PowerShell session cancellation timed out.");
         }
 
         return BuildSessionResult(command.CommandId, session);
@@ -1808,13 +1816,14 @@ public sealed partial class CommandHandler
     {
         var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
         var snapshot = session.ReadOutput(0, 0, 262_144);
+        var stateSnapshot = session.GetSnapshot();
         var result = new PowerShellSessionResult
         {
             SessionId = session.SessionId,
-            State = SessionStateStrings[(int)session.State],
+            State = SessionStateStrings[(int)stateSnapshot.State],
             StartedAt = session.StartedAt,
-            CompletedAt = session.CompletedAt,
-            ExitCode = session.ExitCode,
+            CompletedAt = stateSnapshot.CompletedAt,
+            ExitCode = stateSnapshot.ExitCode,
             Stdout = utf8.GetString(snapshot.StdoutBytes),
             Stderr = utf8.GetString(snapshot.StderrBytes),
             NextStdoutOffset = snapshot.NextStdoutOffset,

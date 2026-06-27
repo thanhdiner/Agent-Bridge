@@ -108,8 +108,8 @@ public sealed class PowerShellSessionTools
         if (stdoutOffset < 0 || stderrOffset < 0)
             return CreateErrorResult("INVALID_REQUEST", "stdoutOffset and stderrOffset must be >= 0.");
 
-        if (maxOutputBytes is < 1 or > 262_144)
-            return CreateErrorResult("INVALID_REQUEST", "maxOutputBytes must be between 1 and 262144.");
+        if (maxOutputBytes is < 4 or > 262_144)
+            return CreateErrorResult("INVALID_REQUEST", "maxOutputBytes must be between 4 and 262144.");
 
         var command = new PowerShellStatusCommand
         {

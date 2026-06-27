@@ -42,13 +42,15 @@ internal sealed class PowerShellSessionState : IDisposable
     private volatile PowerShellSessionSnapshot _snapshot = new(PowerShellSessionStateValue.Running, null, null);
 
     private readonly object _outputLock = new();
-    private readonly List<byte> _stdout = new();
-    private readonly List<byte> _stderr = new();
+    private readonly byte[] _stdoutBuffer;
+    private readonly byte[] _stderrBuffer;
+    private int _stdoutLength;
+    private int _stderrLength;
     private readonly int _maxOutputBytes;
     private bool _truncated;
 
     public CancellationTokenSource Cts { get; } = new();
-
+    
     private readonly object _processLock = new();
     private Process? _process;
     private bool _disposed;
@@ -64,7 +66,11 @@ internal sealed class PowerShellSessionState : IDisposable
         DeviceId = deviceId;
         StartedAt = DateTimeOffset.UtcNow;
         _maxOutputBytes = maxOutputBytes;
+        _stdoutBuffer = new byte[maxOutputBytes];
+        _stderrBuffer = new byte[maxOutputBytes];
     }
+
+    public PowerShellSessionSnapshot GetSnapshot() => _snapshot;
 
     public PowerShellSessionStateValue State => _snapshot.State;
     public DateTimeOffset? CompletedAt => _snapshot.CompletedAt;
@@ -107,7 +113,7 @@ internal sealed class PowerShellSessionState : IDisposable
     {
         lock (_outputLock)
         {
-            var currentTotal = _stdout.Count + _stderr.Count;
+            var currentTotal = _stdoutLength + _stderrLength;
             if (currentTotal >= _maxOutputBytes)
             {
                 _truncated = true;
@@ -115,13 +121,15 @@ internal sealed class PowerShellSessionState : IDisposable
             }
             var spaceLeft = _maxOutputBytes - currentTotal;
             var toCopy = Math.Min(count, spaceLeft);
-            for (int i = 0; i < toCopy; i++)
+            if (toCopy > 0)
             {
-                _stdout.Add(data[i]);
+                Buffer.BlockCopy(data, 0, _stdoutBuffer, _stdoutLength, toCopy);
+                _stdoutLength += toCopy;
             }
             if (toCopy < count)
             {
                 _truncated = true;
+                _stdoutLength = CleanTrailingUtf8Rune(_stdoutBuffer, _stdoutLength);
             }
         }
     }
@@ -130,7 +138,7 @@ internal sealed class PowerShellSessionState : IDisposable
     {
         lock (_outputLock)
         {
-            var currentTotal = _stdout.Count + _stderr.Count;
+            var currentTotal = _stdoutLength + _stderrLength;
             if (currentTotal >= _maxOutputBytes)
             {
                 _truncated = true;
@@ -138,13 +146,15 @@ internal sealed class PowerShellSessionState : IDisposable
             }
             var spaceLeft = _maxOutputBytes - currentTotal;
             var toCopy = Math.Min(count, spaceLeft);
-            for (int i = 0; i < toCopy; i++)
+            if (toCopy > 0)
             {
-                _stderr.Add(data[i]);
+                Buffer.BlockCopy(data, 0, _stderrBuffer, _stderrLength, toCopy);
+                _stderrLength += toCopy;
             }
             if (toCopy < count)
             {
                 _truncated = true;
+                _stderrLength = CleanTrailingUtf8Rune(_stderrBuffer, _stderrLength);
             }
         }
     }
@@ -153,59 +163,93 @@ internal sealed class PowerShellSessionState : IDisposable
     {
         lock (_outputLock)
         {
-            byte[] stdoutBytes = _stdout.ToArray();
-            byte[] stderrBytes = _stderr.ToArray();
+            // Normalize offsets to int range and make sure they don't exceed current length
+            int stdOffset = (int)Math.Clamp(stdoutOffset, 0, _stdoutLength);
+            int errOffset = (int)Math.Clamp(stderrOffset, 0, _stderrLength);
 
-            var stdoutAvail = Math.Max(0, stdoutBytes.Length - (int)stdoutOffset);
-            var stdoutBudget = Math.Min(stdoutAvail, maxBytes / 2);
-            var stdoutLen = GetSafeUtf8Length(stdoutBytes, (int)stdoutOffset, (int)stdoutBudget);
+            // Align offsets if they point inside a multi-byte UTF-8 sequence
+            stdOffset = NormalizeOffsetToUtf8Boundary(_stdoutBuffer, _stdoutLength, stdOffset);
+            errOffset = NormalizeOffsetToUtf8Boundary(_stderrBuffer, _stderrLength, errOffset);
 
+            var stdoutAvail = _stdoutLength - stdOffset;
+            var stdoutBudget = Math.Min(stdoutAvail, maxBytes);
+            var stdoutLen = GetSafeUtf8Length(_stdoutBuffer, _stdoutLength, stdOffset, stdoutBudget);
+            
             var stdoutSlice = new byte[stdoutLen];
             if (stdoutLen > 0)
-                Buffer.BlockCopy(stdoutBytes, (int)stdoutOffset, stdoutSlice, 0, stdoutLen);
+                Buffer.BlockCopy(_stdoutBuffer, stdOffset, stdoutSlice, 0, stdoutLen);
 
-            var stderrAvail = Math.Max(0, stderrBytes.Length - (int)stderrOffset);
+            var stderrAvail = _stderrLength - errOffset;
             var stderrBudget = Math.Min(stderrAvail, maxBytes - stdoutLen);
-            var stderrLen = GetSafeUtf8Length(stderrBytes, (int)stderrOffset, (int)stderrBudget);
+            var stderrLen = GetSafeUtf8Length(_stderrBuffer, _stderrLength, errOffset, stderrBudget);
 
             var stderrSlice = new byte[stderrLen];
             if (stderrLen > 0)
-                Buffer.BlockCopy(stderrBytes, (int)stderrOffset, stderrSlice, 0, stderrLen);
+                Buffer.BlockCopy(_stderrBuffer, errOffset, stderrSlice, 0, stderrLen);
 
             return new OutputSnapshot(
                 StdoutBytes: stdoutSlice,
                 StderrBytes: stderrSlice,
-                NextStdoutOffset: stdoutOffset + stdoutLen,
-                NextStderrOffset: stderrOffset + stderrLen,
+                NextStdoutOffset: stdOffset + stdoutLen,
+                NextStderrOffset: errOffset + stderrLen,
                 Truncated: _truncated);
         }
     }
 
-    private static int GetSafeUtf8Length(byte[] buffer, int start, int requestedLength)
+    private static int NormalizeOffsetToUtf8Boundary(byte[] buffer, int length, int offset)
     {
-        if (start >= buffer.Length)
-            return 0;
+        if (offset <= 0 || offset >= length)
+            return offset;
 
-        if (requestedLength <= 0)
-            requestedLength = 1;
-
-        byte startByte = buffer[start];
-        if (startByte >= 192)
+        int current = offset;
+        while (current >= 0 && current > offset - 4)
         {
-            int expected = 1;
-            if (startByte >= 240) expected = 4;
-            else if (startByte >= 224) expected = 3;
-            else if (startByte >= 192) expected = 2;
-
-            if (start + expected <= buffer.Length && expected > requestedLength)
+            byte b = buffer[current];
+            if (b < 128)
             {
-                requestedLength = expected;
+                return offset;
+            }
+            if (b >= 192)
+            {
+                return current;
+            }
+            current--;
+        }
+        return offset;
+    }
+
+    private static int CleanTrailingUtf8Rune(byte[] buffer, int length)
+    {
+        for (int i = length - 1; i >= 0 && i >= length - 4; i--)
+        {
+            byte b = buffer[i];
+            if (b < 128)
+                break;
+            if (b >= 192)
+            {
+                int expected = 1;
+                if (b >= 240) expected = 4;
+                else if (b >= 224) expected = 3;
+                else if (b >= 192) expected = 2;
+
+                if (length - i < expected)
+                {
+                    return i;
+                }
+                break;
             }
         }
+        return length;
+    }
 
-        if (start + requestedLength >= buffer.Length)
+    private static int GetSafeUtf8Length(byte[] buffer, int length, int start, int requestedLength)
+    {
+        if (start >= length)
+            return 0;
+
+        if (start + requestedLength >= length)
         {
-            return buffer.Length - start;
+            return length - start;
         }
 
         int end = start + requestedLength;
@@ -226,19 +270,17 @@ internal sealed class PowerShellSessionState : IDisposable
                 int actualBytes = end - i;
                 if (actualBytes < expectedBytes)
                 {
-                    if (i == start)
-                    {
-                        if (start + expectedBytes <= buffer.Length)
-                        {
-                            return expectedBytes;
-                        }
-                    }
                     return i - start;
                 }
                 break;
             }
         }
         return requestedLength;
+    }
+
+    public void SignalCancel()
+    {
+        try { Cts.Cancel(); } catch {}
     }
 
     public void SetExpiry(DateTimeOffset expiry)

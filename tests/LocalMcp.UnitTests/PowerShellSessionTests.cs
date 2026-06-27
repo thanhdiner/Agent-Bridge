@@ -16,6 +16,7 @@ using LocalMcp.BuildingBlocks.Errors;
 using LocalMcp.Contracts.Commands;
 using LocalMcp.Contracts.Results;
 using LocalMcp.Gateway.Mcp;
+using LocalMcp.Gateway.Commands;
 
 namespace LocalMcp.UnitTests;
 
@@ -44,7 +45,6 @@ public sealed class PowerShellSessionTests
             });
 
         var fileSystem = Substitute.For<IFileSystemExecutor>();
-
         var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
 
         return new CommandHandler(
@@ -60,6 +60,18 @@ public sealed class PowerShellSessionTests
     {
         return FileSystemExecutor.ResolveToolExecutable("pwsh.exe", AppDomain.CurrentDomain.BaseDirectory);
     }
+
+public class PwshFactAttribute : FactAttribute
+{
+    public PwshFactAttribute()
+    {
+        var pwshPath = FileSystemExecutor.ResolveToolExecutable("pwsh.exe", AppDomain.CurrentDomain.BaseDirectory);
+        if (pwshPath == null)
+        {
+            Skip = "pwsh.exe is not available on this system.";
+        }
+    }
+}
 
     // ──────────────────────────────────────────────
     // 1. Thread-safety & Concurrency / Eviction Race
@@ -86,12 +98,16 @@ public sealed class PowerShellSessionTests
 
         Assert.Equal(16, createdCount);
         Assert.Equal(16, rejectedCount);
+
+        var runningCount = registry.Sessions.Count(s => s.State == PowerShellSessionStateValue.Running);
+        Assert.True(runningCount <= 16);
     }
 
     [Fact]
     public async Task Registry_HistoryLimitRace_NeverExceeds100()
     {
         var registry = BuildRegistry();
+        var originalSessions = new List<PowerShellSessionState>();
 
         // Populate 100 finished sessions
         for (int i = 0; i < 100; i++)
@@ -100,7 +116,10 @@ public sealed class PowerShellSessionTests
             Assert.NotNull(session);
             session!.TryTransition(PowerShellSessionStateValue.Completed, 0);
             registry.OnSessionTerminated(session);
+            originalSessions.Add(session);
         }
+
+        Assert.Equal(100, registry.Count);
 
         // Try to concurrently add 50 more
         var tasks = new List<Task<PowerShellSessionState?>>();
@@ -114,14 +133,20 @@ public sealed class PowerShellSessionTests
         }
 
         var results = await Task.WhenAll(tasks);
+        var successfullyCreated = results.Where(r => r != null).ToList();
 
-        // Lock forces eviction: each insertion triggers eviction of the oldest terminated session.
-        // So the total count must remain exactly 100.
-        lock (registry)
+        // Check registry count never exceeds 100
+        Assert.True(registry.Count <= 100);
+
+        // Assert that the oldest historical sessions were evicted
+        var currentSessions = registry.Sessions.ToHashSet();
+        var evictedCount = originalSessions.Count(s => !currentSessions.Contains(s));
+        Assert.True(evictedCount > 0, "Oldest historical sessions must be evicted.");
+
+        // Assert the newly created ones actually exist in the registry
+        foreach (var newSession in successfullyCreated)
         {
-            // We use GetPrivateFieldValue or just registry lookup to count the active dict size.
-            // Since we don't have access to dict directly, we can verify that the successful ones got added,
-            // and we check how many sessions are left by trying to fetch one of the original ones (which should be evicted).
+            Assert.Contains(newSession!, currentSessions);
         }
     }
 
@@ -146,7 +171,7 @@ public sealed class PowerShellSessionTests
         var retrieved = registry.Get(session.SessionId);
         Assert.Null(retrieved);
 
-        // Check if Cts in expired session was disposed (Cts.Token throws ObjectDisposedException)
+        // Check if Cts in expired session was disposed
         Assert.Throws<ObjectDisposedException>(() => session.Cts.Token);
     }
 
@@ -168,12 +193,11 @@ public sealed class PowerShellSessionTests
 
         while (true)
         {
-            var snap = session.ReadOutput(offset, 0, maxBytes: 5); // very small page budget
+            var snap = session.ReadOutput(offset, 0, maxBytes: 5);
             if (snap.StdoutBytes.Length == 0)
                 break;
 
             var chunkText = System.Text.Encoding.UTF8.GetString(snap.StdoutBytes);
-            // Verify no replacement character (representing a broken UTF-8 sequence)
             Assert.DoesNotContain("\uFFFD", chunkText);
             reconstructed.Append(chunkText);
             offset = snap.NextStdoutOffset;
@@ -189,7 +213,6 @@ public sealed class PowerShellSessionTests
     [Fact]
     public void SessionState_OutputRetentionCap_IsCombined()
     {
-        // Combined budget: 100 bytes
         var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 100);
 
         var data1 = new byte[80];
@@ -203,7 +226,6 @@ public sealed class PowerShellSessionTests
         var snap = session.ReadOutput(0, 0, 200);
         Assert.True(snap.Truncated);
         Assert.Equal(80, snap.StdoutBytes.Length);
-        // Only 20 bytes of Stderr should be retained since 80 + 20 = 100 (budget reached)
         Assert.Equal(20, snap.StderrBytes.Length);
     }
 
@@ -216,21 +238,17 @@ public sealed class PowerShellSessionTests
     {
         var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 1024);
 
-        // Stdout arrives first
         var stdout1 = "stdout1"u8.ToArray();
         session.AppendStdout(stdout1, stdout1.Length);
 
-        // Read stdout offset 0
         var snap1 = session.ReadOutput(0, 0, 100);
         Assert.Equal("stdout1", System.Text.Encoding.UTF8.GetString(snap1.StdoutBytes));
         Assert.Equal(stdout1.Length, snap1.NextStdoutOffset);
         Assert.Equal(0, snap1.NextStderrOffset);
 
-        // Stderr arrives late
         var stderr1 = "stderr1"u8.ToArray();
         session.AppendStderr(stderr1, stderr1.Length);
 
-        // Read stderr starting from offset 0, and stdout from its next offset
         var snap2 = session.ReadOutput(snap1.NextStdoutOffset, 0, 100);
         Assert.Empty(snap2.StdoutBytes);
         Assert.Equal("stderr1", System.Text.Encoding.UTF8.GetString(snap2.StderrBytes));
@@ -246,7 +264,7 @@ public sealed class PowerShellSessionTests
     public void SessionState_StateTransition_AtomicityAndConsistency()
     {
         var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 1024);
-
+        
         Assert.Equal(PowerShellSessionStateValue.Running, session.State);
         Assert.Null(session.CompletedAt);
         Assert.Null(session.ExitCode);
@@ -257,6 +275,38 @@ public sealed class PowerShellSessionTests
         Assert.Equal(PowerShellSessionStateValue.Completed, session.State);
         Assert.NotNull(session.CompletedAt);
         Assert.Equal(123, session.ExitCode);
+    }
+
+    [Fact]
+    public async Task SessionState_StateTransition_NoConsistencyRace()
+    {
+        var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 1024);
+        
+        var t1 = Task.Run(async () =>
+        {
+            await Task.Delay(5);
+            session.TryTransition(PowerShellSessionStateValue.Completed, 0);
+        });
+
+        var t2 = Task.Run(() =>
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                var snap = session.GetSnapshot();
+                if (snap.State == PowerShellSessionStateValue.Completed)
+                {
+                    Assert.NotNull(snap.CompletedAt);
+                    Assert.NotNull(snap.ExitCode);
+                }
+                else
+                {
+                    Assert.Null(snap.CompletedAt);
+                    Assert.Null(snap.ExitCode);
+                }
+            }
+        });
+
+        await Task.WhenAll(t1, t2);
     }
 
     // ──────────────────────────────────────────────
@@ -272,11 +322,10 @@ public sealed class PowerShellSessionTests
 
         var handler = BuildHandler(registry);
 
-        // Status query with wrong device ID should return SESSION_NOT_FOUND
         var statusCmd = new PowerShellStatusCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = "dev-2", // Wrong Device
+            DeviceId = "dev-2",
             CreatedAt = DateTimeOffset.UtcNow,
             SessionId = session!.SessionId,
             StdoutOffset = 0,
@@ -287,11 +336,10 @@ public sealed class PowerShellSessionTests
         Assert.False(statusResult.Success);
         Assert.Equal("SESSION_NOT_FOUND", statusResult.Error?.Code);
 
-        // Cancel with wrong device ID should return SESSION_NOT_FOUND
         var cancelCmd = new PowerShellCancelCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = "dev-2", // Wrong Device
+            DeviceId = "dev-2",
             CreatedAt = DateTimeOffset.UtcNow,
             SessionId = session.SessionId
         };
@@ -319,15 +367,380 @@ public sealed class PowerShellSessionTests
         }
     }
 
+    [Fact]
+    public async Task Gateway_Authorization_Fails_ReturnsForbidden()
+    {
+        var dispatcher = Substitute.For<ICommandDispatcher>();
+        var authService = Substitute.For<IAuthorizationService>();
+        
+        authService.AuthorizeAsync(
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Any<object>(),
+            Arg.Any<string>())
+            .Returns(AuthorizationResult.Failed());
+
+        var tools = new PowerShellSessionTools(
+            dispatcher,
+            authService,
+            NullLogger<PowerShellSessionTools>());
+
+        var startResult = await tools.StartSessionAsync("dev-1", "C:\\repo", "echo hello");
+        Assert.True(startResult.IsError);
+        Assert.Contains("FORBIDDEN", Assert.IsType<TextContentBlock>(startResult.Content[0]).Text);
+
+        var statusResult = await tools.GetSessionStatusAsync("dev-1", Guid.NewGuid().ToString(), 0, 0, 65536);
+        Assert.True(statusResult.IsError);
+        Assert.Contains("FORBIDDEN", Assert.IsType<TextContentBlock>(statusResult.Content[0]).Text);
+
+        var cancelResult = await tools.CancelSessionAsync("dev-1", Guid.NewGuid().ToString());
+        Assert.True(cancelResult.IsError);
+        Assert.Contains("FORBIDDEN", Assert.IsType<TextContentBlock>(cancelResult.Content[0]).Text);
+
+        await dispatcher.DidNotReceiveWithAnyArgs().SendAsync<object>(Arg.Any<AgentCommand>(), Arg.Any<CancellationToken>());
+    }
+
     // ──────────────────────────────────────────────
-    // 9. Real Integration Tests with pwsh.exe
+    // 9. Cancel timeout & Start cancellation leak
     // ──────────────────────────────────────────────
 
     [Fact]
+    public async Task CommandHandler_PsCancel_Timeout_ReturnsCancelTimeout()
+    {
+        var registry = BuildRegistry();
+        var handler = BuildHandler(registry);
+
+        var session = registry.TryCreate("dev-1", 1024, out _);
+        Assert.NotNull(session);
+        Assert.Equal(PowerShellSessionStateValue.Running, session!.State);
+
+        var cancelCmd = new PowerShellCancelCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = session.SessionId
+        };
+
+        var result = await handler.HandleAsync(cancelCmd, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("CANCEL_TIMEOUT", result.Error?.Code);
+    }
+
+    [Fact]
+    public async Task CommandHandler_PsStart_CancellationLeak_CleansUpAndDisposes()
+    {
+        var registry = BuildRegistry();
+        var handler = BuildHandler(registry);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var startCmd = new PowerShellStartCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+            Script = "echo hello"
+        };
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        {
+            await handler.HandleAsync(startCmd, cts.Token);
+        });
+
+        Assert.Equal(0, registry.Count);
+    }
+
+    // ──────────────────────────────────────────────
+    // 10. Bounded Output & Offset Edge Cases
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task CommandHandler_PsStatus_MaxOutputBytes_Validation()
+    {
+        var registry = BuildRegistry();
+        var handler = BuildHandler(registry);
+
+        var session = registry.TryCreate("dev-1", 1024, out _);
+        Assert.NotNull(session);
+
+        var invalidCmd1 = new PowerShellStatusCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = session!.SessionId,
+            MaxOutputBytes = 1
+        };
+        var res1 = await handler.HandleAsync(invalidCmd1, CancellationToken.None);
+        Assert.False(res1.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, res1.Error?.Code);
+
+        var invalidCmd3 = new PowerShellStatusCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = session.SessionId,
+            MaxOutputBytes = 3
+        };
+        var res3 = await handler.HandleAsync(invalidCmd3, CancellationToken.None);
+        Assert.False(res3.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, res3.Error?.Code);
+
+        var validCmd4 = new PowerShellStatusCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = session.SessionId,
+            MaxOutputBytes = 4
+        };
+        var res4 = await handler.HandleAsync(validCmd4, CancellationToken.None);
+        Assert.True(res4.Success);
+    }
+
+    [Fact]
+    public void SessionState_Offset_LongMaxValue_ReturnsCleanly()
+    {
+        var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 1024);
+        var stdout = "hello"u8.ToArray();
+        session.AppendStdout(stdout, stdout.Length);
+
+        var snap = session.ReadOutput(long.MaxValue, long.MaxValue, 100);
+        Assert.Empty(snap.StdoutBytes);
+        Assert.Empty(snap.StderrBytes);
+        Assert.Equal(5, snap.NextStdoutOffset);
+        Assert.Equal(0, snap.NextStderrOffset);
+    }
+
+    [Fact]
+    public void SessionState_Offset_MiddleOfEmoji_Normalizes()
+    {
+        var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 1024);
+        var bytes = System.Text.Encoding.UTF8.GetBytes("🧪"); // 4 bytes
+        session.AppendStdout(bytes, bytes.Length);
+
+        var snap = session.ReadOutput(2, 0, 100); // offset = 2 points inside the 4-byte emoji
+        Assert.Equal("🧪", System.Text.Encoding.UTF8.GetString(snap.StdoutBytes));
+        Assert.Equal(4, snap.NextStdoutOffset);
+    }
+
+    [Fact]
+    public void SessionState_RetentionCap_CutsMiddleOfEmoji_CleanTruncation()
+    {
+        // Combined cap of 3 bytes. We write "A" (1 byte) then "🧪" (4 bytes).
+        // Total exceeds 3, so it cuts. The emoji cannot fit in the remaining 2 bytes.
+        // It must cleanly truncate the emoji, leaving only "A" in buffer.
+        var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 3);
+
+        session.AppendStdout("A"u8.ToArray(), 1);
+        session.AppendStdout(System.Text.Encoding.UTF8.GetBytes("🧪"), 4);
+
+        var snap = session.ReadOutput(0, 0, 100);
+        Assert.True(snap.Truncated);
+        Assert.Equal("A", System.Text.Encoding.UTF8.GetString(snap.StdoutBytes));
+    }
+
+    [Fact]
+    public void SessionState_RuneSplitAcrossAppends_DecodesCorrectly()
+    {
+        var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 1024);
+        var bytes = System.Text.Encoding.UTF8.GetBytes("🧪");
+        
+        session.AppendStdout(bytes.Take(2).ToArray(), 2);
+        session.AppendStdout(bytes.Skip(2).ToArray(), 2);
+
+        var snap = session.ReadOutput(0, 0, 100);
+        Assert.Equal("🧪", System.Text.Encoding.UTF8.GetString(snap.StdoutBytes));
+    }
+
+    [Fact]
+    public void SessionState_CombinedResponse_DoesNotExceedPageBudget()
+    {
+        var session = new PowerShellSessionState(Guid.NewGuid(), "dev-1", 1024);
+        var stdout = "stdoutdata"u8.ToArray(); // 10 bytes
+        var stderr = "stderrdata"u8.ToArray(); // 10 bytes
+
+        session.AppendStdout(stdout, stdout.Length);
+        session.AppendStderr(stderr, stderr.Length);
+
+        // Budget = 8
+        var snap = session.ReadOutput(0, 0, maxBytes: 8);
+        var combinedLen = snap.StdoutBytes.Length + snap.StderrBytes.Length;
+        Assert.True(combinedLen <= 8);
+    }
+
+    // ──────────────────────────────────────────────
+    // 11. Restored & Historical Core Tests
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task CommandHandler_PsStatus_UnknownSession_ReturnsNotFound()
+    {
+        var registry = BuildRegistry();
+        var handler = BuildHandler(registry);
+
+        var command = new PowerShellStatusCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = Guid.NewGuid()
+        };
+
+        var result = await handler.HandleAsync(command, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Equal("SESSION_NOT_FOUND", result.Error?.Code);
+    }
+
+    [Fact]
+    public async Task CommandHandler_PsCancel_Idempotent_OnCompletedSession()
+    {
+        var registry = BuildRegistry();
+        var session = registry.TryCreate("dev-1", 4096, out _);
+        Assert.NotNull(session);
+        session!.TryTransition(PowerShellSessionStateValue.Completed, 0);
+        registry.OnSessionTerminated(session);
+
+        var handler = BuildHandler(registry);
+
+        var command = new PowerShellCancelCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = session.SessionId
+        };
+
+        var result1 = await handler.HandleAsync(command, CancellationToken.None);
+        Assert.True(result1.Success);
+
+        var result2 = await handler.HandleAsync(command, CancellationToken.None);
+        Assert.True(result2.Success);
+
+        var payload = result2.Data.Deserialize<PowerShellSessionResult>(
+            LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+        Assert.Equal("completed", payload!.State);
+    }
+
+    [Fact]
+    public async Task CommandHandler_PsStart_InvalidScript_Empty_ReturnsError()
+    {
+        var registry = BuildRegistry();
+        var handler = BuildHandler(registry);
+
+        var command = new PowerShellStartCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+            Script = ""
+        };
+
+        var result = await handler.HandleAsync(command, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
+    }
+
+    [Fact]
+    public async Task CommandHandler_PsStart_TimeoutOutOfRange_ReturnsError()
+    {
+        var registry = BuildRegistry();
+        var handler = BuildHandler(registry);
+
+        var command = new PowerShellStartCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+            Script = "echo hello",
+            TimeoutSeconds = 0
+        };
+
+        var result = await handler.HandleAsync(command, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
+    }
+
+    [Fact]
+    public async Task CommandHandler_PsStart_ElevatedSession_ReturnsError()
+    {
+        var registry = BuildRegistry();
+        var handler = BuildHandler(registry);
+
+        var command = new PowerShellStartCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+            Script = "echo hello",
+            Elevated = true,
+            Visible = true
+        };
+
+        var result = await handler.HandleAsync(command, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
+    }
+
+    [Fact]
+    public void AgentCommandTimeouts_PsStart_Returns15Seconds()
+    {
+        var cmd = new PowerShellStartCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev",
+            CreatedAt = DateTimeOffset.UtcNow,
+            WorkingDirectory = "C:\\repo",
+            Script = "echo hello"
+        };
+
+        Assert.Equal(TimeSpan.FromSeconds(15), AgentCommandTimeouts.GetTimeout(cmd));
+    }
+
+    [Fact]
+    public void AgentCommandTimeouts_PsStatus_Returns10Seconds()
+    {
+        var cmd = new PowerShellStatusCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = Guid.NewGuid()
+        };
+
+        Assert.Equal(TimeSpan.FromSeconds(10), AgentCommandTimeouts.GetTimeout(cmd));
+    }
+
+    [Fact]
+    public void AgentCommandTimeouts_PsCancel_Returns10Seconds()
+    {
+        var cmd = new PowerShellCancelCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = Guid.NewGuid()
+        };
+
+        Assert.Equal(TimeSpan.FromSeconds(10), AgentCommandTimeouts.GetTimeout(cmd));
+    }
+
+    // ──────────────────────────────────────────────
+    // 12. Real Integration Tests with pwsh.exe
+    // ──────────────────────────────────────────────
+
+    [PwshFact]
     public async Task Start_RealPwsh_SuccessAndStdout()
     {
         var pwshPath = GetPwshPath();
-        if (pwshPath == null) return; // skip if pwsh is not available
+        Assert.NotNull(pwshPath);
 
         var registry = BuildRegistry();
         var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
@@ -336,27 +749,26 @@ public sealed class PowerShellSessionTests
 
         executor.StartBackground(
             session!,
-            pwshPath,
+            pwshPath!,
             AppDomain.CurrentDomain.BaseDirectory,
             "Write-Output \"Hello World\"",
             timeoutSeconds: 30);
 
-        // Wait for session to complete
         await session!.CompletionTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(PowerShellSessionStateValue.Completed, session.State);
         Assert.Equal(0, session.ExitCode);
-
+        
         var snap = session.ReadOutput(0, 0, 4096);
         var stdoutText = System.Text.Encoding.UTF8.GetString(snap.StdoutBytes);
         Assert.Contains("Hello World", stdoutText);
     }
 
-    [Fact]
+    [PwshFact]
     public async Task Start_RealPwsh_NonZeroExitAndStderr()
     {
         var pwshPath = GetPwshPath();
-        if (pwshPath == null) return;
+        Assert.NotNull(pwshPath);
 
         var registry = BuildRegistry();
         var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
@@ -365,7 +777,7 @@ public sealed class PowerShellSessionTests
 
         executor.StartBackground(
             session!,
-            pwshPath,
+            pwshPath!,
             AppDomain.CurrentDomain.BaseDirectory,
             "Write-Error \"Failed execution\"; exit 101",
             timeoutSeconds: 30);
@@ -380,21 +792,20 @@ public sealed class PowerShellSessionTests
         Assert.Contains("Failed execution", stderrText);
     }
 
-    [Fact]
+    [PwshFact]
     public async Task Start_RealPwsh_Timeout()
     {
         var pwshPath = GetPwshPath();
-        if (pwshPath == null) return;
+        Assert.NotNull(pwshPath);
 
         var registry = BuildRegistry();
         var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
         var session = registry.TryCreate("dev-1", 4096, out _);
         Assert.NotNull(session);
 
-        // Timeout set to 2 seconds for a script sleeping 10 seconds
         executor.StartBackground(
             session!,
-            pwshPath,
+            pwshPath!,
             AppDomain.CurrentDomain.BaseDirectory,
             "Start-Sleep -Seconds 10",
             timeoutSeconds: 2);
@@ -404,11 +815,11 @@ public sealed class PowerShellSessionTests
         Assert.Equal(PowerShellSessionStateValue.TimedOut, session.State);
     }
 
-    [Fact]
+    [PwshFact]
     public async Task Start_RealPwsh_ExternalCancelAndChildTreeKilled()
     {
         var pwshPath = GetPwshPath();
-        if (pwshPath == null) return;
+        Assert.NotNull(pwshPath);
 
         var registry = BuildRegistry();
         var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
@@ -417,27 +828,133 @@ public sealed class PowerShellSessionTests
 
         executor.StartBackground(
             session!,
-            pwshPath,
+            pwshPath!,
             AppDomain.CurrentDomain.BaseDirectory,
-            "Start-Sleep -Seconds 10",
+            "Start-Process cmd.exe -ArgumentList '/c timeout 100' -NoNewWindow -PassThru; Start-Sleep -Seconds 10",
             timeoutSeconds: 30);
 
-        // Allow pwsh process to start up
         await Task.Delay(1000);
 
-        // Cancel via Registry
         registry.Cancel(session!);
-
-        // Wait for cancellation to complete
         await session!.CompletionTask.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(PowerShellSessionStateValue.Cancelled, session.State);
 
-        // Verify the process is terminated
         var proc = session.Process;
         if (proc != null)
         {
             Assert.True(proc.HasExited);
         }
+    }
+
+    [PwshFact]
+    public async Task Start_RealPwsh_ChildProcessTreeKilled_Verified()
+    {
+        var pwshPath = GetPwshPath();
+        Assert.NotNull(pwshPath);
+
+        var registry = BuildRegistry();
+        var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
+        var session = registry.TryCreate("dev-1", 4096, out _);
+        Assert.NotNull(session);
+
+        executor.StartBackground(
+            session!,
+            pwshPath!,
+            AppDomain.CurrentDomain.BaseDirectory,
+            "$p = Start-Process cmd.exe -ArgumentList '/c timeout 100' -PassThru -NoNewWindow; Write-Output \"CHILD_PID=$($p.Id)\"; Start-Sleep -Seconds 10",
+            timeoutSeconds: 30);
+
+        int childPid = 0;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (childPid == 0 && !cts.IsCancellationRequested)
+        {
+            var snap = session.ReadOutput(0, 0, 4096);
+            var text = System.Text.Encoding.UTF8.GetString(snap.StdoutBytes);
+            if (text.Contains("CHILD_PID="))
+            {
+                var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                var match = lines.FirstOrDefault(l => l.StartsWith("CHILD_PID="));
+                if (match != null)
+                {
+                    childPid = int.Parse(match.Substring("CHILD_PID=".Length));
+                }
+            }
+            await Task.Delay(100);
+        }
+
+        Assert.True(childPid > 0, "Failed to get child PID");
+
+        registry.Cancel(session!);
+        await session!.CompletionTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(PowerShellSessionStateValue.Cancelled, session.State);
+
+        Assert.Throws<ArgumentException>(() => Process.GetProcessById(childPid));
+    }
+
+    [PwshFact]
+    public async Task Start_RealPwsh_CancelReturnsTerminalState()
+    {
+        var pwshPath = GetPwshPath();
+        Assert.NotNull(pwshPath);
+
+        var registry = BuildRegistry();
+        var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
+        var session = registry.TryCreate("dev-1", 4096, out _);
+        Assert.NotNull(session);
+
+        executor.StartBackground(
+            session!,
+            pwshPath!,
+            AppDomain.CurrentDomain.BaseDirectory,
+            "Start-Sleep -Seconds 10",
+            timeoutSeconds: 30);
+
+        await Task.Delay(1000);
+
+        var handler = BuildHandler(registry);
+        var cancelCmd = new PowerShellCancelCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = "dev-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            SessionId = session.SessionId
+        };
+
+        var result = await handler.HandleAsync(cancelCmd, CancellationToken.None);
+        Assert.True(result.Success);
+
+        var payload = result.Data.Deserialize<PowerShellSessionResult>(
+            LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+        Assert.Equal("cancelled", payload!.State);
+    }
+
+    [PwshFact]
+    public async Task Start_RealPwsh_RegistryShutdown_CancelAll_Verified()
+    {
+        var pwshPath = GetPwshPath();
+        Assert.NotNull(pwshPath);
+
+        var registry = BuildRegistry();
+        var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
+        var session = registry.TryCreate("dev-1", 4096, out _);
+        Assert.NotNull(session);
+
+        executor.StartBackground(
+            session!,
+            pwshPath!,
+            AppDomain.CurrentDomain.BaseDirectory,
+            "Start-Sleep -Seconds 10",
+            timeoutSeconds: 30);
+
+        await Task.Delay(1000);
+
+        var sw = Stopwatch.StartNew();
+        registry.Dispose();
+        sw.Stop();
+
+        Assert.Equal(PowerShellSessionStateValue.Cancelled, session.State);
+        Assert.True(sw.ElapsedMilliseconds < 5000);
     }
 }

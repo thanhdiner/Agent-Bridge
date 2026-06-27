@@ -62,93 +62,98 @@ internal sealed class PowerShellSessionExecutor
                 return;
             }
 
-            // Store process reference so external cancel can kill it
             session.Process = process;
-
-            // Drain stdout and stderr concurrently
-            var stdoutTask = DrainStreamAsync(
-                process.StandardOutput.BaseStream,
-                session.AppendStdout,
-                session.Cts.Token);
-            var stderrTask = DrainStreamAsync(
-                process.StandardError.BaseStream,
-                session.AppendStderr,
-                session.Cts.Token);
-
-            // Feed script via stdin then close it
             try
             {
-                await process.StandardInput.WriteAsync(
-                    script.AsMemory(),
+                // Drain stdout and stderr concurrently
+                var stdoutTask = DrainStreamAsync(
+                    process.StandardOutput.BaseStream,
+                    session.AppendStdout,
                     session.Cts.Token);
-                await process.StandardInput.FlushAsync();
+                var stderrTask = DrainStreamAsync(
+                    process.StandardError.BaseStream,
+                    session.AppendStderr,
+                    session.Cts.Token);
+
+                // Feed script via stdin then close it
+                try
+                {
+                    await process.StandardInput.WriteAsync(
+                        script.AsMemory(),
+                        session.Cts.Token);
+                    await process.StandardInput.FlushAsync();
+                }
+                catch (IOException) { /* pwsh may exit before consuming all stdin */ }
+                catch (OperationCanceledException) { /* handled below */ }
+                finally
+                {
+                    try { process.StandardInput.Close(); }
+                    catch { /* ignore */ }
+                }
+
+                // Wait for process exit with timeout
+                using var timeoutSource = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(timeoutSeconds));
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                    session.Cts.Token,
+                    timeoutSource.Token);
+
+                bool timedOut;
+                try
+                {
+                    await process.WaitForExitAsync(linked.Token);
+                    timedOut = false;
+                }
+                catch (OperationCanceledException) when (
+                    timeoutSource.IsCancellationRequested &&
+                    !session.Cts.IsCancellationRequested)
+                {
+                    timedOut = true;
+                    TryKill(process);
+                    await WaitSafeAsync(process);
+                }
+                catch (OperationCanceledException)
+                {
+                    // External cancel via Cts
+                    TryKill(process);
+                    await WaitSafeAsync(process);
+                    timedOut = false;
+                }
+
+                // Wait for drain tasks to complete
+                await Task.WhenAll(stdoutTask, stderrTask);
+
+                // Atomic terminal state transition (only one wins)
+                int? exitCode = null;
+                try { exitCode = process.HasExited ? process.ExitCode : null; }
+                catch { /* ignore */ }
+
+                if (timedOut)
+                {
+                    session.TryTransition(PowerShellSessionStateValue.TimedOut);
+                }
+                else if (session.Cts.IsCancellationRequested)
+                {
+                    session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                }
+                else if (exitCode == 0)
+                {
+                    session.TryTransition(PowerShellSessionStateValue.Completed, exitCode);
+                }
+                else
+                {
+                    session.TryTransition(PowerShellSessionStateValue.Failed, exitCode);
+                }
+
+                _registry.OnSessionTerminated(session);
+                _logger.LogDebug(
+                    "Session {SessionId} finished: state={State}, exitCode={ExitCode}",
+                    session.SessionId, session.State, exitCode);
             }
-            catch (IOException) { /* pwsh may exit before consuming all stdin */ }
-            catch (OperationCanceledException) { /* handled below */ }
             finally
             {
-                try { process.StandardInput.Close(); }
-                catch { /* ignore */ }
+                session.Process = null;
             }
-
-            // Wait for process exit with timeout
-            using var timeoutSource = new CancellationTokenSource(
-                TimeSpan.FromSeconds(timeoutSeconds));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                session.Cts.Token,
-                timeoutSource.Token);
-
-            bool timedOut;
-            try
-            {
-                await process.WaitForExitAsync(linked.Token);
-                timedOut = false;
-            }
-            catch (OperationCanceledException) when (
-                timeoutSource.IsCancellationRequested &&
-                !session.Cts.IsCancellationRequested)
-            {
-                timedOut = true;
-                TryKill(process);
-                await WaitSafeAsync(process);
-            }
-            catch (OperationCanceledException)
-            {
-                // External cancel via Cts
-                TryKill(process);
-                await WaitSafeAsync(process);
-                timedOut = false;
-            }
-
-            // Wait for drain tasks to complete
-            await Task.WhenAll(stdoutTask, stderrTask);
-
-            // Atomic terminal state transition (only one wins)
-            int? exitCode = null;
-            try { exitCode = process.HasExited ? process.ExitCode : null; }
-            catch { /* ignore */ }
-
-            if (timedOut)
-            {
-                session.TryTransition(PowerShellSessionStateValue.TimedOut);
-            }
-            else if (session.Cts.IsCancellationRequested)
-            {
-                session.TryTransition(PowerShellSessionStateValue.Cancelled);
-            }
-            else if (exitCode == 0)
-            {
-                session.TryTransition(PowerShellSessionStateValue.Completed, exitCode);
-            }
-            else
-            {
-                session.TryTransition(PowerShellSessionStateValue.Failed, exitCode);
-            }
-
-            _registry.OnSessionTerminated(session);
-            _logger.LogDebug(
-                "Session {SessionId} finished: state={State}, exitCode={ExitCode}",
-                session.SessionId, session.State, exitCode);
         }
         catch (Exception ex) when (
             ex is Win32Exception or

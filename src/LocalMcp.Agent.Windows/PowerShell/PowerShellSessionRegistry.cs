@@ -14,6 +14,22 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
     private readonly ILogger<PowerShellSessionRegistry> _logger;
     private bool _disposed;
 
+    internal int Count
+    {
+        get
+        {
+            lock (_registryLock) return _sessions.Count;
+        }
+    }
+
+    internal IReadOnlyCollection<PowerShellSessionState> Sessions
+    {
+        get
+        {
+            lock (_registryLock) return _sessions.Values.ToArray();
+        }
+    }
+
     public PowerShellSessionRegistry(ILogger<PowerShellSessionRegistry> logger)
     {
         _logger = logger;
@@ -78,16 +94,40 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
         }
     }
 
+    public bool Remove(Guid sessionId)
+    {
+        lock (_registryLock)
+        {
+            if (_sessions.TryRemove(sessionId, out var session))
+            {
+                session.Dispose();
+                return true;
+            }
+            return false;
+        }
+    }
+
     public void CancelAll()
     {
         lock (_registryLock)
         {
             _logger.LogInformation("Cancelling all active PowerShell sessions on shutdown.");
-            foreach (var session in _sessions.Values)
+            var runningSessions = _sessions.Values.Where(s => s.State == PowerShellSessionStateValue.Running).ToList();
+            foreach (var session in runningSessions)
             {
-                if (session.State == PowerShellSessionStateValue.Running)
+                TryCancelSession(session);
+            }
+
+            // Bounded wait up to 5s for running sessions to cleanly stop
+            if (runningSessions.Count > 0)
+            {
+                try
                 {
-                    TryCancelSession(session);
+                    Task.WhenAll(runningSessions.Select(s => s.CompletionTask)).Wait(TimeSpan.FromSeconds(5));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Timeout or error waiting for running sessions to stop during shutdown.");
                 }
             }
         }
@@ -106,11 +146,7 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
 
     private static void TryCancelSession(PowerShellSessionState session)
     {
-        try
-        {
-            session.Cts.Cancel();
-        }
-        catch (ObjectDisposedException) {}
+        session.SignalCancel();
     }
 
     public void OnSessionTerminated(PowerShellSessionState session)
