@@ -54,6 +54,7 @@ public sealed class CommandDeserializerTests
                 nameof(CreateDirectoryCommand) => JsonSerializer.Deserialize<CreateDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(StatCommand) => JsonSerializer.Deserialize<StatCommand>(payload, JsonOptions.Default),
                 nameof(BatchStatCommand) => JsonSerializer.Deserialize<BatchStatCommand>(payload, JsonOptions.Default),
+                nameof(BatchReadCommand) => JsonSerializer.Deserialize<BatchReadCommand>(payload, JsonOptions.Default),
                 nameof(MoveCommand) => JsonSerializer.Deserialize<MoveCommand>(payload, JsonOptions.Default),
                 nameof(CopyCommand) => JsonSerializer.Deserialize<CopyCommand>(payload, JsonOptions.Default),
                 nameof(DeleteCommand) => JsonSerializer.Deserialize<DeleteCommand>(payload, JsonOptions.Default),
@@ -225,6 +226,35 @@ public sealed class CommandDeserializerTests
         Assert.Null(errorCode);
         var batchCommand = Assert.IsType<BatchStatCommand>(command);
         Assert.Equal(new[] { "C:/src/a.txt", "C:/src/b" }, batchCommand.Paths);
+    }
+
+    [Fact]
+    public void Deserialize_BatchReadCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"BatchReadCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"paths\":[\"C:/src/a.txt\",\"C:/src/b.txt\"],\"maxBytesPerFile\":1024,\"maxTotalBytes\":4096}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var batchCommand = Assert.IsType<BatchReadCommand>(command);
+        Assert.Equal(new[] { "C:/src/a.txt", "C:/src/b.txt" }, batchCommand.Paths);
+        Assert.Equal(1024, batchCommand.MaxBytesPerFile);
+        Assert.Equal(4096L, batchCommand.MaxTotalBytes);
+    }
+
+    [Fact]
+    public void Deserialize_BatchReadCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"BatchReadCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"paths\":[\"C:/src/a.txt\"]}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var batchCommand = Assert.IsType<BatchReadCommand>(command);
+        Assert.Equal(262_144, batchCommand.MaxBytesPerFile);
+        Assert.Equal(2_097_152L, batchCommand.MaxTotalBytes);
     }
 
     [Fact]

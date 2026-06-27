@@ -31,7 +31,7 @@ graph TD
     Client -->|"Bearer token (files:read or files:write)"| JwtMiddleware
     JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
     JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_read_range/fs_list/fs_tree/fs_search/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
+    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
     McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
@@ -60,6 +60,7 @@ graph TD
 | `fs_list` | Lists immediate children of a directory, sorted directory-first then alphabetically. |
 | `fs_search` | Recursively searches for files matching a query (filename or content). |
 | `fs_read` | Reads the text of a single file. Returns size, encoding, SHA-256, and content. |
+| `fs_batch_read` | Reads 1–20 UTF-8 text files in one request with independent per-path errors, stable input ordering, four-way concurrency, UTF-8-safe truncation, and configurable per-file plus total response byte limits. |
 | `fs_read_range` | Streams a UTF-8 text file and returns a bounded one-based line range, total line count, encoding, SHA-256, and truncation status without loading the whole file into memory. Defaults to 200 lines and allows at most 1000 lines per call. |
 | `fs_stat` | Returns metadata (existence, size, SHA-256, encoding, read-only flag, last-write-time, reparse point status) of a path. Returns `Exists = false` for non-existent paths. For files larger than `MaxReadBytes`, skips content hashing/encoding detection, returning `ContentMetadataSkipped = true`. |
 | `fs_batch_stat` | Returns ordered status results for 1–100 paths in one call. Each path is evaluated independently, failures do not abort the batch, and internal concurrency is capped at eight operations. |
@@ -270,7 +271,8 @@ LocalMcp/
 │  │  ├─ Program.cs                      # Startup & public-exposure guardrail
 │  │  ├─ DependencyInjection.cs
 │  │  ├─ Hubs/AgentHub.cs               # SignalR hub
-│  │  ├─ Mcp/FileSystemTools.cs         # MCP tools (scope-gated)
+│  │  ├─ Mcp/FileSystemTools.cs         # Core MCP tools (scope-gated)
+│  │  ├─ Mcp/BatchReadTools.cs          # Bounded multi-file read MCP tool
 │  │  ├─ Security/
 │  │  │  ├─ SecurityOptions.cs
 │  │  │  └─ McpPolicies.cs              # files:read / files:write authorization policies
@@ -309,6 +311,7 @@ LocalMcp/
 │  │  │  ├─ CreateDirectoryCommand.cs
 │  │  │  ├─ StatCommand.cs
 │  │  │  ├─ BatchStatCommand.cs
+│  │  │  ├─ BatchReadCommand.cs
 │  │  │  ├─ MoveCommand.cs
 │  │  │  ├─ CopyCommand.cs
 │  │  │  ├─ DeleteCommand.cs
@@ -326,6 +329,7 @@ LocalMcp/
 │  │     ├─ CreateDirectoryResult.cs
 │  │     ├─ StatResult.cs
 │  │     ├─ BatchStatResult.cs
+│  │     ├─ BatchReadResult.cs
 │  │     ├─ MoveResult.cs
 │  │     ├─ CopyResult.cs
 │  │     ├─ DeleteResult.cs
@@ -360,6 +364,7 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `DirectoryCreationTests` | Hardened recursive directory segment creation, rollbacks, and junction/symlink escape checks |
 | `StatTests` | Bounded file metadata status, encoding detection, oversized size skips, and unreadable files handling |
 | `BatchStatTests` | Ordered partial-success batches, 1–100 path validation, cancellation, denied paths, and an eight-operation concurrency cap |
+| `BatchReadTests` | Ordered multi-file reads, independent item failures, binary rejection, UTF-8-safe per-file and total truncation, validation, cancellation, and a four-operation concurrency cap |
 | `DeleteTests` | File-only deletion policy, writable-root enforcement, hash conflicts, read-only files, denied paths, and reparse-point rejection |
 | `RemoveDirectoryTests` | Empty-directory-only removal, root protection, missing paths, non-empty races, denied paths, and reparse-point rejection |
 | `ReadRangeTests` | Bounded line-range streaming, large-file reads, UTF-8/BOM validation, binary rejection, response limits, and denied paths |
@@ -368,7 +373,7 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
-| `CommandDeserializerTests` | Strict command deserialization for all 14 commands |
+| `CommandDeserializerTests` | Strict command deserialization for all 15 commands |
 | `BenchmarkTests` | PathPolicy throughput under sustained load |
 | `EndToEndTests` | Full SignalR loop: Gateway → Agent → FileSystem → Gateway |
 | `ArchitectureTests` | No circular project references |

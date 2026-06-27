@@ -62,7 +62,10 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
 
         builder.Services.AddGatewayServices(builder.Configuration);
         builder.Services.AddSignalR();
-        builder.Services.AddMcpServer().WithHttpTransport().WithTools<FileSystemTools>();
+        builder.Services.AddMcpServer()
+            .WithHttpTransport()
+            .WithTools<FileSystemTools>()
+            .WithTools<BatchReadTools>();
 
         builder.Services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, opts =>
         {
@@ -203,6 +206,46 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
             toolName: "fs_read_range",
             arguments: new { deviceId = "missing-test-device", path = "C:\\test.txt", startLine = 1, lineCount = 20 }
         );
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("FORBIDDEN", body);
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingFsBatchRead_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_batch_read",
+            arguments: new
+            {
+                deviceId = "missing-test-device",
+                paths = new[] { "C:/one.txt", "C:/two.txt" }
+            });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("AGENT_OFFLINE", body);
+    }
+
+    [Fact]
+    public async Task FilesWriteScope_CallingFsBatchRead_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_batch_read",
+            arguments: new
+            {
+                deviceId = "missing-test-device",
+                paths = new[] { "C:/one.txt" }
+            });
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var body = await resp.Content.ReadAsStringAsync();

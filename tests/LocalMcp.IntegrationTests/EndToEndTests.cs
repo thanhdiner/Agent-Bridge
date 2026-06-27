@@ -47,7 +47,8 @@ public sealed class EndToEndTests : IAsyncDisposable
         builder.Services.AddSignalR();
         builder.Services.AddMcpServer()
             .WithHttpTransport()
-            .WithTools<FileSystemTools>();
+            .WithTools<FileSystemTools>()
+            .WithTools<BatchReadTools>();
 
         _gatewayApp = builder.Build();
         _gatewayApp.MapHub<AgentHub>("/hubs/agent");
@@ -266,6 +267,43 @@ public sealed class EndToEndTests : IAsyncDisposable
         Assert.NotNull(statResultAfter);
         Assert.True(statResultAfter.Exists);
         Assert.Equal("directory", statResultAfter.Type);
+    }
+
+    [Fact]
+    public async Task FsBatchRead_EndToEndFlow_ReturnsOrderedBoundedResults()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var first = Path.Combine(_tempRoot, "batch-read-first.txt");
+        var second = Path.Combine(_tempRoot, "batch-read-second.txt");
+        await File.WriteAllTextAsync(first, "abcdef");
+        await File.WriteAllTextAsync(second, "uvwxyz");
+
+        var tools = new BatchReadTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<BatchReadTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>());
+
+        var response = await tools.BatchReadAsync(
+            _deviceId,
+            new List<string> { first, second },
+            maxBytesPerFile: 4,
+            maxTotalBytes: 6);
+
+        Assert.False(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<BatchReadResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal(2, data.Succeeded);
+        Assert.Equal(6, data.TotalBytesReturned);
+        Assert.Equal("abcd", data.Items[0].Data!.Content);
+        Assert.Equal("uv", data.Items[1].Data!.Content);
+        Assert.All(data.Items, item => Assert.True(item.Data!.Truncated));
     }
 
     [Fact]

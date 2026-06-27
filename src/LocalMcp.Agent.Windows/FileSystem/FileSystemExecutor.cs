@@ -27,6 +27,7 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
     private readonly ILogger<FileSystemExecutor> _logger;
 
     internal Func<string, Task>? OnBeforeContentReadHook { get; set; }
+    internal Func<string, Task>? OnBeforeFileReadHook { get; set; }
     internal Action<string>? OnDirectorySegmentCreatedHook { get; set; }
     internal Func<string, Task>? OnBeforeDirectoryDeleteHook { get; set; }
     internal Func<string, string, bool>? ShouldUseCrossVolumeMoveFallbackHook { get; set; }
@@ -54,6 +55,9 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
 
         try
         {
+            if (OnBeforeFileReadHook is not null)
+                await OnBeforeFileReadHook(path);
+
             var fileInfo = new FileInfo(path);
             var size = fileInfo.Length;
 
