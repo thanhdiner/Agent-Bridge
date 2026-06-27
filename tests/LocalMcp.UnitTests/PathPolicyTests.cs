@@ -206,4 +206,13 @@ public sealed class PathPolicyTests : IDisposable
         Assert.NotNull(error);
         Assert.Equal(ErrorCodes.AccessDenied, error.Code);
     }
+
+    [Fact]
+    public void IsSubdirectoryOf_DriveRoot_AllowsChildPath()
+    {
+        Assert.True(PathPolicy.IsSubdirectoryOf(
+            @"D:\mcp-scratch\a.txt",
+            @"D:\"
+        ));
+    }
 }

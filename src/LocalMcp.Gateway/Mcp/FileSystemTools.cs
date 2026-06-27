@@ -290,6 +290,29 @@ public sealed class FileSystemTools
         return await DispatchAsync<PatchFileResult>(command, "fs_patch", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_batch_patch", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Applies exact text replacements to 1-20 UTF-8 files with ordered per-item results. Requires files:write scope.")]
+    public async Task<CallToolResult> BatchPatchAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The file patch requests to execute (1 to 20 entries)")] List<MultiFilePatchItem> items)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (items is null || items.Count < 1 || items.Count > 20)
+            return CreateErrorResult("INVALID_REQUEST", "items must contain between 1 and 20 entries.");
+        var command = new MultiFilePatchCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Items = items.ToList()
+        };
+
+        return await DispatchAsync<MultiFilePatchResult>(command, "fs_batch_patch", deviceId, GetCancellationToken());
+    }
+
     [McpServerTool(Name = "fs_mkdir", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false), Description("Creates a directory or directories at the specified path on a target Windows agent device. Requires files:write scope. Recursive creation is supported.")]
     public async Task<CallToolResult> CreateDirectoryAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,

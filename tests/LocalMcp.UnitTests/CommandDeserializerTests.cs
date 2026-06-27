@@ -51,6 +51,7 @@ public sealed class CommandDeserializerTests
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
                 nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(payload, JsonOptions.Default),
                 nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
+                nameof(MultiFilePatchCommand) => JsonSerializer.Deserialize<MultiFilePatchCommand>(payload, JsonOptions.Default),
                 nameof(CreateDirectoryCommand) => JsonSerializer.Deserialize<CreateDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(StatCommand) => JsonSerializer.Deserialize<StatCommand>(payload, JsonOptions.Default),
                 nameof(BatchStatCommand) => JsonSerializer.Deserialize<BatchStatCommand>(payload, JsonOptions.Default),
@@ -255,6 +256,22 @@ public sealed class CommandDeserializerTests
         var batchCommand = Assert.IsType<BatchReadCommand>(command);
         Assert.Equal(262_144, batchCommand.MaxBytesPerFile);
         Assert.Equal(2_097_152L, batchCommand.MaxTotalBytes);
+    }
+
+    [Fact]
+    public void Deserialize_MultiFilePatchCommand_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"MultiFilePatchCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"items\":[{{\"path\":\"C:/src/a.txt\",\"expectedSha256\":\"abc\",\"edits\":[{{\"oldText\":\"old\",\"newText\":\"new\",\"replaceAll\":false}}]}}]}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var batchCommand = Assert.IsType<MultiFilePatchCommand>(command);
+        var item = Assert.Single(batchCommand.Items);
+        Assert.Equal("C:/src/a.txt", item.Path);
+        Assert.Equal("abc", item.ExpectedSha256);
+        Assert.Single(item.Edits);
     }
 
     [Fact]

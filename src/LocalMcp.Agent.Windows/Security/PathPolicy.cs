@@ -1157,21 +1157,25 @@ public sealed class PathPolicy : IPathPolicy
 
     public static bool IsSubdirectoryOf(string path, string root)
     {
-        var normalizedPath = Path.GetFullPath(path).Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
-        var normalizedRoot = Path.GetFullPath(root).Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        var normalizedPath = Path.GetFullPath(path)
+            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
 
-        if (!normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
+        var normalizedRoot = Path.GetFullPath(root)
+            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
 
-        if (normalizedPath.Length == normalizedRoot.Length)
+        if (string.Equals(normalizedPath, normalizedRoot, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        var nextChar = normalizedPath[normalizedRoot.Length];
-        return nextChar == Path.DirectorySeparatorChar;
+        var rootWithSeparator = Path.EndsInDirectorySeparator(normalizedRoot)
+            ? normalizedRoot
+            : normalizedRoot + Path.DirectorySeparatorChar;
+
+        return normalizedPath.StartsWith(
+            rootWithSeparator,
+            StringComparison.OrdinalIgnoreCase
+        );
     }
 
     private string ResolvePhysicalPath(string path)

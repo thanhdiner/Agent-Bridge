@@ -31,7 +31,7 @@ graph TD
     Client -->|"Bearer token (files:read or files:write)"| JwtMiddleware
     JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
     JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
+    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
     McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
@@ -71,6 +71,7 @@ graph TD
 |---|---|
 | `fs_write` | Creates or overwrites a single file using optimistic concurrency (SHA-256 ETag). |
 | `fs_patch` | Applies a list of exact text substitutions atomically to an existing file. |
+| `fs_batch_patch` | Applies text edits to 1–20 UTF-8 files with four-way concurrency, stable ordering, atomic writes per file, and per-item results. |
 | `fs_mkdir` | Creates directory or directories. Gated by `WritableRoots` enforcement. For recursive creation (`recursive: true`), resolves the closest existing ancestor, validates it, checks every proposed subdirectory name against denied patterns, and creates them segment by segment with post-creation safety verification and automatic rollback on failure. |
 | `fs_move` | Moves or renames a file or directory within writable roots. File moves support cross-volume copy-verify-delete fallback with SHA-256 verification, durable temporary writes, rollback on pre-delete failure, and optional source hash guards. Directory moves remain same-volume only. |
 | `fs_copy` | Copies a file or bounded directory tree into a writable root. Directory sources require `recursive: true`, reject merge/overwrite, enforce entry and byte limits, reject reparse points at every level, and publish through a temporary sibling directory followed by an atomic rename. |
