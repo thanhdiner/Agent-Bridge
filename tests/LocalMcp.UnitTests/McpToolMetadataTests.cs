@@ -31,6 +31,8 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_search", true, false, true, false)]
     [InlineData("fs_write", false, true, false, false)]
     [InlineData("fs_patch", false, true, false, false)]
+    [InlineData("fs_mkdir", false, false, true, false)]
+    [InlineData("fs_stat", true, false, true, false)]
     public void ValidateToolAnnotations(
         string toolName,
         bool expectReadOnly,
@@ -83,6 +85,8 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsSearch_NoInternalParameters() => AssertNoInternalParams("fs_search");
     [Fact] public void FsWrite_NoInternalParameters() => AssertNoInternalParams("fs_write");
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
+    [Fact] public void FsMkdir_NoInternalParameters() => AssertNoInternalParams("fs_mkdir");
+    [Fact] public void FsStat_NoInternalParameters() => AssertNoInternalParams("fs_stat");
 
     [Fact]
     public void FsRead_HasExactSchema()
@@ -147,5 +151,24 @@ public sealed class McpToolMetadataTests
         Assert.Contains("expectedSha256", names);
         Assert.Contains("edits", names);
         Assert.Equal(4, names.Count);
+    }
+
+    [Fact]
+    public void FsMkdir_HasExactSchema()
+    {
+        var names = GetParamNames("fs_mkdir").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("recursive", names);
+        Assert.Equal(3, names.Count);
+    }
+
+    [Fact]
+    public void FsStat_HasExactSchema()
+    {
+        var names = GetParamNames("fs_stat").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Equal(2, names.Count);
     }
 }

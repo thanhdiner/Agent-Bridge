@@ -251,6 +251,65 @@ public sealed class FileSystemTools
         return await DispatchAsync<PatchFileResult>(command, "fs_patch", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_mkdir", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false), Description("Creates a directory or directories at the specified path on a target Windows agent device. Requires files:write scope. Recursive creation is supported.")]
+    public async Task<CallToolResult> CreateDirectoryAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the directory to create")] string path,
+        [Description("Whether to recursively create parent directories if missing (default: false)")] bool recursive = false)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        var command = new CreateDirectoryCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            Recursive = recursive
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<CreateDirectoryResult>(command, "fs_mkdir", deviceId, cancellationToken);
+    }
+
+    [McpServerTool(Name = "fs_stat", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Gets file or directory status metadata (exists, size, type, sha256) on a target Windows agent device. Requires files:read scope.")]
+    public async Task<CallToolResult> StatAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the file or directory to check")] string path)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        var command = new StatCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<StatResult>(command, "fs_stat", deviceId, cancellationToken);
+    }
+
+
     // ──────────────────────────────────────────────
     // Private transport and auth helpers
     // ──────────────────────────────────────────────

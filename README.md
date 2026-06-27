@@ -60,6 +60,7 @@ graph TD
 | `fs_list` | Lists immediate children of a directory, sorted directory-first then alphabetically. |
 | `fs_search` | Recursively searches for files matching a query (filename or content). |
 | `fs_read` | Reads the text of a single file. Returns size, encoding, SHA-256, and content. |
+| `fs_stat` | Returns metadata (existence, size, SHA-256, encoding, read-only flag, last-write-time, reparse point status) of a path. Returns `Exists = false` for non-existent paths. For files larger than `MaxReadBytes`, skips content hashing/encoding detection, returning `ContentMetadataSkipped = true`. |
 
 ### Write tools — require `files:write` scope
 
@@ -67,9 +68,10 @@ graph TD
 |---|---|
 | `fs_write` | Creates or overwrites a single file using optimistic concurrency (SHA-256 ETag). |
 | `fs_patch` | Applies a list of exact text substitutions atomically to an existing file. |
+| `fs_mkdir` | Creates directory or directories. Gated by `WritableRoots` enforcement. For recursive creation (`recursive: true`), resolves the closest existing ancestor, validates it, checks every proposed subdirectory name against denied patterns, and creates them segment by segment with post-creation safety verification and automatic rollback on failure. |
 
 > [!IMPORTANT]
-> **Write tools are disabled by default.** `WritableRoots` in `appsettings.json` is an empty list. You must explicitly add directories before write tools can succeed.
+> **Write tools (including `fs_mkdir`) are disabled by default.** `WritableRoots` in `appsettings.json` is an empty list. You must explicitly add directories before write tools can succeed.
 
 > [!NOTE]
 > All tools return structured JSON errors. Internal paths, stack traces, and `.tmp_` filenames are never leaked to MCP clients.
@@ -295,7 +297,9 @@ LocalMcp/
 │  │  │  ├─ TreeCommand.cs
 │  │  │  ├─ SearchFilesCommand.cs
 │  │  │  ├─ WriteFileCommand.cs
-│  │  │  └─ PatchFileCommand.cs
+│  │  │  ├─ PatchFileCommand.cs
+│  │  │  ├─ CreateDirectoryCommand.cs
+│  │  │  └─ StatCommand.cs
 │  │  └─ Results/
 │  │     ├─ CommandError.cs
 │  │     ├─ CommandResult.cs
@@ -304,7 +308,9 @@ LocalMcp/
 │  │     ├─ TreeResult.cs
 │  │     ├─ SearchFilesResult.cs
 │  │     ├─ WriteFileResult.cs
-│  │     └─ PatchFileResult.cs
+│  │     ├─ PatchFileResult.cs
+│  │     ├─ CreateDirectoryResult.cs
+│  │     └─ StatResult.cs
 │  │
 │  └─ LocalMcp.BuildingBlocks/
 │     ├─ Errors/ErrorCodes.cs           # Standard error code constants
@@ -332,10 +338,12 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 |---|---|
 | `PathPolicyTests` | AllowedRoots, WritableRoots, DeniedSegments, wildcard denials |
 | `WriteToolsTests` | Executor write/patch safety, BOM absence, UTF-8, conflict, temp cleanup |
+| `DirectoryCreationTests` | Hardened recursive directory segment creation, rollbacks, and junction/symlink escape checks |
+| `StatTests` | Bounded file metadata status, encoding detection, oversized size skips, and unreadable files handling |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
-| `CommandDeserializerTests` | Strict command deserialization for all 6 commands |
+| `CommandDeserializerTests` | Strict command deserialization for all 8 commands |
 | `BenchmarkTests` | PathPolicy throughput under sustained load |
 | `EndToEndTests` | Full SignalR loop: Gateway → Agent → FileSystem → Gateway |
 | `ArchitectureTests` | No circular project references |
