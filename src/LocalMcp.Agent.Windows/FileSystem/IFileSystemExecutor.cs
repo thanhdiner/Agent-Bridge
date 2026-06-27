@@ -59,6 +59,25 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<GitStatusResult>> GitStatusAsync(
+        string path,
+        bool includeUntracked,
+        int maxEntries,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
+    Task<CommandResult<GitDiffResult>> GitDiffAsync(
+        string path,
+        bool staged,
+        bool includeUntracked,
+        IReadOnlyList<string> pathSpecs,
+        int contextLines,
+        int maxBytes,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<WriteFileResult>> WriteFileAsync(
         string path,
         string content,

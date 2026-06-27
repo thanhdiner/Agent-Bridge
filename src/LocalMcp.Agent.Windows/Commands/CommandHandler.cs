@@ -68,6 +68,14 @@ public sealed class CommandHandler
         {
             return await HandleSearchContextAsync(searchContextCommand, cancellationToken);
         }
+        else if (command is GitStatusCommand gitStatusCommand)
+        {
+            return await HandleGitStatusAsync(gitStatusCommand, cancellationToken);
+        }
+        else if (command is GitDiffCommand gitDiffCommand)
+        {
+            return await HandleGitDiffAsync(gitDiffCommand, cancellationToken);
+        }
         else if (command is TreeCommand treeCommand)
         {
             return await HandleTreeAsync(treeCommand, cancellationToken);
@@ -364,6 +372,95 @@ public sealed class CommandHandler
             Success = true,
             Data = JsonSerializer.SerializeToElement(
                 filteredResult,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleGitStatusAsync(
+        GitStatusCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.GitStatusAsync(
+            normalizedPath,
+            command.IncludeUntracked,
+            command.MaxEntries,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleGitDiffAsync(
+        GitDiffCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.GitDiffAsync(
+            normalizedPath,
+            command.Staged,
+            command.IncludeUntracked,
+            command.PathSpecs ?? [],
+            command.ContextLines,
+            command.MaxBytes,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
                 LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
         };
     }

@@ -21,6 +21,9 @@ public static class ErrorCodes
     public const string SearchQueryRequired = "SEARCH_QUERY_REQUIRED";
     public const string TreeDepthLimitExceeded = "TREE_DEPTH_LIMIT_EXCEEDED";
     public const string ResultLimitExceeded = "RESULT_LIMIT_EXCEEDED";
+    public const string GitNotAvailable = "GIT_NOT_AVAILABLE";
+    public const string GitRepositoryNotFound = "GIT_REPOSITORY_NOT_FOUND";
+    public const string GitCommandFailed = "GIT_COMMAND_FAILED";
 
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";

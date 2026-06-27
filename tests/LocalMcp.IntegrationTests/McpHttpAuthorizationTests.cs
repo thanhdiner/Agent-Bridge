@@ -249,6 +249,73 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FilesReadScope_CallingGitStatus_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_status",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src/repo" });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesWriteScope_CallingGitStatus_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_status",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src/repo" });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingGitDiff_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_diff",
+            arguments: new
+            {
+                deviceId = "missing-test-device",
+                path = "C:/src/repo",
+                staged = false,
+                includeUntracked = true,
+                pathSpecs = new[] { "src/**/*.cs" }
+            });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesWriteScope_CallingGitDiff_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_diff",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src/repo" });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task FilesReadScope_CallingFsBatchRead_ReachesDispatch_AgentOffline()
     {
         await StartServerAsync();

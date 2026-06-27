@@ -31,7 +31,7 @@ graph TD
     Client -->|"Bearer token (files:read or files:write)"| JwtMiddleware
     JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
     JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
+    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_search_context/git_status/git_diff/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
     McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
@@ -59,6 +59,9 @@ graph TD
 | `fs_tree` | Returns a bounded directory tree. Used by ChatGPT to understand project layout. |
 | `fs_list` | Lists immediate children of a directory, sorted directory-first then alphabetically. |
 | `fs_search` | Recursively searches for files matching a query (filename or content). |
+| `fs_search_context` | Searches UTF-8 files using literal or regex matching and returns bounded surrounding lines plus each file's SHA-256. Supports include/exclude globs. |
+| `git_status` | Returns bounded Git working-tree status, branch/upstream metadata, ahead/behind counts, and policy-filtered changed paths. |
+| `git_diff` | Returns a bounded staged or unstaged unified diff for policy-authorized paths. It can append safe synthetic patches for untracked UTF-8 files. |
 | `fs_read` | Reads the text of a single file. Returns size, encoding, SHA-256, and content. |
 | `fs_batch_read` | Reads 1–20 UTF-8 text files in one request with independent per-path errors, stable input ordering, four-way concurrency, UTF-8-safe truncation, and configurable per-file plus total response byte limits. |
 | `fs_read_range` | Streams a UTF-8 text file and returns a bounded one-based line range, total line count, encoding, SHA-256, and truncation status without loading the whole file into memory. Defaults to 200 lines and allows at most 1000 lines per call. |
@@ -121,6 +124,7 @@ Every filesystem operation passes through `PathPolicy` before executing:
 10. **ReadOnly file check** — write operations reject files with the `ReadOnly` attribute.
 11. **WritableRoots check** — write operations require the resolved path to be inside a writable root.
 12. **Size validation** — `fs_read` rejects files > `MaxReadBytes` (default 2 MB); `fs_read_range` may scan larger files but bounds the returned range to `MaxReadBytes`; writes reject content > `MaxWriteBytes` (default 512 KB); directory copy additionally enforces caller-supplied `maxEntries` and `maxTotalBytes` limits with hard caps of 5000 entries and 1 GiB.
+13. **Git inspection hardening** — Git tools are read-only, disable external diff drivers, text conversion, pagers, prompts, fsmonitor, and submodule recursion. They reject executable clean/process filters configured by the repository itself, while ignoring unrelated global filters such as Git LFS, bound process output/time, and omit paths denied by `PathPolicy`.
 
 ### Device token (Agent → Gateway SignalR)
 
@@ -294,7 +298,8 @@ LocalMcp/
 │  │  ├─ FileSystem/
 │  │  │  ├─ IFileSystemExecutor.cs
 │  │  │  ├─ ITransferExecutor.cs        # Bounded file/directory copy orchestration
-│  │  │  └─ FileSystemExecutor.cs       # Atomic write, patch, read, list, search
+│  │  │  ├─ FileSystemExecutor.cs       # Atomic write, patch, read, list, search
+│  │  │  └─ FileSystemExecutor.Git.cs   # Bounded, policy-filtered Git status and diff
 │  │  └─ Security/
 │  │     ├─ FileAccessOptions.cs
 │  │     ├─ IPathPolicy.cs
@@ -307,6 +312,9 @@ LocalMcp/
 │  │  │  ├─ ListDirectoryCommand.cs
 │  │  │  ├─ TreeCommand.cs
 │  │  │  ├─ SearchFilesCommand.cs
+│  │  │  ├─ SearchContextCommand.cs
+│  │  │  ├─ GitStatusCommand.cs
+│  │  │  ├─ GitDiffCommand.cs
 │  │  │  ├─ WriteFileCommand.cs
 │  │  │  ├─ PatchFileCommand.cs
 │  │  │  ├─ CreateDirectoryCommand.cs
@@ -325,6 +333,9 @@ LocalMcp/
 │  │     ├─ ListDirectoryResult.cs
 │  │     ├─ TreeResult.cs
 │  │     ├─ SearchFilesResult.cs
+│  │     ├─ SearchContextResult.cs
+│  │     ├─ GitStatusResult.cs
+│  │     ├─ GitDiffResult.cs
 │  │     ├─ WriteFileResult.cs
 │  │     ├─ PatchFileResult.cs
 │  │     ├─ CreateDirectoryResult.cs
@@ -371,10 +382,11 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `ReadRangeTests` | Bounded line-range streaming, large-file reads, UTF-8/BOM validation, binary rejection, response limits, and denied paths |
 | `MoveCopyTests` | File move/copy concurrency plus bounded recursive directory copy, entry/byte limits, denied descendants, destination containment, and temporary-tree cleanup |
 | `CrossVolumeMoveTests` | Same-volume fast path, cross-volume copy-verify-delete fallback, overwrite rollback, source mutation detection, cancellation, and temporary-file cleanup |
+| `GitToolsTests` | Git filter-scope regression coverage, porcelain status parsing, and synthetic untracked-file patch formatting for the read-only Git inspection tools |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
-| `CommandDeserializerTests` | Strict command deserialization for all 15 commands |
+| `CommandDeserializerTests` | Strict command deserialization for all supported commands |
 | `BenchmarkTests` | PathPolicy throughput under sustained load |
 | `EndToEndTests` | Full SignalR loop: Gateway → Agent → FileSystem → Gateway |
 | `ArchitectureTests` | No circular project references |
