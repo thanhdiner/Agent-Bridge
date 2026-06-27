@@ -23,6 +23,124 @@ public sealed class ProjectCheckTests
     }
 
     [Fact]
+    public void DetectProjectType_PrefersPythonForFrontendHybrid()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "pyproject.toml"), "[build-system]");
+            File.WriteAllText(Path.Combine(root, "package.json"), "{}");
+
+            Assert.Equal("python", FileSystemExecutor.DetectProjectType(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DetectProjectType_DetectsGoModule()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "go.mod"), "module example.com/sample");
+
+            Assert.Equal("go", FileSystemExecutor.DetectProjectType(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildProjectStepPlans_PythonPrefersVenvTools()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "pyproject.toml"), "[build-system]");
+            var scripts = Path.Combine(root, ".venv", "Scripts");
+            Directory.CreateDirectory(scripts);
+            foreach (var executable in new[] { "python.exe", "pytest.exe", "ruff.exe", "mypy.exe" })
+                File.WriteAllText(Path.Combine(scripts, executable), string.Empty);
+
+            var plans = FileSystemExecutor.BuildProjectStepPlans(
+                root,
+                "python",
+                ["build", "test", "lint", "typecheck"],
+                "Debug");
+
+            Assert.Equal(4, plans.Count);
+            Assert.Equal(Path.Combine(".venv", "Scripts", "python.exe"), plans[0].Executable);
+            Assert.Equal(new[] { "-m", "build", "--no-isolation" }, plans[0].Arguments);
+            Assert.Equal("pytest", plans[1].Toolchain);
+            Assert.Equal(Path.Combine(".venv", "Scripts", "pytest.exe"), plans[1].Executable);
+            Assert.Contains(plans[1].Alternatives, candidate =>
+                candidate.Toolchain == "python-unittest" && candidate.Executable == "python.exe");
+            Assert.Equal("ruff", plans[2].Toolchain);
+            Assert.Equal("mypy", plans[3].Toolchain);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildProjectStepPlans_PythonUsesFixedFallbackOrderWithoutVenv()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "requirements.txt"), "requests==2.32.0");
+
+            var plans = FileSystemExecutor.BuildProjectStepPlans(
+                root,
+                "python",
+                ["build", "test", "lint", "typecheck"],
+                "Debug");
+
+            Assert.False(plans[0].Supported);
+            Assert.Equal("build_manifest_not_found", plans[0].SkipReason);
+            Assert.Equal("pytest.exe", plans[1].Executable);
+            Assert.Equal(
+                new[] { "python-unittest", "python-unittest" },
+                plans[1].Alternatives.Select(candidate => candidate.Toolchain));
+            Assert.Equal("ruff.exe", plans[2].Executable);
+            Assert.Equal(
+                new[] { "flake8" },
+                plans[2].Alternatives.Select(candidate => candidate.Toolchain).Distinct());
+            Assert.Equal("mypy.exe", plans[3].Executable);
+            Assert.Equal(
+                new[] { "pyright" },
+                plans[3].Alternatives.Select(candidate => candidate.Toolchain).Distinct());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildProjectStepPlans_GoUsesFixedCommands()
+    {
+        var plans = FileSystemExecutor.BuildProjectStepPlans(
+            Path.GetTempPath(),
+            "go",
+            ["build", "test", "lint", "typecheck"],
+            "Debug");
+
+        Assert.All(plans, plan => Assert.Equal("go.exe", plan.Executable));
+        Assert.Equal(new[] { "build", "./..." }, plans[0].Arguments);
+        Assert.Equal(new[] { "test", "./..." }, plans[1].Arguments);
+        Assert.Equal(new[] { "vet", "./..." }, plans[2].Arguments);
+        Assert.Equal(new[] { "test", "-run=^$", "./..." }, plans[3].Arguments);
+    }
+
+    [Fact]
     public void BuildProjectStepPlans_NodeUsesPnpmAndSkipsMissingScript()
     {
         var root = CreateTempDirectory();
