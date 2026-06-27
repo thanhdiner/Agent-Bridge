@@ -1,0 +1,84 @@
+using LocalMcp.Gateway.Hubs;
+using LocalMcp.Gateway.Security;
+using Microsoft.Extensions.Options;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add Gateway services
+builder.Services.AddGatewayServices(builder.Configuration);
+
+// Add SignalR
+builder.Services.AddSignalR(options =>
+{
+    // Set reasonable SignalR message-size limits (10MB is plenty for tool calls and small files)
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
+});
+
+// Configure MCP Server
+builder.Services.AddMcpServer()
+    .WithHttpTransport()
+    .WithToolsFromAssembly();
+
+var app = builder.Build();
+
+// ── Public Exposure Guardrail ──────────────────────────────────────────────
+// This is a startup guardrail, NOT a replacement for authentication.
+// It warns operators when the Gateway may be internet-accessible without auth.
+var securityOptions = app.Services.GetRequiredService<IOptions<SecurityOptions>>().Value;
+var env = app.Environment;
+
+if (securityOptions.PublicExposure && !securityOptions.AuthenticationEnabled)
+{
+    if (env.IsDevelopment())
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(
+            "⚠️  SECURITY WARNING: Gateway is configured with PublicExposure=true and AuthenticationEnabled=false. " +
+            "The MCP endpoint is publicly reachable without any authentication. " +
+            "Only read-only tools (fs_read, fs_list, fs_tree, fs_search) are currently enabled. " +
+            "Do NOT enable write tools while authentication is disabled. " +
+            "This configuration is only permitted in the Development environment.");
+    }
+    else
+    {
+        // In Staging or Production, fail startup immediately.
+        throw new InvalidOperationException(
+            "STARTUP REJECTED: Security:PublicExposure is true and Security:AuthenticationEnabled is false " +
+            "in a non-Development environment. This configuration risks exposing the filesystem to the public " +
+            "without any authentication. Enable authentication or set PublicExposure=false before deploying.");
+    }
+}
+// ──────────────────────────────────────────────────────────────────────────
+
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// ── Protected Resource Metadata (RFC 9728) ─────────────────────────────────
+var metadataHandler = (IOptions<SecurityOptions> options) =>
+{
+    var security = options.Value;
+    var response = new
+    {
+        resource = security.PublicBaseUrl,
+        authorization_servers = new[] { security.OAuth.Authority },
+        scopes_supported = security.OAuth.RequiredScopes,
+        resource_documentation = $"{security.PublicBaseUrl}/docs"
+    };
+    return Results.Json(response, contentType: "application/json");
+};
+
+app.MapGet("/.well-known/oauth-protected-resource", metadataHandler).AllowAnonymous();
+app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAnonymous();
+// ──────────────────────────────────────────────────────────────────────────
+
+// Map SignalR Hub
+app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
+
+// Map MCP endpoints (Streamable HTTP Transport — default path: POST /)
+app.MapMcp().RequireAuthorization("McpPolicy");
+
+app.Run();
+
+// Make the implicit Program class visible to integration tests
+public partial class Program { }

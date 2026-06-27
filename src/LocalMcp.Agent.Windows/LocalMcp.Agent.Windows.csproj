@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalMcp.Contracts\LocalMcp.Contracts.csproj" />
+    <ProjectReference Include="..\LocalMcp.BuildingBlocks\LocalMcp.BuildingBlocks.csproj" />
+  </ItemGroup>
+</Project>

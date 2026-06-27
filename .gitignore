@@ -1,0 +1,25 @@
+# Build folders
+bin/
+obj/
+
+# IDE files
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+
+# System & OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# App Settings Secrets/Local overrides
+appsettings.Development.json
+appsettings.Local.json
+*.local.json
+.env
+.env.*
+
+# Testing outputs
+TestResults/

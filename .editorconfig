@@ -1,0 +1,19 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+# Standard C# settings
+csharp_style_expression_bodied_methods = true:suggestion
+csharp_style_expression_bodied_constructors = true:suggestion
+csharp_style_expression_bodied_operators = true:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+
+# Nullability preferences
+dotnet_diagnostic.CS8618.severity = warning
+dotnet_diagnostic.CS8625.severity = warning
