@@ -71,7 +71,7 @@ graph TD
 | `fs_patch` | Applies a list of exact text substitutions atomically to an existing file. |
 | `fs_mkdir` | Creates directory or directories. Gated by `WritableRoots` enforcement. For recursive creation (`recursive: true`), resolves the closest existing ancestor, validates it, checks every proposed subdirectory name against denied patterns, and creates them segment by segment with post-creation safety verification and automatic rollback on failure. |
 | `fs_move` | Moves or renames a file or directory within writable roots. Supports optional source SHA-256 concurrency checks. |
-| `fs_copy` | Copies one file into a writable root using a temporary file and atomic rename. Directories are not supported. |
+| `fs_copy` | Copies a file or bounded directory tree into a writable root. Directory sources require `recursive: true`, reject merge/overwrite, enforce entry and byte limits, reject reparse points at every level, and publish through a temporary sibling directory followed by an atomic rename. |
 | `fs_delete` | Deletes one file from a writable root after confirmation. Directories are not supported; optional SHA-256 concurrency checks and `missingOk` are supported. |
 
 > [!IMPORTANT]
@@ -116,7 +116,7 @@ Every filesystem operation passes through `PathPolicy` before executing:
 9. **DeniedWriteExtensions** — blocks certificate/key file extensions (`.pem`, `.key`, `.pfx`, `.p12`, etc.).
 10. **ReadOnly file check** — write operations reject files with the `ReadOnly` attribute.
 11. **WritableRoots check** — write operations require the resolved path to be inside a writable root.
-12. **Size validation** — `fs_read` rejects files > `MaxReadBytes` (default 2 MB); `fs_read_range` may scan larger files but bounds the returned range to `MaxReadBytes`; writes reject content > `MaxWriteBytes` (default 512 KB).
+12. **Size validation** — `fs_read` rejects files > `MaxReadBytes` (default 2 MB); `fs_read_range` may scan larger files but bounds the returned range to `MaxReadBytes`; writes reject content > `MaxWriteBytes` (default 512 KB); directory copy additionally enforces caller-supplied `maxEntries` and `maxTotalBytes` limits with hard caps of 5000 entries and 1 GiB.
 
 ### Device token (Agent → Gateway SignalR)
 
@@ -288,6 +288,7 @@ LocalMcp/
 │  │  ├─ Commands/CommandHandler.cs
 │  │  ├─ FileSystem/
 │  │  │  ├─ IFileSystemExecutor.cs
+│  │  │  ├─ ITransferExecutor.cs        # Bounded file/directory copy orchestration
 │  │  │  └─ FileSystemExecutor.cs       # Atomic write, patch, read, list, search
 │  │  └─ Security/
 │  │     ├─ FileAccessOptions.cs
@@ -354,6 +355,7 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `StatTests` | Bounded file metadata status, encoding detection, oversized size skips, and unreadable files handling |
 | `DeleteTests` | File-only deletion policy, writable-root enforcement, hash conflicts, read-only files, denied paths, and reparse-point rejection |
 | `ReadRangeTests` | Bounded line-range streaming, large-file reads, UTF-8/BOM validation, binary rejection, response limits, and denied paths |
+| `MoveCopyTests` | File move/copy concurrency plus bounded recursive directory copy, entry/byte limits, denied descendants, destination containment, and temporary-tree cleanup |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |

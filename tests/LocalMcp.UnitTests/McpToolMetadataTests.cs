@@ -54,6 +54,14 @@ public sealed class McpToolMetadataTests
     }
 
     [Fact]
+    public void FsCopy_DescriptionRequiresUserConfirmation()
+    {
+        var description = GetToolMethod("fs_copy").GetCustomAttribute<DescriptionAttribute>();
+        Assert.NotNull(description);
+        Assert.Contains("Ask the user for confirmation", description!.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void FsDelete_DescriptionRequiresUserConfirmation()
     {
         var description = GetToolMethod("fs_delete").GetCustomAttribute<DescriptionAttribute>();
@@ -221,7 +229,10 @@ public sealed class McpToolMetadataTests
         Assert.Contains("destination", names);
         Assert.Contains("overwrite", names);
         Assert.Contains("expectedSourceSha256", names);
-        Assert.Equal(5, names.Count);
+        Assert.Contains("recursive", names);
+        Assert.Contains("maxEntries", names);
+        Assert.Contains("maxTotalBytes", names);
+        Assert.Equal(8, names.Count);
     }
 
     [Fact]

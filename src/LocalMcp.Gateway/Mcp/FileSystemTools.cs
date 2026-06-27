@@ -383,13 +383,16 @@ public sealed class FileSystemTools
         return await DispatchAsync<MoveResult>(command, "fs_move", deviceId, cancellationToken);
     }
 
-    [McpServerTool(Name = "fs_copy", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Copies a file to a new location on a target Windows agent device. Directories are not supported in Phase One. The source must be within AllowedRoots. The destination must be within WritableRoots. The copy is performed via a temporary file with a durable flush before atomic rename. Requires files:write scope. Ask the user for confirmation before executing.")]
+    [McpServerTool(Name = "fs_copy", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Copies a file or a bounded directory tree to a new location on a target Windows agent device. Directory copy requires recursive=true, rejects merge and overwrite, and enforces entry and byte limits. The source must be within AllowedRoots and the destination within WritableRoots. Requires files:write scope. Ask the user for confirmation before executing.")]
     public async Task<CallToolResult> CopyAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
-        [Description("The absolute path of the source file to copy")] string path,
+        [Description("The absolute path of the source file or directory to copy")] string path,
         [Description("The absolute path of the copy destination")] string destination,
-        [Description("Whether to overwrite the destination file if it already exists (default: false)")] bool overwrite = false,
-        [Description("Optional SHA-256 hex digest of the source file. If provided, the copy is aborted when the actual hash does not match (concurrency guard).")] string? expectedSourceSha256 = null)
+        [Description("Whether to overwrite an existing destination file (default: false). Directory merge and overwrite are not supported.")] bool overwrite = false,
+        [Description("Optional SHA-256 hex digest of the source file. Not supported for directory sources.")] string? expectedSourceSha256 = null,
+        [Description("Whether to recursively include directory contents (default: false)")] bool recursive = false,
+        [Description("Maximum number of descendant entries (default: 1000, hard limit: 5000)")] int maxEntries = 1000,
+        [Description("Maximum total bytes to transfer (default: 104857600, hard limit: 1073741824)")] long maxTotalBytes = 104857600)
     {
         if (!await AuthorizeScopeAsync("FilesWritePolicy"))
             return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
@@ -403,6 +406,12 @@ public sealed class FileSystemTools
         if (string.IsNullOrWhiteSpace(destination))
             return CreateErrorResult("INVALID_REQUEST", "destination parameter is required.");
 
+        if (maxEntries < 1 || maxEntries > 5000)
+            return CreateErrorResult("INVALID_REQUEST", "maxEntries must be between 1 and 5000.");
+
+        if (maxTotalBytes < 1 || maxTotalBytes > 1073741824)
+            return CreateErrorResult("INVALID_REQUEST", "maxTotalBytes must be between 1 and 1073741824.");
+
         var command = new CopyCommand
         {
             CommandId = Guid.NewGuid(),
@@ -411,7 +420,10 @@ public sealed class FileSystemTools
             Path = path,
             Destination = destination,
             Overwrite = overwrite,
-            ExpectedSourceSha256 = string.IsNullOrWhiteSpace(expectedSourceSha256) ? null : expectedSourceSha256
+            ExpectedSourceSha256 = string.IsNullOrWhiteSpace(expectedSourceSha256) ? null : expectedSourceSha256,
+            Recursive = recursive,
+            MaxEntries = maxEntries,
+            MaxTotalBytes = maxTotalBytes
         };
 
         var cancellationToken = GetCancellationToken();

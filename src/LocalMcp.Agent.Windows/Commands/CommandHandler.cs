@@ -12,15 +12,30 @@ public sealed class CommandHandler
 {
     private readonly IPathPolicy _pathPolicy;
     private readonly IFileSystemExecutor _fileSystemExecutor;
+    private readonly IDirectoryCopyExecutor _directoryCopyExecutor;
     private readonly ILogger<CommandHandler> _logger;
 
     public CommandHandler(
         IPathPolicy pathPolicy,
         IFileSystemExecutor fileSystemExecutor,
         ILogger<CommandHandler> logger)
+        : this(
+            pathPolicy,
+            fileSystemExecutor,
+            new FileCopyFallbackExecutor(fileSystemExecutor),
+            logger)
+    {
+    }
+
+    public CommandHandler(
+        IPathPolicy pathPolicy,
+        IFileSystemExecutor fileSystemExecutor,
+        IDirectoryCopyExecutor directoryCopyExecutor,
+        ILogger<CommandHandler> logger)
     {
         _pathPolicy = pathPolicy;
         _fileSystemExecutor = fileSystemExecutor;
+        _directoryCopyExecutor = directoryCopyExecutor;
         _logger = logger;
     }
 
@@ -530,11 +545,14 @@ public sealed class CommandHandler
         CopyCommand command,
         CancellationToken cancellationToken)
     {
-        var result = await _fileSystemExecutor.CopyAsync(
+        var result = await _directoryCopyExecutor.ExecuteAsync(
             command.Path,
             command.Destination,
             command.Overwrite,
             command.ExpectedSourceSha256,
+            command.Recursive,
+            command.MaxEntries,
+            command.MaxTotalBytes,
             command.CommandId,
             cancellationToken
         );
@@ -556,6 +574,50 @@ public sealed class CommandHandler
             Success = true,
             Data = dataJson
         };
+    }
+
+    private sealed class FileCopyFallbackExecutor : IDirectoryCopyExecutor
+    {
+        private readonly IFileSystemExecutor _executor;
+
+        public FileCopyFallbackExecutor(IFileSystemExecutor executor)
+        {
+            _executor = executor;
+        }
+
+        public Task<CommandResult<CopyResult>> ExecuteAsync(
+            string sourcePath,
+            string destinationPath,
+            bool overwrite,
+            string? expectedSourceSha256,
+            bool recursive,
+            int maxEntries,
+            long maxTotalBytes,
+            Guid commandId,
+            CancellationToken cancellationToken)
+        {
+            if (Directory.Exists(sourcePath))
+            {
+                return Task.FromResult(new CommandResult<CopyResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.InvalidRequest, "Directory copy executor is unavailable.")
+                });
+            }
+
+            _ = recursive;
+            _ = maxEntries;
+
+            return _executor.CopyAsync(
+                sourcePath,
+                destinationPath,
+                overwrite,
+                expectedSourceSha256,
+                maxTotalBytes,
+                commandId,
+                cancellationToken);
+        }
     }
 
     private async Task<CommandResult<JsonElement>> HandleDeleteAsync(

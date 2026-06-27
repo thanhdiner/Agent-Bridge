@@ -77,6 +77,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IPathPolicy, PathPolicy>();
         services.AddSingleton<IFileSystemExecutor, FileSystemExecutor>();
+        services.AddSingleton<IDirectoryCopyExecutor, DirectoryCopyExecutor>();
         services.AddSingleton<CommandHandler>();
         services.AddSingleton<GatewayConnection>();
 

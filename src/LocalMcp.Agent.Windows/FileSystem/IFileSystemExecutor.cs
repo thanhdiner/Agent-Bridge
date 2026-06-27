@@ -92,6 +92,16 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<CopyResult>> CopyAsync(
+        string sourcePath,
+        string destinationPath,
+        bool overwrite,
+        string? expectedSourceSha256,
+        long maxTotalBytes,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<DeleteResult>> DeleteAsync(
         string path,
         string? expectedSha256,
