@@ -1,6 +1,9 @@
 using System.ComponentModel;
 using System.Text.Json;
+using System.Security.Claims;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using LocalMcp.Contracts.Commands;
@@ -14,20 +17,32 @@ namespace LocalMcp.Gateway.Mcp;
 public sealed class FileSystemTools
 {
     private readonly ICommandDispatcher _dispatcher;
+    private readonly IAuthorizationService _authorizationService;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly ILogger<FileSystemTools> _logger;
 
-    public FileSystemTools(ICommandDispatcher dispatcher, ILogger<FileSystemTools> logger)
+    public FileSystemTools(
+        ICommandDispatcher dispatcher,
+        IAuthorizationService authorizationService,
+        ILogger<FileSystemTools> logger,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _dispatcher = dispatcher;
+        _authorizationService = authorizationService;
         _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
     }
 
-    [McpServerTool(Name = "fs_read", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Reads the content of a file on a target Windows agent device.")]
+    [McpServerTool(Name = "fs_read", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Reads the content of a file on a target Windows agent device. Requires files:read scope.")]
     public async Task<CallToolResult> ReadFileAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
-        [Description("The absolute path of the file to read")] string path,
-        CancellationToken cancellationToken)
+        [Description("The absolute path of the file to read")] string path)
     {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        }
+
         if (string.IsNullOrWhiteSpace(deviceId))
             return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
@@ -42,18 +57,22 @@ public sealed class FileSystemTools
             Path = path
         };
 
+        var cancellationToken = GetCancellationToken();
         return await DispatchAsync<ReadFileResult>(command, "fs_read", deviceId, cancellationToken);
     }
 
-    [McpServerTool(Name = "fs_tree", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Returns a bounded directory tree for a path inside an allowed root.")]
+    [McpServerTool(Name = "fs_tree", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Returns a bounded directory tree for a path inside an allowed root. Requires files:read scope.")]
     public async Task<CallToolResult> GetTreeAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("The absolute path of the root directory of the tree")] string path,
         [Description("The maximum depth of the tree (default: 4, hard limit: 10)")] int maxDepth = 4,
-        [Description("The maximum number of entries to return (default: 1000, hard limit: 5000)")] int maxEntries = 1000,
-        [Description("Whether to include hidden files/folders (default: false)")] bool includeHidden = false,
-        CancellationToken cancellationToken = default)
+        [Description("The maximum number of entries to return (default: 1000, hard limit: 5000)")] int maxEntries = 1000)
     {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        }
+
         if (string.IsNullOrWhiteSpace(deviceId))
             return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
@@ -74,24 +93,32 @@ public sealed class FileSystemTools
             Path = path,
             MaxDepth = maxDepth,
             MaxEntries = maxEntries,
-            IncludeHidden = includeHidden
+            IncludeHidden = false
         };
 
+        var cancellationToken = GetCancellationToken();
         return await DispatchAsync<TreeResult>(command, "fs_tree", deviceId, cancellationToken);
     }
 
-    [McpServerTool(Name = "fs_list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Lists the immediate contents of a directory on a target Windows agent device.")]
+    [McpServerTool(Name = "fs_list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Lists the immediate contents of a directory on a target Windows agent device. Requires files:read scope.")]
     public async Task<CallToolResult> ListDirectoryAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("The absolute path of the directory to list")] string path,
-        [Description("Whether to include hidden files/folders (default: false)")] bool includeHidden = false,
-        CancellationToken cancellationToken = default)
+        [Description("The maximum number of entries to return (default: 1000, hard limit: 5000)")] int maxEntries = 1000)
     {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        }
+
         if (string.IsNullOrWhiteSpace(deviceId))
             return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
         if (string.IsNullOrWhiteSpace(path))
             return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        if (maxEntries < 1 || maxEntries > 5000)
+            return CreateErrorResult("INVALID_REQUEST", "maxEntries must be between 1 and 5000.");
 
         var command = new ListDirectoryCommand
         {
@@ -99,24 +126,26 @@ public sealed class FileSystemTools
             DeviceId = deviceId,
             CreatedAt = DateTimeOffset.UtcNow,
             Path = path,
-            IncludeHidden = includeHidden
+            MaxEntries = maxEntries
         };
 
+        var cancellationToken = GetCancellationToken();
         return await DispatchAsync<ListDirectoryResult>(command, "fs_list", deviceId, cancellationToken);
     }
 
-    [McpServerTool(Name = "fs_search", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Recursively searches for files matching a pattern or query in a directory on a target Windows agent device.")]
+    [McpServerTool(Name = "fs_search", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Recursively searches for files matching a pattern or query in a directory on a target Windows agent device. Requires files:read scope.")]
     public async Task<CallToolResult> SearchFilesAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("The absolute path of the directory to search in")] string path,
         [Description("The search query (filename or content search)")] string query,
-        [Description("The search mode: 'name' or 'content'")] string mode,
-        [Description("Optional glob pattern to filter files (e.g. *.cs)")] string? filePattern = null,
-        [Description("Whether the search is case sensitive (default: false)")] bool caseSensitive = false,
         [Description("Maximum results to return (default: 100, hard limit: 500)")] int maxResults = 100,
-        [Description("Maximum size in bytes of files to search in content mode (default: 1MB)")] long maxFileBytes = 1048576,
-        CancellationToken cancellationToken = default)
+        [Description("Maximum depth to search (default: 4, hard limit: 10)")] int maxDepth = 4)
     {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        }
+
         if (string.IsNullOrWhiteSpace(deviceId))
             return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
@@ -126,15 +155,11 @@ public sealed class FileSystemTools
         if (string.IsNullOrEmpty(query))
             return CreateErrorResult("SEARCH_QUERY_REQUIRED", "Search query is required.");
 
-        if (string.IsNullOrWhiteSpace(mode) ||
-            (!string.Equals(mode, "name", StringComparison.OrdinalIgnoreCase) &&
-             !string.Equals(mode, "content", StringComparison.OrdinalIgnoreCase)))
-        {
-            return CreateErrorResult("INVALID_SEARCH_MODE", "Invalid search mode. Supported modes are 'name' or 'content'.");
-        }
-
         if (maxResults < 1 || maxResults > 500)
             return CreateErrorResult("INVALID_REQUEST", "maxResults must be between 1 and 500.");
+
+        if (maxDepth < 1 || maxDepth > 10)
+            return CreateErrorResult("INVALID_REQUEST", "maxDepth must be between 1 and 10.");
 
         var command = new SearchFilesCommand
         {
@@ -143,25 +168,105 @@ public sealed class FileSystemTools
             CreatedAt = DateTimeOffset.UtcNow,
             Path = path,
             Query = query,
-            Mode = mode,
-            FilePattern = filePattern,
-            CaseSensitive = caseSensitive,
             MaxResults = maxResults,
-            MaxFileBytes = maxFileBytes
+            MaxDepth = maxDepth
         };
 
+        var cancellationToken = GetCancellationToken();
         return await DispatchAsync<SearchFilesResult>(command, "fs_search", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_write", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Creates a new UTF-8 text file or replaces the complete content of an existing text file on a target Windows agent device. Requires files:write scope. Safe workflow: (1) Call fs_read first; (2) Inspect content; (3) Pass returned sha256 as expectedSha256; (4) Call fs_write. Re-read on conflict.")]
+    public async Task<CallToolResult> WriteFileAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the file to write")] string path,
+        [Description("The text content to write to the file")] string content,
+        [Description("The expected SHA-256 hash of the existing file. Required if the file already exists.")] string? expectedSha256 = null,
+        [Description("Whether to create the file if it does not exist (default: false)")] bool createIfMissing = false)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        if (content == null)
+            return CreateErrorResult("INVALID_REQUEST", "content parameter is required.");
+
+        var command = new WriteFileCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            Content = content,
+            ExpectedSha256 = expectedSha256,
+            CreateIfMissing = createIfMissing
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<WriteFileResult>(command, "fs_write", deviceId, cancellationToken);
+    }
+
+    [McpServerTool(Name = "fs_patch", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Applies one or more exact text replacements to an existing UTF-8 text file on a target Windows agent device. Requires files:write scope. Safe workflow: (1) Call fs_read first; (2) Inspect content; (3) Pass returned sha256 as expectedSha256; (4) Call fs_patch. Re-read on conflict.")]
+    public async Task<CallToolResult> PatchFileAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the file to patch")] string path,
+        [Description("The expected SHA-256 hash of the current file content")] string expectedSha256,
+        [Description("The list of exact text replacements to apply")] List<PatchEdit> edits)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        if (string.IsNullOrEmpty(expectedSha256))
+            return CreateErrorResult("EXPECTED_HASH_REQUIRED", "expectedSha256 parameter is required.");
+
+        if (edits == null || edits.Count == 0)
+            return CreateErrorResult("PATCH_EDITS_REQUIRED", "edits parameter is required and cannot be empty.");
+
+        var command = new PatchFileCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            ExpectedSha256 = expectedSha256,
+            Edits = edits
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<PatchFileResult>(command, "fs_patch", deviceId, cancellationToken);
+    }
+
     // ──────────────────────────────────────────────
-    // Private transport helpers
+    // Private transport and auth helpers
     // ──────────────────────────────────────────────
 
-    /// <summary>
-    /// Dispatches a command to the agent, awaits the result, and returns a <see cref="CallToolResult"/>.
-    /// Centralises: dispatch, timeout propagation, structured error conversion, success mapping, and logging.
-    /// Each tool method remains responsible for input validation and command construction.
-    /// </summary>
+    private async Task<bool> AuthorizeScopeAsync(string policyName)
+    {
+        var principal = _httpContextAccessor?.HttpContext?.User ?? new ClaimsPrincipal(new ClaimsIdentity());
+        var authResult = await _authorizationService.AuthorizeAsync(principal, null, policyName);
+        return authResult.Succeeded;
+    }
+
+    private CancellationToken GetCancellationToken()
+    {
+        return _httpContextAccessor?.HttpContext?.RequestAborted ?? CancellationToken.None;
+    }
+
     private async Task<CallToolResult> DispatchAsync<TResult>(
         AgentCommand command,
         string toolName,

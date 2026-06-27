@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using ModelContextProtocol.Server;
 using LocalMcp.Gateway.Mcp;
@@ -6,50 +5,147 @@ using Xunit;
 
 namespace LocalMcp.UnitTests;
 
+/// <summary>
+/// Validates that MCP tool annotations and public parameter schemas match the
+/// agreed contract. No tool may expose internal types (CancellationToken,
+/// HttpContext, ClaimsPrincipal, IServiceProvider, requestContext).
+/// </summary>
 public sealed class McpToolMetadataTests
 {
-    [Theory]
-    [InlineData("fs_read", true, false)]
-    [InlineData("fs_tree", true, false)]
-    [InlineData("fs_list", true, false)]
-    [InlineData("fs_search", true, false)]
-    public void McpTools_ShouldHaveCorrectMetadata(string toolName, bool expectedReadOnly, bool expectedDestructive)
-    {
-        var methods = typeof(FileSystemTools).GetMethods(BindingFlags.Public | BindingFlags.Instance);
-        var method = methods.FirstOrDefault(m => m.GetCustomAttribute<McpServerToolAttribute>()?.Name == toolName);
+    private static readonly Type ToolsType = typeof(FileSystemTools);
 
+    private static MethodInfo GetToolMethod(string toolName)
+    {
+        var method = ToolsType.GetMethods()
+            .FirstOrDefault(m => m.GetCustomAttribute<McpServerToolAttribute>()?.Name == toolName);
         Assert.NotNull(method);
-        var attr = method.GetCustomAttribute<McpServerToolAttribute>();
+        return method!;
+    }
+
+    // ── Metadata / Annotation Assertions ─────────────────────────────────────
+
+    [Theory]
+    [InlineData("fs_read", true, false, true, false)]
+    [InlineData("fs_list", true, false, true, false)]
+    [InlineData("fs_tree", true, false, true, false)]
+    [InlineData("fs_search", true, false, true, false)]
+    [InlineData("fs_write", false, true, false, false)]
+    [InlineData("fs_patch", false, true, false, false)]
+    public void ValidateToolAnnotations(
+        string toolName,
+        bool expectReadOnly,
+        bool expectDestructive,
+        bool expectIdempotent,
+        bool expectOpenWorld)
+    {
+        var attr = GetToolMethod(toolName).GetCustomAttribute<McpServerToolAttribute>();
         Assert.NotNull(attr);
-        Assert.Equal(expectedReadOnly, attr.ReadOnly);
-        Assert.Equal(expectedDestructive, attr.Destructive);
+        Assert.Equal(expectReadOnly, attr!.ReadOnly);
+        Assert.Equal(expectDestructive, attr.Destructive);
+        Assert.Equal(expectIdempotent, attr.Idempotent);
+        Assert.Equal(expectOpenWorld, attr.OpenWorld);
+    }
+
+    // ── Schema / Parameter Assertions ────────────────────────────────────────
+
+    private static IEnumerable<string> GetParamNames(string toolName) =>
+        GetToolMethod(toolName)
+            .GetParameters()
+            .Select(p => p.Name!);
+
+    private static readonly HashSet<string> ForbiddenParamTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CancellationToken",
+        "HttpContext",
+        "DefaultHttpContext",
+        "ClaimsPrincipal",
+        "ClaimsIdentity",
+        "IServiceProvider",
+        "IHttpContextAccessor",
+        "Object",   // catches object? requestContext
+    };
+
+    private void AssertNoInternalParams(string toolName)
+    {
+        var method = GetToolMethod(toolName);
+        foreach (var p in method.GetParameters())
+        {
+            var typeName = p.ParameterType.Name;
+            Assert.False(
+                ForbiddenParamTypes.Contains(typeName),
+                $"Tool '{toolName}' exposes internal parameter '{p.Name}' of type '{typeName}'");
+        }
+    }
+
+    [Fact] public void FsRead_NoInternalParameters() => AssertNoInternalParams("fs_read");
+    [Fact] public void FsList_NoInternalParameters() => AssertNoInternalParams("fs_list");
+    [Fact] public void FsTree_NoInternalParameters() => AssertNoInternalParams("fs_tree");
+    [Fact] public void FsSearch_NoInternalParameters() => AssertNoInternalParams("fs_search");
+    [Fact] public void FsWrite_NoInternalParameters() => AssertNoInternalParams("fs_write");
+    [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
+
+    [Fact]
+    public void FsRead_HasExactSchema()
+    {
+        var names = GetParamNames("fs_read").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Equal(2, names.Count);
     }
 
     [Fact]
-    public void DumpMcpTypes()
+    public void FsList_HasExactSchema()
     {
-        var gwDir = Path.GetDirectoryName(typeof(FileSystemTools).Assembly.Location)!;
-        var mcpAssembly = Assembly.Load("ModelContextProtocol");
-        var mcpCoreAssembly = Assembly.Load("ModelContextProtocol.Core");
-        var mcpAspNetAssembly = Assembly.Load("ModelContextProtocol.AspNetCore");
+        var names = GetParamNames("fs_list").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("maxEntries", names);
+        Assert.Equal(3, names.Count);
+    }
 
-        var sb = new System.Text.StringBuilder();
-        foreach (var ass in new[] { mcpAssembly, mcpCoreAssembly, mcpAspNetAssembly })
-        {
-            sb.AppendLine($"=== ASSEMBLY: {ass.GetName().Name} ===");
-            foreach (var type in ass.GetTypes().Where(t => t.IsPublic))
-            {
-                sb.AppendLine($"Type: {type.FullName}");
-                foreach (var prop in type.GetProperties())
-                {
-                    sb.AppendLine($"  Prop: {prop.PropertyType.Name} {prop.Name}");
-                }
-                foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
-                {
-                    sb.AppendLine($"  Method: {method.ReturnType.Name} {method.Name}");
-                }
-            }
-        }
-        File.WriteAllText(Path.Combine(gwDir, "mcp_types_dump.txt"), sb.ToString());
+    [Fact]
+    public void FsTree_HasExactSchema()
+    {
+        var names = GetParamNames("fs_tree").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("maxDepth", names);
+        Assert.Contains("maxEntries", names);
+        Assert.Equal(4, names.Count);
+    }
+
+    [Fact]
+    public void FsSearch_HasExactSchema()
+    {
+        var names = GetParamNames("fs_search").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("query", names);
+        Assert.Contains("maxResults", names);
+        Assert.Contains("maxDepth", names);
+        Assert.Equal(5, names.Count);
+    }
+
+    [Fact]
+    public void FsWrite_HasExactSchema()
+    {
+        var names = GetParamNames("fs_write").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("content", names);
+        Assert.Contains("expectedSha256", names);
+        Assert.Contains("createIfMissing", names);
+        Assert.Equal(5, names.Count);
+    }
+
+    [Fact]
+    public void FsPatch_HasExactSchema()
+    {
+        var names = GetParamNames("fs_patch").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("expectedSha256", names);
+        Assert.Contains("edits", names);
+        Assert.Equal(4, names.Count);
     }
 }

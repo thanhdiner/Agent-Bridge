@@ -1,21 +1,38 @@
+using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using LocalMcp.Contracts.Results;
+using LocalMcp.Contracts.Commands;
 using LocalMcp.BuildingBlocks.Errors;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using LocalMcp.Agent.Windows.Security;
 
 namespace LocalMcp.Agent.Windows.FileSystem;
 
 public sealed class FileSystemExecutor : IFileSystemExecutor
 {
+    private static readonly Encoding StrictUtf8Encoding = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true
+    );
+
     private readonly IPathPolicy _pathPolicy;
+    private readonly FileAccessOptions _options;
     private readonly ILogger<FileSystemExecutor> _logger;
 
-    public FileSystemExecutor(IPathPolicy pathPolicy, ILogger<FileSystemExecutor> logger)
+    public FileSystemExecutor(
+        IPathPolicy pathPolicy,
+        IOptions<FileAccessOptions> options,
+        ILogger<FileSystemExecutor> logger)
     {
         _pathPolicy = pathPolicy;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -31,7 +48,6 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             var fileInfo = new FileInfo(path);
             var size = fileInfo.Length;
 
-            // 1. Asynchronously read all bytes using FileStream
             byte[] bytes;
             using (var fs = new FileStream(
                 path,
@@ -57,10 +73,8 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                 }
             }
 
-            // 2. Compute SHA-256
             var sha256Hash = ComputeSha256(bytes);
 
-            // 3. Binary detection (check for null bytes)
             if (IsBinary(bytes))
             {
                 _logger.LogWarning("File {Path} is detected as binary. Rejecting.", path);
@@ -72,8 +86,22 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                 };
             }
 
-            // 4. Handle UTF-8 and UTF-8 BOM
-            var (content, encoding) = DecodeText(bytes);
+            string content;
+            string encoding;
+            try
+            {
+                (content, encoding) = DecodeText(bytes);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "File {Path} contains invalid UTF-8 encoding.", path);
+                return new CommandResult<ReadFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.UnsupportedTextEncoding, "Unsupported text encoding.")
+                };
+            }
 
             return new CommandResult<ReadFileResult>
             {
@@ -208,21 +236,17 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                     return;
                 }
 
-                // 1. Skip reparse points (symlinks, junctions)
                 if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
                     continue;
                 }
 
-                // 2. Skip hidden if not includeHidden
                 if (!includeHidden && info.Attributes.HasFlag(FileAttributes.Hidden))
                 {
                     continue;
                 }
 
                 var isDir = info is DirectoryInfo;
-
-                // 3. Centralized PathPolicy validation
                 var error = _pathPolicy.Validate(info.FullName, out var normalizedPath, isDir);
                 if (error is not null)
                 {
@@ -269,11 +293,11 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
 
     public Task<CommandResult<ListDirectoryResult>> ListDirectoryAsync(
         string path,
-        bool includeHidden,
+        int maxEntries,
         Guid commandId,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Listing directory {Path} (includeHidden={IncludeHidden})", path, includeHidden);
+        _logger.LogInformation("Listing directory {Path} (maxEntries={MaxEntries})", path, maxEntries);
 
         try
         {
@@ -295,21 +319,22 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // 1. Skip reparse points
+                if (directoriesList.Count + filesList.Count >= maxEntries)
+                {
+                    break;
+                }
+
                 if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
                     continue;
                 }
 
-                // 2. Skip hidden if not includeHidden
-                if (!includeHidden && info.Attributes.HasFlag(FileAttributes.Hidden))
+                if (info.Attributes.HasFlag(FileAttributes.Hidden))
                 {
                     continue;
                 }
 
                 var isDir = info is DirectoryInfo;
-
-                // 3. Centralized PathPolicy validation
                 var error = _pathPolicy.Validate(info.FullName, out var normalizedPath, isDir);
                 if (error is not null)
                 {
@@ -337,7 +362,6 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                 }
             }
 
-            // Consistent sorting: alphabetical, directories first, then files
             var sortedDirs = directoriesList
                 .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -384,27 +408,12 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
     public Task<CommandResult<SearchFilesResult>> SearchFilesAsync(
         string path,
         string query,
-        string mode,
-        string? filePattern,
-        bool caseSensitive,
         int maxResults,
-        long maxFileBytes,
+        int maxDepth,
         Guid commandId,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Searching files in {Path} (query={Query}, mode={Mode}, pattern={Pattern})", path, query, mode, filePattern);
-
-        if (string.IsNullOrWhiteSpace(mode) ||
-            (!string.Equals(mode, "name", StringComparison.OrdinalIgnoreCase) &&
-             !string.Equals(mode, "content", StringComparison.OrdinalIgnoreCase)))
-        {
-            return Task.FromResult(new CommandResult<SearchFilesResult>
-            {
-                CommandId = commandId,
-                Success = false,
-                Error = new CommandError(ErrorCodes.InvalidSearchMode, "Invalid search mode. Supported modes are 'name' or 'content'.")
-            });
-        }
+        _logger.LogInformation("Searching files in {Path} (query={Query}, maxResults={MaxResults}, maxDepth={MaxDepth})", path, query, maxResults, maxDepth);
 
         if (string.IsNullOrEmpty(query))
         {
@@ -412,7 +421,7 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             {
                 CommandId = commandId,
                 Success = false,
-                Error = new CommandError(ErrorCodes.SearchQueryRequired, "Search query is required and cannot be empty.")
+                Error = new CommandError(ErrorCodes.SearchQueryRequired, "Search query is required.")
             });
         }
 
@@ -430,9 +439,7 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             }
 
             var matches = new List<SearchMatch>();
-            var searchPattern = string.IsNullOrWhiteSpace(filePattern) ? "*" : filePattern;
-
-            SearchRecursive(dirInfo, path, query, mode, searchPattern, caseSensitive, maxResults, maxFileBytes, matches, cancellationToken);
+            SearchRecursive(dirInfo, path, query, 1, maxDepth, maxResults, matches, cancellationToken);
 
             return Task.FromResult(new CommandResult<SearchFilesResult>
             {
@@ -469,69 +476,49 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         DirectoryInfo currentDir,
         string rootPath,
         string query,
-        string mode,
-        string searchPattern,
-        bool caseSensitive,
+        int currentDepth,
+        int maxDepth,
         int maxResults,
-        long maxFileBytes,
         List<SearchMatch> results,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         if (results.Count >= maxResults) return;
+        if (currentDepth > maxDepth) return;
 
-        // Skip reparse points
         if (currentDir.Attributes.HasFlag(FileAttributes.ReparsePoint)) return;
 
-        // Centralized PathPolicy validation for directory
         var dirError = _pathPolicy.Validate(currentDir.FullName, out var normalizedDir, isDirectory: true);
         if (dirError is not null) return;
 
         try
         {
-            foreach (var fileInfo in currentDir.EnumerateFiles(searchPattern))
+            foreach (var fileInfo in currentDir.EnumerateFiles())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (results.Count >= maxResults) return;
 
-                // Skip reparse points
                 if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
 
-                // Centralized PathPolicy validation for file
                 var fileError = _pathPolicy.Validate(fileInfo.FullName, out var normalizedFile, isDirectory: false);
                 if (fileError is not null) continue;
 
-                // Check file size limit
-                if (fileInfo.Length > maxFileBytes) continue;
-
                 var relativePath = Path.GetRelativePath(rootPath, normalizedFile);
 
-                if (string.Equals(mode, "name", StringComparison.OrdinalIgnoreCase))
+                if (fileInfo.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    relativePath.Contains(query, StringComparison.OrdinalIgnoreCase))
                 {
-                    bool isMatch;
-                    if (caseSensitive)
+                    results.Add(new SearchMatch
                     {
-                        isMatch = fileInfo.Name.Contains(query) || relativePath.Contains(query);
-                    }
-                    else
-                    {
-                        isMatch = fileInfo.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || relativePath.Contains(query, StringComparison.OrdinalIgnoreCase);
-                    }
-
-                    if (isMatch)
-                    {
-                        results.Add(new SearchMatch
-                        {
-                            RelativePath = relativePath,
-                            FullPath = normalizedFile,
-                            MatchType = "name"
-                        });
-                    }
+                        RelativePath = relativePath,
+                        FullPath = normalizedFile,
+                        MatchType = "name"
+                    });
                 }
-                else if (string.Equals(mode, "content", StringComparison.OrdinalIgnoreCase))
+                else
                 {
-                    SearchInFileContent(normalizedFile, query, caseSensitive, maxFileBytes, maxResults, relativePath, results, cancellationToken);
+                    SearchInFileContent(normalizedFile, query, 1048576, maxResults, relativePath, results, cancellationToken);
                 }
             }
         }
@@ -544,7 +531,7 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             foreach (var subDir in currentDir.EnumerateDirectories())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                SearchRecursive(subDir, rootPath, query, mode, searchPattern, caseSensitive, maxResults, maxFileBytes, results, cancellationToken);
+                SearchRecursive(subDir, rootPath, query, currentDepth + 1, maxDepth, maxResults, results, cancellationToken);
             }
         }
         catch (UnauthorizedAccessException) { }
@@ -555,18 +542,15 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
     private void SearchInFileContent(
         string fullPath,
         string query,
-        bool caseSensitive,
         long maxFileBytes,
         int maxResults,
         string relativePath,
         List<SearchMatch> results,
         CancellationToken cancellationToken)
     {
-        // Double check size
         var info = new FileInfo(fullPath);
         if (info.Length > maxFileBytes) return;
 
-        // Read first scan block to detect if it's binary
         try
         {
             using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -576,19 +560,19 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                 int bytesRead = fs.Read(buffer, 0, len);
                 if (IsBinary(buffer))
                 {
-                    return; // Skip binary files
+                    return;
                 }
             }
         }
         catch
         {
-            return; // Skip read issues
+            return;
         }
 
-        // Scan line-by-line
         try
         {
-            using (var reader = new StreamReader(fullPath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            using (var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var reader = new StreamReader(fs, StrictUtf8Encoding, detectEncodingFromByteOrderMarks: true))
             {
                 int lineNumber = 0;
                 string? line;
@@ -598,17 +582,7 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                     if (results.Count >= maxResults) return;
 
                     lineNumber++;
-                    bool isMatch;
-                    if (caseSensitive)
-                    {
-                        isMatch = line.Contains(query);
-                    }
-                    else
-                    {
-                        isMatch = line.Contains(query, StringComparison.OrdinalIgnoreCase);
-                    }
-
-                    if (isMatch)
+                    if (line.Contains(query, StringComparison.OrdinalIgnoreCase))
                     {
                         var preview = line.Trim();
                         if (preview.Length > 200)
@@ -630,7 +604,477 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         }
         catch
         {
-            // Skip read failures
+            // Skip invalid text file
+        }
+    }
+
+    public async Task<CommandResult<WriteFileResult>> WriteFileAsync(
+        string path,
+        string content,
+        string? expectedSha256,
+        bool createIfMissing,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Writing file {Path} for command {CommandId}", path, commandId);
+
+        string? previousSha256 = null;
+        bool created;
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                byte[] currentBytes = await File.ReadAllBytesAsync(path, cancellationToken);
+                if (IsBinary(currentBytes))
+                {
+                    return new CommandResult<WriteFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.BinaryFileNotSupported, "Binary files are not supported.")
+                    };
+                }
+
+                var currentHash = ComputeSha256(currentBytes);
+                if (string.IsNullOrEmpty(expectedSha256))
+                {
+                    return new CommandResult<WriteFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.ExpectedHashRequired, "expectedSha256 is required for modifying an existing file.")
+                    };
+                }
+                if (!string.Equals(currentHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new CommandResult<WriteFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.FileConflict, "File conflict detected.")
+                    };
+                }
+
+                previousSha256 = currentHash;
+                created = false;
+            }
+            else
+            {
+                if (!createIfMissing)
+                {
+                    return new CommandResult<WriteFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.FileNotFound, "The target file does not exist.")
+                    };
+                }
+                if (!string.IsNullOrEmpty(expectedSha256))
+                {
+                    return new CommandResult<WriteFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.InvalidRequest, "expectedSha256 must be null or empty when creating a new file.")
+                    };
+                }
+                created = true;
+            }
+
+            var writeBytes = StrictUtf8Encoding.GetBytes(content);
+            if (writeBytes.Length > _options.MaxWriteBytes)
+            {
+                return new CommandResult<WriteFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileTooLarge, "The content size exceeds the maximum allowed write limit.")
+                };
+            }
+
+            var dir = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                return new CommandResult<WriteFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotFound, "The target directory was not found.")
+                };
+            }
+
+            var tempPath = Path.Combine(dir, $".tmp_{Guid.NewGuid():N}");
+            try
+            {
+                using (var fs = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+                {
+                    await fs.WriteAsync(writeBytes.AsMemory(0, writeBytes.Length), cancellationToken);
+                    fs.Flush(flushToDisk: true);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (created)
+                {
+                    if (File.Exists(path))
+                    {
+                        return new CommandResult<WriteFileResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.FileAlreadyExists, "The file already exists.")
+                        };
+                    }
+                    File.Move(tempPath, path);
+                }
+                else
+                {
+                    // Revalidate target state immediately before replacement
+                    byte[] currentBytesCheck = await File.ReadAllBytesAsync(path, cancellationToken);
+                    var currentHashCheck = ComputeSha256(currentBytesCheck);
+                    if (!string.Equals(currentHashCheck, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new CommandResult<WriteFileResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.FileConflict, "File conflict detected.")
+                        };
+                    }
+
+                    File.Move(tempPath, path, overwrite: true);
+                }
+            }
+            catch (IOException ex)
+            {
+                _logger.LogError(ex, "IOException during atomic write replacement.");
+                if (created && File.Exists(path))
+                {
+                    return new CommandResult<WriteFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.FileAlreadyExists, "The file already exists.")
+                    };
+                }
+                return new CommandResult<WriteFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AtomicReplaceFailed, "Atomic write replacement failed.")
+                };
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { }
+                }
+            }
+
+            var finalBytes = await File.ReadAllBytesAsync(path, cancellationToken);
+            var finalHash = ComputeSha256(finalBytes);
+            var fileInfo = new FileInfo(path);
+
+            return new CommandResult<WriteFileResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new WriteFileResult
+                {
+                    Path = path,
+                    Created = created,
+                    BytesWritten = writeBytes.Length,
+                    PreviousSha256 = previousSha256,
+                    Sha256 = finalHash,
+                    Encoding = "utf-8",
+                    LastWriteTimeUtc = fileInfo.LastWriteTimeUtc
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("File write was cancelled for command {CommandId}", commandId);
+            return new CommandResult<WriteFileResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The file write operation was cancelled.")
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write file {Path} for command {CommandId}", path, commandId);
+            return new CommandResult<WriteFileResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An error occurred while writing the file.")
+            };
+        }
+    }
+
+    public async Task<CommandResult<PatchFileResult>> PatchFileAsync(
+        string path,
+        string expectedSha256,
+        List<PatchEdit> edits,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Patching file {Path} for command {CommandId}", path, commandId);
+
+        if (edits == null || edits.Count == 0)
+        {
+            return new CommandResult<PatchFileResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.PatchEditsRequired, "At least one patch edit is required.")
+            };
+        }
+
+        string tempPath = string.Empty;
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileNotFound, "The target file does not exist.")
+                };
+            }
+
+            var currentBytes = await File.ReadAllBytesAsync(path, cancellationToken);
+            if (IsBinary(currentBytes))
+            {
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.BinaryFileNotSupported, "Binary files are not supported.")
+                };
+            }
+
+            string originalText;
+            try
+            {
+                (originalText, _) = DecodeText(currentBytes);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Target file {Path} contains invalid UTF-8 encoding during patch.", path);
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.UnsupportedTextEncoding, "Unsupported text encoding.")
+                };
+            }
+
+            var currentHash = ComputeSha256(currentBytes);
+            if (string.IsNullOrEmpty(expectedSha256))
+            {
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.ExpectedHashRequired, "expectedSha256 is required for modifying an existing file.")
+                };
+            }
+            if (!string.Equals(currentHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileConflict, "File conflict detected.")
+                };
+            }
+
+            var allSpans = new List<EditSpan>();
+            foreach (var edit in edits)
+            {
+                if (string.IsNullOrEmpty(edit.OldText))
+                {
+                    return new CommandResult<PatchFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.InvalidRequest, "OldText in patch edit cannot be empty.")
+                    };
+                }
+
+                var matches = new List<int>();
+                int index = 0;
+                while ((index = originalText.IndexOf(edit.OldText, index, StringComparison.Ordinal)) != -1)
+                {
+                    matches.Add(index);
+                    index += edit.OldText.Length;
+                }
+
+                if (matches.Count == 0)
+                {
+                    return new CommandResult<PatchFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.PatchTargetNotFound, "Target text was not found in the file.")
+                    };
+                }
+
+                if (!edit.ReplaceAll && matches.Count > 1)
+                {
+                    return new CommandResult<PatchFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.PatchTargetAmbiguous, "Target text has multiple occurrences in the file.")
+                    };
+                }
+
+                foreach (var match in matches)
+                {
+                    allSpans.Add(new EditSpan
+                    {
+                        Start = match,
+                        End = match + edit.OldText.Length,
+                        NewText = edit.NewText
+                    });
+                }
+            }
+
+            for (int i = 0; i < allSpans.Count; i++)
+            {
+                for (int j = i + 1; j < allSpans.Count; j++)
+                {
+                    var s1 = allSpans[i];
+                    var s2 = allSpans[j];
+                    if (s1.Start < s2.End && s2.Start < s1.End)
+                    {
+                        return new CommandResult<PatchFileResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.PatchEditsOverlap, "The requested patch edits contain overlapping target spans.")
+                        };
+                    }
+                }
+            }
+
+            var sb = new StringBuilder(originalText);
+            foreach (var span in allSpans.OrderByDescending(s => s.Start))
+            {
+                sb.Remove(span.Start, span.End - span.Start);
+                sb.Insert(span.Start, span.NewText);
+            }
+            var updatedText = sb.ToString();
+
+            var writeBytes = StrictUtf8Encoding.GetBytes(updatedText);
+            if (writeBytes.Length > _options.MaxWriteBytes)
+            {
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileTooLarge, "The patched content size exceeds the maximum allowed write limit.")
+                };
+            }
+
+            var dir = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotFound, "The target directory was not found.")
+                };
+            }
+
+            tempPath = Path.Combine(dir, $".tmp_{Guid.NewGuid():N}");
+
+            using (var fs = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+            {
+                await fs.WriteAsync(writeBytes.AsMemory(0, writeBytes.Length), cancellationToken);
+                fs.Flush(flushToDisk: true);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Revalidate target state immediately before replacement
+            byte[] currentBytesCheck = await File.ReadAllBytesAsync(path, cancellationToken);
+            var currentHashCheck = ComputeSha256(currentBytesCheck);
+            if (!string.Equals(currentHashCheck, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CommandResult<PatchFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileConflict, "File conflict detected.")
+                };
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+
+            var finalBytes = await File.ReadAllBytesAsync(path, cancellationToken);
+            var finalHash = ComputeSha256(finalBytes);
+            var fileInfo = new FileInfo(path);
+
+            return new CommandResult<PatchFileResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new PatchFileResult
+                {
+                    Path = path,
+                    EditsApplied = edits.Count,
+                    ReplacementsMade = allSpans.Count,
+                    BytesWritten = writeBytes.Length,
+                    PreviousSha256 = currentHash,
+                    Sha256 = finalHash,
+                    LastWriteTimeUtc = fileInfo.LastWriteTimeUtc
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("File patch was cancelled for command {CommandId}", commandId);
+            return new CommandResult<PatchFileResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The file patch operation was cancelled.")
+            };
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex, "IOException during atomic patch replacement.");
+            return new CommandResult<PatchFileResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AtomicReplaceFailed, "Atomic patch replacement failed.")
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to patch file {Path} for command {CommandId}", path, commandId);
+            return new CommandResult<PatchFileResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An error occurred while patching the file.")
+            };
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
         }
     }
 
@@ -657,11 +1101,18 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
     {
         if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
         {
-            var content = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+            var content = StrictUtf8Encoding.GetString(bytes, 3, bytes.Length - 3);
             return (content, "utf-8-bom");
         }
 
-        var text = Encoding.UTF8.GetString(bytes);
+        var text = StrictUtf8Encoding.GetString(bytes);
         return (text, "utf-8");
+    }
+
+    private sealed class EditSpan
+    {
+        public int Start { get; set; }
+        public int End { get; set; }
+        public string NewText { get; set; } = string.Empty;
     }
 }

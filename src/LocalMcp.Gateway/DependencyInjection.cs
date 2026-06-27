@@ -1,4 +1,4 @@
-using LocalMcp.Gateway.Connections;
+﻿using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Commands;
 using LocalMcp.Gateway.Security;
 using Microsoft.Extensions.Configuration;
@@ -15,152 +15,178 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddGatewayServices(this IServiceCollection services, IConfiguration? configuration = null)
     {
+        services.AddHttpContextAccessor();
         services.AddSingleton<IAgentConnectionRegistry, InMemoryAgentConnectionRegistry>();
         services.AddSingleton<ICommandDispatcher, SignalRCommandDispatcher>();
 
-        if (configuration is not null)
-        {
-            // 1. Bind options
-            var securitySection = configuration.GetSection(SecurityOptions.SectionName);
-            var agentSecuritySection = configuration.GetSection(AgentSecurityOptions.SectionName);
+        var config = configuration ?? new ConfigurationBuilder().Build();
 
-            services.AddOptions<SecurityOptions>()
-                .Bind(securitySection)
-                .Validate(o =>
-                {
-                    if (!o.AuthenticationEnabled)
-                    {
-                        return true;
-                    }
+        // 1. Bind options
+        var securitySection = config.GetSection(SecurityOptions.SectionName);
+        var agentSecuritySection = config.GetSection(AgentSecurityOptions.SectionName);
 
-                    if (string.IsNullOrWhiteSpace(o.PublicBaseUrl))
-                    {
-                        return false;
-                    }
-
-                    if (!Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var uri))
-                    {
-                        return false;
-                    }
-
-                    var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                    var isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
-                    if (!isDev && uri.Scheme != Uri.UriSchemeHttps)
-                    {
-                        return false;
-                    }
-
-                    if (o.OAuth == null)
-                    {
-                        return false;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(o.OAuth.Authority) || !Uri.TryCreate(o.OAuth.Authority, UriKind.Absolute, out _))
-                    {
-                        return false;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(o.OAuth.Audience))
-                    {
-                        return false;
-                    }
-
-                    return true;
-                }, "Security options are invalid when AuthenticationEnabled is true. PublicBaseUrl must be a valid HTTPS URL (HTTPS required outside Development), and Authority/Audience must be configured.")
-                .ValidateOnStart();
-
-            services.AddOptions<AgentSecurityOptions>()
-                .Bind(agentSecuritySection)
-                .Validate(o =>
-                {
-                    if (!o.AuthenticationEnabled)
-                    {
-                        return true;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(o.TokenEnvironmentVariable))
-                    {
-                        return false;
-                    }
-
-                    var token = Environment.GetEnvironmentVariable(o.TokenEnvironmentVariable);
-                    if (string.IsNullOrWhiteSpace(token))
-                    {
-                        return false;
-                    }
-
-                    return true;
-                }, "AgentSecurity:AuthenticationEnabled is true but the expected token is missing in environment variables.")
-                .ValidateOnStart();
-
-            // 2. Normalise PublicBaseUrl
-            services.PostConfigure<SecurityOptions>(o =>
+        services.AddOptions<SecurityOptions>()
+            .Bind(securitySection)
+            .Validate(o =>
             {
-                if (!string.IsNullOrEmpty(o.PublicBaseUrl))
+                if (!o.AuthenticationEnabled)
                 {
-                    o.PublicBaseUrl = o.PublicBaseUrl.TrimEnd('/');
+                    return true;
+                }
+
+                if (string.IsNullOrWhiteSpace(o.PublicBaseUrl))
+                {
+                    return false;
+                }
+
+                if (!Uri.TryCreate(o.PublicBaseUrl, UriKind.Absolute, out var uri))
+                {
+                    return false;
+                }
+
+                var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                var isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
+                if (!isDev && uri.Scheme != Uri.UriSchemeHttps)
+                {
+                    return false;
+                }
+
+                if (o.OAuth == null)
+                {
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(o.OAuth.Authority) || !Uri.TryCreate(o.OAuth.Authority, UriKind.Absolute, out _))
+                {
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(o.OAuth.Audience))
+                {
+                    return false;
+                }
+
+                return true;
+            }, "Security options are invalid when AuthenticationEnabled is true. PublicBaseUrl must be a valid HTTPS URL (HTTPS required outside Development), and Authority/Audience must be configured.")
+            .ValidateOnStart();
+
+        services.AddOptions<AgentSecurityOptions>()
+            .Bind(agentSecuritySection)
+            .Validate(o =>
+            {
+                if (!o.AuthenticationEnabled)
+                {
+                    return true;
+                }
+
+                if (string.IsNullOrWhiteSpace(o.TokenEnvironmentVariable))
+                {
+                    return false;
+                }
+
+                var token = Environment.GetEnvironmentVariable(o.TokenEnvironmentVariable);
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    return false;
+                }
+
+                return true;
+            }, "AgentSecurity:AuthenticationEnabled is true but the expected token is missing in environment variables.")
+            .ValidateOnStart();
+
+        // 2. Normalise PublicBaseUrl
+        services.PostConfigure<SecurityOptions>(o =>
+        {
+            if (!string.IsNullOrEmpty(o.PublicBaseUrl))
+            {
+                o.PublicBaseUrl = o.PublicBaseUrl.TrimEnd('/');
+            }
+        });
+
+        // 3. Register authentication
+        var authEnabled = securitySection.GetValue<bool>("AuthenticationEnabled");
+
+        var authBuilder = services.AddAuthentication(options =>
+        {
+            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        });
+
+        if (authEnabled)
+        {
+            // Real JwtBearer
+            services.ConfigureOptions<ConfigureJwtBearerOptions>();
+            authBuilder.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, _ => { });
+        }
+        else
+        {
+            // Local bypass handler when authentication is disabled
+            authBuilder.AddScheme<AuthenticationSchemeOptions, DevBypassAuthHandler>(JwtBearerDefaults.AuthenticationScheme, null);
+        }
+
+        // Always add AgentToken scheme
+        authBuilder.AddScheme<AuthenticationSchemeOptions, AgentTokenAuthHandler>("AgentToken", null);
+
+        // 4. Configure policies and handlers
+        services.AddSingleton<IAuthorizationHandler, ScopeHandler>();
+
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("McpAuthenticatedPolicy", policy =>
+            {
+                if (authEnabled)
+                {
+                    policy.RequireAuthenticatedUser();
+                    policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
+                }
+                else
+                {
+                    policy.RequireAssertion(_ => true); // Allow anonymous
                 }
             });
 
-            // 3. Register authentication
-            var authEnabled = securitySection.GetValue<bool>("AuthenticationEnabled");
-
-            var authBuilder = services.AddAuthentication(options =>
+            options.AddPolicy("FilesReadPolicy", policy =>
             {
-                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                if (authEnabled)
+                {
+                    policy.RequireAuthenticatedUser();
+                    policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
+                    policy.Requirements.Add(new ScopeRequirement(new List<string> { "files:read" }));
+                }
+                else
+                {
+                    policy.RequireAssertion(_ => true); // Allow anonymous
+                }
             });
 
-            if (authEnabled)
+            options.AddPolicy("FilesWritePolicy", policy =>
             {
-                // Real JwtBearer
-                services.ConfigureOptions<ConfigureJwtBearerOptions>();
-                authBuilder.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, _ => { });
-            }
-            else
-            {
-                // Local bypass handler when authentication is disabled
-                authBuilder.AddScheme<AuthenticationSchemeOptions, DevBypassAuthHandler>(JwtBearerDefaults.AuthenticationScheme, null);
-            }
-
-            // Always add AgentToken scheme
-            authBuilder.AddScheme<AuthenticationSchemeOptions, AgentTokenAuthHandler>("AgentToken", null);
-
-            // 4. Configure policies and handlers
-            services.AddSingleton<IAuthorizationHandler, ScopeHandler>();
-
-            services.AddAuthorization(options =>
-            {
-                options.AddPolicy("McpPolicy", policy =>
+                if (authEnabled)
                 {
-                    if (authEnabled)
-                    {
-                        var securityOptions = securitySection.Get<SecurityOptions>() ?? new SecurityOptions();
-                        policy.RequireAuthenticatedUser();
-                        policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
-                        policy.Requirements.Add(new ScopeRequirement(securityOptions.OAuth.RequiredScopes));
-                    }
-                    else
-                    {
-                        policy.RequireAssertion(_ => true); // Allow anonymous
-                    }
-                });
-
-                var agentAuthEnabled = agentSecuritySection.GetValue<bool>("AuthenticationEnabled");
-                options.AddPolicy("AgentPolicy", policy =>
+                    policy.RequireAuthenticatedUser();
+                    policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
+                    policy.Requirements.Add(new ScopeRequirement(new List<string> { "files:write" }));
+                }
+                else
                 {
-                    if (agentAuthEnabled)
-                    {
-                        policy.RequireAuthenticatedUser();
-                        policy.AddAuthenticationSchemes("AgentToken");
-                    }
-                    else
-                    {
-                        policy.RequireAssertion(_ => true); // Allow anonymous
-                    }
-                });
+                    policy.RequireAssertion(_ => true); // Allow anonymous
+                }
             });
-        }
+
+            var agentAuthEnabled = agentSecuritySection.GetValue<bool>("AuthenticationEnabled");
+            options.AddPolicy("AgentPolicy", policy =>
+            {
+                if (agentAuthEnabled)
+                {
+                    policy.RequireAuthenticatedUser();
+                    policy.AddAuthenticationSchemes("AgentToken");
+                }
+                else
+                {
+                    policy.RequireAssertion(_ => true); // Allow anonymous
+                }
+            });
+        });
 
         return services;
     }
@@ -185,7 +211,7 @@ internal sealed class DevBypassAuthHandler : AuthenticationHandler<Authenticatio
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, "DevUser"),
-            new Claim("scope", "files:read")
+            new Claim("scope", "files:read files:write")
         };
         var identity = new ClaimsIdentity(claims, Scheme.Name);
         var principal = new ClaimsPrincipal(identity);
@@ -193,3 +219,4 @@ internal sealed class DevBypassAuthHandler : AuthenticationHandler<Authenticatio
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
 }
+

@@ -20,6 +20,35 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(FileAccessOptions.SectionName))
             .Validate(o => o.AllowedRoots != null && o.AllowedRoots.Any(r => !string.IsNullOrWhiteSpace(r)), "FileAccess:AllowedRoots must contain at least one valid root directory.")
             .Validate(o => o.MaxReadBytes > 0, "FileAccess:MaxReadBytes must be greater than 0.")
+            .Validate(o => o.MaxWriteBytes > 0, "FileAccess:MaxWriteBytes must be greater than 0.")
+            .Validate(o =>
+            {
+                if (o.WritableRoots == null || o.WritableRoots.Count == 0)
+                {
+                    return true;
+                }
+                foreach (var wRoot in o.WritableRoots)
+                {
+                    if (string.IsNullOrWhiteSpace(wRoot)) continue;
+                    try
+                    {
+                        var fullWR = Path.GetFullPath(wRoot);
+                        var matched = o.AllowedRoots.Any(aRoot =>
+                        {
+                            if (string.IsNullOrWhiteSpace(aRoot)) return false;
+                            try
+                            {
+                                var fullAR = Path.GetFullPath(aRoot);
+                                return PathPolicy.IsSubdirectoryOf(fullWR, fullAR);
+                            }
+                            catch { return false; }
+                        });
+                        if (!matched) return false;
+                    }
+                    catch { return false; }
+                }
+                return true;
+            }, "All WritableRoots must be located within at least one of the configured AllowedRoots.")
             .ValidateOnStart();
 
         services.AddOptions<AgentSecurityOptions>()

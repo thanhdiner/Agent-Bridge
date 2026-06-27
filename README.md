@@ -1,6 +1,6 @@
-# LocalMcp - Local Windows File System MCP Gateway
+# LocalMcp — Local Windows File System MCP Gateway
 
-LocalMcp is a secure and performant system that exposes the local Windows file system to AI clients (such as ChatGPT) using the Model Context Protocol (MCP). It features a strict separation of concerns between the Control Plane (Gateway) and the Execution Plane (Windows Agent) connected via a real-time SignalR connection.
+LocalMcp is a secure, production-shaped system that exposes the local Windows file system to AI clients (such as ChatGPT) using the Model Context Protocol (MCP). It uses a strict separation between the Control Plane (Gateway) and the Execution Plane (Windows Agent), connected via SignalR.
 
 ---
 
@@ -9,74 +9,118 @@ LocalMcp is a secure and performant system that exposes the local Windows file s
 ```mermaid
 graph TD
     Client["ChatGPT (MCP Client)"]
+    Auth0["Auth0 (OAuth 2.1 / OIDC)"]
 
     subgraph ControlPlane["Control Plane (Gateway)"]
         McpServer["MCP HTTP Server (/)"]
         Registry["Agent Connection Registry"]
         Dispatcher["SignalR Command Dispatcher"]
         Hub["AgentHub (SignalR)"]
+        JwtMiddleware["JWT Bearer Middleware"]
+        ScopePolicies["Scope Policies (files:read / files:write)"]
     end
 
     subgraph ExecutionPlane["Execution Plane (Windows Agent)"]
-        Conn["Gateway Connection"]
+        Conn["Gateway Connection (device token auth)"]
         Handler["Command Handler"]
-        Sandbox["PathPolicy (Sandbox)"]
-        Executor["File System Executor"]
+        Sandbox["PathPolicy (Sandbox + WritableRoots)"]
+        Executor["File System Executor (strict UTF-8)"]
         Disk["Windows File System"]
     end
 
-    Client -->|fs_read/fs_list/fs_tree/fs_search| McpServer
-    McpServer -->|Dispatch| Dispatcher
+    Client -->|"Bearer token (files:read or files:write)"| JwtMiddleware
+    JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
+    JwtMiddleware --> ScopePolicies
+    ScopePolicies -->|fs_read/fs_list/fs_tree/fs_search/fs_write/fs_patch| McpServer
+    McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
-    Hub -->|Outbound TCP Loopback| Conn
-    Conn -->|Process & Deserialise| Handler
-    Handler -->|Validate Path Safety| Sandbox
-    Sandbox -->|Safe Traversal / Read| Executor
-    Executor -->|Asynchronous I/O| Disk
-    Disk -->|Bytes / Entries| Executor
-    Executor -->|CommandResult| Handler
+    Hub -->|TCP Loopback| Conn
+    Conn --> Handler
+    Handler --> Sandbox
+    Sandbox -->|Safe traversal / I/O| Executor
+    Executor --> Disk
+    Disk --> Executor
+    Executor --> Handler
     Handler -->|SignalR Response| Hub
-    Hub -->|Complete Task| Dispatcher
-    Dispatcher -->|JSON-RPC Output| McpServer
-    McpServer -->|Content Block| Client
+    Hub --> Dispatcher
+    Dispatcher --> McpServer
+    McpServer -->|JSON-RPC result| Client
 ```
 
 ---
 
 ## Exposed MCP Tools
 
-The system implements the following read-only MCP tools:
+### Read tools — require `files:read` scope
 
-1. **`fs_tree`**: Returns a bounded directory tree structure for a path inside an allowed root. Used to understand overall project layout.
-2. **`fs_list`**: Lists the immediate subdirectories and files of a directory, sorted directory-first and alphabetically.
-3. **`fs_search`**: Recursively searches for files matching a query (either by filename or content search) within a directory.
-4. **`fs_read`**: Reads the full text content of a single allowed file. Includes file size, encoding (UTF-8 / UTF-8-BOM) detection, and SHA-256 hash.
+| Tool | Description |
+|---|---|
+| `fs_tree` | Returns a bounded directory tree. Used by ChatGPT to understand project layout. |
+| `fs_list` | Lists immediate children of a directory, sorted directory-first then alphabetically. |
+| `fs_search` | Recursively searches for files matching a query (filename or content). |
+| `fs_read` | Reads the text of a single file. Returns size, encoding, SHA-256, and content. |
+
+### Write tools — require `files:write` scope
+
+| Tool | Description |
+|---|---|
+| `fs_write` | Creates or overwrites a single file using optimistic concurrency (SHA-256 ETag). |
+| `fs_patch` | Applies a list of exact text substitutions atomically to an existing file. |
+
+> [!IMPORTANT]
+> **Write tools are disabled by default.** `WritableRoots` in `appsettings.json` is an empty list. You must explicitly add directories before write tools can succeed.
 
 > [!NOTE]
-> All tools return clean, structured JSON errors instead of leaking raw system exceptions to ChatGPT.
+> All tools return structured JSON errors. Internal paths, stack traces, and `.tmp_` filenames are never leaked to MCP clients.
 
 ---
 
-## Security Sandbox (PathPolicy)
+## Security Model
 
-To protect the host machine, the Windows Agent runs all filesystem operations through a strict `PathPolicy` validation loop:
+### OAuth 2.1 (Gateway)
 
-1. **Empty Rejection**: Rejects null, empty, or whitespace paths immediately.
-2. **Canonical Normalisation**: Resolves the path to its absolute physical form, resolving relative segments (`.`, `..`).
-3. **Link Resolution**: Recursively resolves symbolic links and junctions to check the final destination.
-4. **Allowed Root Verification**: Enforces that the resolved path starts with a directory in the configured `AllowedRoots`.
-5. **Prefix Collision Prevention**: Prevents prefix matching exploits (e.g. allowed root `F:\Project` vs sibling `F:\ProjectFake\secret.txt`).
-6. **Deny List Filtering**: Confirms no directory segment (e.g. `bin`, `obj`, `.git`, `node_modules`) or filename (e.g. `.env`) matches the configured denylists.
-7. **Existence Checks**: Verifies files exist (for reads) or directories exist (for listing/tree/search).
-8. **Size Validation**: Rejects reading files exceeding `MaxReadBytes` (default 2MB) before buffer allocation.
+All MCP tool calls require a valid Bearer token issued by Auth0.
+
+Token validation enforces:
+- **Signature** — RS256 signed by Auth0's JWKS
+- **Issuer** — must match `Security:OAuth:Authority`
+- **Audience** — must match `Security:OAuth:Audience`
+- **Lifetime** — `nbf`/`exp` checked with zero clock skew
+- **Scope** — `files:read` for read tools; `files:write` for write tools
+
+The OAuth 2.1 protected-resource metadata is published at:
+```
+GET /.well-known/oauth-protected-resource
+GET /.well-known/oauth-protected-resource/mcp
+```
+
+### PathPolicy sandbox (Windows Agent)
+
+Every filesystem operation passes through `PathPolicy` before executing:
+
+1. **Empty rejection** — null/whitespace paths rejected immediately.
+2. **Canonical normalisation** — resolves absolute physical path, collapses `..` segments.
+3. **Symlink/junction resolution** — recursively resolves links to check the final destination.
+4. **AllowedRoots check** — resolved path must be inside a configured allowed root.
+5. **Prefix collision prevention** — `F:\Project` does not grant access to `F:\Project-evil\`.
+6. **DeniedSegments** — blocks `bin`, `obj`, `.git`, `.ssh`, `AppData`, etc.
+7. **DeniedFileNames** — blocks exact names (`.env`, `id_rsa`) and wildcard patterns (`.env.*`).
+8. **DeniedWriteFileNames** — additional write-specific name denials (`.gitconfig`, etc.).
+9. **DeniedWriteExtensions** — blocks certificate/key file extensions (`.pem`, `.key`, `.pfx`, `.p12`, etc.).
+10. **ReadOnly file check** — write operations reject files with the `ReadOnly` attribute.
+11. **WritableRoots check** — write operations require the resolved path to be inside a writable root.
+12. **Size validation** — reads reject files > `MaxReadBytes` (default 2 MB); writes reject content > `MaxWriteBytes` (default 512 KB).
+
+### Device token (Agent → Gateway SignalR)
+
+The Windows Agent authenticates to the Gateway's AgentHub using a separate device bearer token configured under `AgentSecurity`.
 
 ---
 
 ## Configuration
 
-### Windows Agent Configuration
-Edit `src/LocalMcp.Agent.Windows/appsettings.json`:
+### Windows Agent — `src/LocalMcp.Agent.Windows/appsettings.json`
 
 ```json
 {
@@ -85,89 +129,125 @@ Edit `src/LocalMcp.Agent.Windows/appsettings.json`:
     "GatewayUrl": "http://localhost:5227"
   },
   "FileAccess": {
-    "AllowedRoots": [
-      "F:\\All Project"
-    ],
-    "DeniedSegments": [
-      "bin",
-      "obj",
-      ".git",
-      ".ssh",
-      ".vs",
-      ".idea",
-      "AppData",
-      "Windows",
-      "Program Files",
-      "node_modules"
-    ],
-    "DeniedFileNames": [
-      ".env",
-      ".env.local",
-      "credentials.json"
-    ],
-    "MaxReadBytes": 2097152
+    "AllowedRoots": [ "F:\\Your Project Root" ],
+    "WritableRoots": [],
+    "DeniedSegments": [ "bin", "obj", ".git", ".ssh", "node_modules" ],
+    "DeniedFileNames": [ ".env", ".env.*", "id_rsa", "id_ed25519", "credentials.json" ],
+    "DeniedWriteFileNames": [ ".env", ".env.*", "id_rsa", "id_ed25519", ".gitconfig" ],
+    "DeniedWriteExtensions": [ ".pem", ".key", ".pfx", ".p12", ".cer", ".der" ],
+    "MaxReadBytes": 2097152,
+    "MaxWriteBytes": 524288
   }
 }
 ```
+
+> [!IMPORTANT]
+> To enable `fs_write` and `fs_patch`, add the target directory to `WritableRoots`.
+> Start with a dedicated scratch directory (`F:\scratch`) and only expand after testing.
+
+### Gateway — `src/LocalMcp.Gateway/appsettings.json`
+
+```json
+{
+  "Security": {
+    "AuthenticationEnabled": true,
+    "PublicExposure": true,
+    "PublicBaseUrl": "https://mcp.yourdomain.com",
+    "OAuth": {
+      "Authority":       "https://your-tenant.auth0.com/",
+      "Audience":        "https://mcp.yourdomain.com",
+      "RequiredScopes":  [ "files:read" ]
+    }
+  },
+  "AgentSecurity": {
+    "AuthenticationEnabled": true,
+    "DeviceTokens": [ "your-device-secret-token" ]
+  }
+}
+```
+
+Use `appsettings.Local.json` (git-ignored) for secrets. Never commit tokens to source control.
 
 ---
 
 ## How to Run
 
-### 1. Run the Gateway
-The Gateway hosts the MCP server on port **5227** (mapped at the root `/`).
-```powershell
-dotnet run --project src/LocalMcp.Gateway
-```
-* Or use `run-gateway.bat`.
+### 1. Start the Gateway
 
-### 2. Run the Agent
-The Agent starts a background worker service and connects outbound to the Gateway's Hub.
 ```powershell
-dotnet run --project src/LocalMcp.Agent.Windows
+dotnet run --project src/LocalMcp.Gateway -c Release
 ```
-* Or use `run-agent.bat`.
+
+Or: `run-gateway.bat`
+
+### 2. Start the Agent
+
+```powershell
+dotnet run --project src/LocalMcp.Agent.Windows -c Release
+```
+
+Or: `run-agent.bat`
+
+### 3. Verify the connection
+
+The Agent logs `[AgentHub] Connected as <deviceId>` when the SignalR handshake succeeds.
 
 ---
 
-## Verification & Testing
+## Testing with ChatGPT
 
-### Testing with MCP Inspector
-The Model Context Protocol Inspector is the official tool to inspect and test MCP servers.
+### Initial auth flow
 
-1. Install and start the inspector on a local port:
-   ```powershell
-   npx -y @modelcontextprotocol/inspector
-   ```
-2. Open the inspector page in your browser (usually `http://localhost:6274`).
-3. Select **Streamable HTTP** as the Transport.
-4. Set the URL to:
-   ```text
-   http://localhost:5227/
-   ```
-5. Click **Connect**. You will see the list of the four tools: `fs_read`, `fs_list`, `fs_tree`, and `fs_search`.
-6. Fill in the arguments (e.g., `deviceId: "development-machine"`, `path: "F:\All Project\_Đang build\AgentBridge"`) and click **Call Tool**.
+1. Open your ChatGPT developer connector or MCP Inspector.
+2. Set the MCP URL to `https://mcp.yourdomain.com/`.
+3. Click **Connect** — ChatGPT fetches `/.well-known/oauth-protected-resource` and redirects to Auth0.
+4. Authenticate with your Auth0 credentials.
+5. ChatGPT stores the access token and begins making tool calls.
 
-### Refreshing ChatGPT MCP Host
-When you modify or add tool definitions, you must tell ChatGPT to refresh the schemas:
-1. In ChatGPT, click your Profile / Customise GPTs or go to the Developer Console where the MCP server is configured.
-2. Under the configured MCP Server Host URL (`http://localhost:5227/` or your Cloudflare Tunnel URL), click the **Refresh** or **Re-fetch** button.
-3. This forces ChatGPT to fetch `tools/list` again and update its instruction templates.
+### Refreshing after schema changes
+
+When you add or rename tools, ChatGPT must re-fetch the tool list:
+
+1. Go to your ChatGPT settings → Connected Apps / Developer MCP Servers.
+2. Find the server (`https://mcp.yourdomain.com/`) and click **Refresh** or **Re-fetch schemas**.
+3. ChatGPT re-calls `tools/list` and updates its instructions.
+
+### Reconnecting after token expiry
+
+Auth0 access tokens expire (default: 24 h for API tokens). To re-authenticate:
+
+1. In ChatGPT, disconnect and reconnect the MCP server.
+2. Complete the Auth0 login flow again.
+3. A new access token is issued and stored automatically.
+
+---
+
+## Recommended Write-Tool Testing Workflow
+
+> [!WARNING]
+> Do **not** add a production project directory to `WritableRoots` for initial testing.
+
+1. Create an isolated scratch directory: `mkdir F:\mcp-scratch`
+2. Add it to `WritableRoots` in `appsettings.json`.
+3. Obtain a token with `files:write` scope via Auth0 device flow or test client.
+4. Use MCP Inspector to call `fs_write` targeting `F:\mcp-scratch\test.txt`.
+5. Verify file is created. Verify SHA-256 conflict protection by re-calling with stale hash.
+6. Only after successful isolated testing, consider adding real project directories.
 
 ---
 
 ## Important Security Warnings
 
-> [!WARNING]
-> **Read-Only Scope Limitation**
-> Currently, the system only supports read-only operations (`fs_read`, `fs_list`, `fs_tree`, `fs_search`). Filesystem mutation tools (e.g. write, edit, delete) are **not** implemented in this phase.
-
 > [!CAUTION]
 > **Public Tunnel Warning**
-> The current development setup allows running a public Cloudflare Quick Tunnel with **no authentication**.
-> - This configuration is **development-only**.
-> - Write tools **must never** be exposed through a public unauthenticated Gateway.
-> - The Gateway checks configuration at startup: in `Development` environment it logs a high-visibility warning; in `Staging` or `Production` environment it will **fail startup** if public exposure is enabled without authentication.
+> The Cloudflare tunnel (`https://mcp.yourdomain.com`) makes the MCP server reachable from the internet.
+> - `AuthenticationEnabled` **must be `true`** for any public-facing deployment.
+> - The Gateway will **fail startup** if public exposure is enabled without authentication in non-Development environments.
+> - Write tools add further risk — only enable `WritableRoots` for directories you fully control and that cannot affect system integrity.
+
+> [!WARNING]
+> **No `.env` or Key File Writes**
+> `DeniedWriteFileNames` and `DeniedWriteExtensions` block writes to `.env`, `.env.*`, `id_rsa`, `id_ed25519`, `.pem`, `.key`, `.pfx`, `.p12` and other credential files. These cannot be overridden by the `files:write` scope.
 
 ---
 
@@ -175,18 +255,17 @@ When you modify or add tool definitions, you must tell ChatGPT to refresh the sc
 
 ```text
 LocalMcp/
-├─ LocalMcp.sln                 # .NET Solution File
-├─ Directory.Build.props        # TargetFramework (net8.0)
+├─ LocalMcp.sln
+├─ Directory.Build.props
 ├─ src/
-│  ├─ LocalMcp.Gateway/          # Control Plane Web Host
-│  │  ├─ Program.cs              # Startup & Public Exposure Guardrail
+│  ├─ LocalMcp.Gateway/
+│  │  ├─ Program.cs                      # Startup & public-exposure guardrail
 │  │  ├─ DependencyInjection.cs
-│  │  ├─ Hubs/
-│  │  │  └─ AgentHub.cs          # SignalR Hub connecting to Agents
-│  │  ├─ Mcp/
-│  │  │  └─ FileSystemTools.cs   # Exposes MCP tools & routes to dispatcher
+│  │  ├─ Hubs/AgentHub.cs               # SignalR hub
+│  │  ├─ Mcp/FileSystemTools.cs         # MCP tools (scope-gated)
 │  │  ├─ Security/
-│  │  │  └─ SecurityOptions.cs   # Public exposure safety settings
+│  │  │  ├─ SecurityOptions.cs
+│  │  │  └─ McpPolicies.cs              # files:read / files:write authorization policies
 │  │  ├─ Connections/
 │  │  │  ├─ IAgentConnectionRegistry.cs
 │  │  │  └─ InMemoryAgentConnectionRegistry.cs
@@ -194,56 +273,69 @@ LocalMcp/
 │  │     ├─ ICommandDispatcher.cs
 │  │     └─ SignalRCommandDispatcher.cs
 │  │
-│  ├─ LocalMcp.Agent.Windows/    # Execution Plane Worker Service
+│  ├─ LocalMcp.Agent.Windows/
 │  │  ├─ Program.cs
-│  │  ├─ DependencyInjection.cs
-│  │  ├─ Worker.cs               # Background worker loop
+│  │  ├─ Worker.cs
 │  │  ├─ Connection/
 │  │  │  ├─ AgentOptions.cs
-│  │  │  └─ GatewayConnection.cs # Strictly deserialises and routes commands
-│  │  ├─ Commands/
-│  │  │  └─ CommandHandler.cs    # Dispatcher to executor
+│  │  │  └─ GatewayConnection.cs        # SignalR client, command dispatch
+│  │  ├─ Commands/CommandHandler.cs
 │  │  ├─ FileSystem/
 │  │  │  ├─ IFileSystemExecutor.cs
-│  │  │  └─ FileSystemExecutor.cs # Performs async disk I/O, search, listing
-│  │  ├─ Security/
-│  │  │  ├─ FileAccessOptions.cs
-│  │  │  ├─ IPathPolicy.cs
-│  │  │  └─ PathPolicy.cs         # Directory-level sandbox policy
+│  │  │  └─ FileSystemExecutor.cs       # Atomic write, patch, read, list, search
+│  │  └─ Security/
+│  │     ├─ FileAccessOptions.cs
+│  │     ├─ IPathPolicy.cs
+│  │     └─ PathPolicy.cs               # Sandbox + WritableRoots enforcement
 │  │
-│  ├─ LocalMcp.Contracts/        # Shared DTOs
+│  ├─ LocalMcp.Contracts/
 │  │  ├─ Commands/
-│  │  │  ├─ AgentCommand.cs
 │  │  │  ├─ ReadFileCommand.cs
 │  │  │  ├─ ListDirectoryCommand.cs
 │  │  │  ├─ TreeCommand.cs
-│  │  │  └─ SearchFilesCommand.cs
+│  │  │  ├─ SearchFilesCommand.cs
+│  │  │  ├─ WriteFileCommand.cs
+│  │  │  └─ PatchFileCommand.cs
 │  │  └─ Results/
 │  │     ├─ CommandError.cs
 │  │     ├─ CommandResult.cs
 │  │     ├─ ReadFileResult.cs
 │  │     ├─ ListDirectoryResult.cs
 │  │     ├─ TreeResult.cs
-│  │     └─ SearchFilesResult.cs
+│  │     ├─ SearchFilesResult.cs
+│  │     ├─ WriteFileResult.cs
+│  │     └─ PatchFileResult.cs
 │  │
-│  └─ LocalMcp.BuildingBlocks/   # Shared Constants
-│     ├─ Errors/
-│     │  └─ ErrorCodes.cs        # 16 standard error codes
-│     └─ Serialization/
-│        └─ JsonOptions.cs
+│  └─ LocalMcp.BuildingBlocks/
+│     ├─ Errors/ErrorCodes.cs           # Standard error code constants
+│     └─ Serialization/JsonOptions.cs
 │
 └─ tests/
-   ├─ LocalMcp.UnitTests/        # Unit tests (Path Policy, Strict Deserialisation, Guardrails)
-   ├─ LocalMcp.IntegrationTests/ # End-to-end SignalR integration loop tests
-   └─ LocalMcp.ArchitectureTests/ # Circular dependency checker tests
+   ├─ LocalMcp.UnitTests/               # PathPolicy, executor, auth, schema tests
+   ├─ LocalMcp.IntegrationTests/        # End-to-end SignalR integration tests
+   └─ LocalMcp.ArchitectureTests/       # Circular dependency tests
 ```
 
 ---
 
 ## Running Tests
 
-Run all test suites with:
 ```powershell
 dotnet test -c Release
 ```
-All automated tests use dynamic, isolated temporary directories and clean up after themselves.
+
+All tests use dynamic, isolated temporary directories and clean up after themselves.
+
+### Test categories
+
+| Suite | What it covers |
+|---|---|
+| `PathPolicyTests` | AllowedRoots, WritableRoots, DeniedSegments, wildcard denials |
+| `WriteToolsTests` | Executor write/patch safety, BOM absence, UTF-8, conflict, temp cleanup |
+| `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
+| `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
+| `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
+| `CommandDeserializerTests` | Strict command deserialization for all 6 commands |
+| `BenchmarkTests` | PathPolicy throughput under sustained load |
+| `EndToEndTests` | Full SignalR loop: Gateway → Agent → FileSystem → Gateway |
+| `ArchitectureTests` | No circular project references |

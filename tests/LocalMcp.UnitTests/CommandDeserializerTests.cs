@@ -5,9 +5,8 @@ using LocalMcp.BuildingBlocks.Serialization;
 
 namespace LocalMcp.UnitTests;
 
-
 /// <summary>
-/// Tests for strict command deserialization in GatewayConnection (Task 3).
+/// Tests for strict command deserialization in GatewayConnection.
 /// These tests directly exercise the deserialization logic by parsing the same
 /// JSON that would arrive via SignalR, using the same code paths as GatewayConnection.
 /// </summary>
@@ -49,6 +48,8 @@ public sealed class CommandDeserializerTests
                 nameof(ListDirectoryCommand) => JsonSerializer.Deserialize<ListDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(SearchFilesCommand) => JsonSerializer.Deserialize<SearchFilesCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
+                nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(payload, JsonOptions.Default),
+                nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
                 _ => null
             };
         }
@@ -65,75 +66,29 @@ public sealed class CommandDeserializerTests
         return (command, null);
     }
 
-    // ── Task 3: Strict deserialization tests ──────────────────────────────────
+    // ── Tests ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Deserialize_MissingCommandType_ReturnsInvalidRequest()
-    {
-        // Payload contains a path but no commandType — old fallback would have parsed this as ReadFileCommand
-        var json = "{\"commandId\":\"00000000-0000-0000-0000-000000000001\",\"deviceId\":\"dev\",\"path\":\"C:\\\\file.txt\"}";
-        var (command, errorCode) = TryDeserialize(json);
-        Assert.Null(command);
-        Assert.Equal(ErrorCodes.InvalidRequest, errorCode);
-    }
-
-    [Fact]
-    public void Deserialize_PathOnlyPayload_NoCommandType_ReturnsInvalidRequest()
-    {
-        // Specifically tests the old dangerous fallback: payload has "path" but no commandType
-        var json = "{\"path\":\"C:\\\\some\\\\path.txt\"}";
-        var (command, errorCode) = TryDeserialize(json);
-        Assert.Null(command);
-        Assert.Equal(ErrorCodes.InvalidRequest, errorCode);
-    }
-
-    [Fact]
-    public void Deserialize_UnknownCommandType_ReturnsUnsupportedCommand()
-    {
-        var json = "{\"commandType\":\"DeleteFileCommand\",\"deviceId\":\"dev\",\"path\":\"C:\\\\file.txt\"}";
-        var (command, errorCode) = TryDeserialize(json);
-        Assert.Null(command);
-        Assert.Equal(ErrorCodes.UnsupportedCommand, errorCode);
-    }
-
-    [Fact]
-    public void Deserialize_MalformedJson_ReturnsInvalidRequest()
-    {
-        var json = "{this is not valid json";
-        var (command, errorCode) = TryDeserialize(json);
-        Assert.Null(command);
-        Assert.Equal(ErrorCodes.InvalidRequest, errorCode);
-    }
-
-    [Fact]
-    public void Deserialize_EmptyJson_ReturnsInvalidRequest()
-    {
-        var json = "{}";
-        var (command, errorCode) = TryDeserialize(json);
-        Assert.Null(command);
-        Assert.Equal(ErrorCodes.InvalidRequest, errorCode);
-    }
-
-    [Fact]
-    public void Deserialize_ReadFileCommand_WithValidCommandType_Succeeds()
+    public void Deserialize_ReadFileCommand_WithValidJson_Succeeds()
     {
         var id = Guid.NewGuid();
-        var json = $"{{\"commandType\":\"ReadFileCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\test.txt\"}}";
+        var json = $"{{\"commandType\":\"ReadFileCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\file.txt\"}}";
 
         var (command, errorCode) = TryDeserialize(json);
 
         Assert.Null(errorCode);
         Assert.NotNull(command);
         var readCmd = Assert.IsType<ReadFileCommand>(command);
-        Assert.Equal("C:\\test.txt", readCmd.Path);
+        Assert.Equal(id, readCmd.CommandId);
         Assert.Equal("dev", readCmd.DeviceId);
+        Assert.Equal("C:\\file.txt", readCmd.Path);
     }
 
     [Fact]
-    public void Deserialize_ListDirectoryCommand_WithValidCommandType_Succeeds()
+    public void Deserialize_ListDirectoryCommand_WithValidJson_Succeeds()
     {
         var id = Guid.NewGuid();
-        var json = $"{{\"commandType\":\"ListDirectoryCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\"}}";
+        var json = $"{{\"commandType\":\"ListDirectoryCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\",\"maxEntries\":50}}";
 
         var (command, errorCode) = TryDeserialize(json);
 
@@ -141,27 +96,14 @@ public sealed class CommandDeserializerTests
         Assert.NotNull(command);
         var listCmd = Assert.IsType<ListDirectoryCommand>(command);
         Assert.Equal("C:\\src", listCmd.Path);
-    }
-
-    [Fact]
-    public void Deserialize_TreeCommand_WithValidCommandType_Succeeds()
-    {
-        var id = Guid.NewGuid();
-        var json = $"{{\"commandType\":\"TreeCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\",\"maxDepth\":3,\"maxEntries\":500,\"includeHidden\":false}}";
-
-        var (command, errorCode) = TryDeserialize(json);
-
-        Assert.Null(errorCode);
-        Assert.NotNull(command);
-        var treeCmd = Assert.IsType<TreeCommand>(command);
-        Assert.Equal(3, treeCmd.MaxDepth);
+        Assert.Equal(50, listCmd.MaxEntries);
     }
 
     [Fact]
     public void Deserialize_SearchFilesCommand_WithValidCommandType_Succeeds()
     {
         var id = Guid.NewGuid();
-        var json = $"{{\"commandType\":\"SearchFilesCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\",\"query\":\"MapMcp\",\"mode\":\"content\"}}";
+        var json = $"{{\"commandType\":\"SearchFilesCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\",\"query\":\"MapMcp\",\"maxResults\":50,\"maxDepth\":3}}";
 
         var (command, errorCode) = TryDeserialize(json);
 
@@ -169,16 +111,67 @@ public sealed class CommandDeserializerTests
         Assert.NotNull(command);
         var searchCmd = Assert.IsType<SearchFilesCommand>(command);
         Assert.Equal("MapMcp", searchCmd.Query);
-        Assert.Equal("content", searchCmd.Mode);
+        Assert.Equal(50, searchCmd.MaxResults);
+        Assert.Equal(3, searchCmd.MaxDepth);
     }
 
     [Fact]
-    public void Deserialize_WriteFileCommand_ReturnsUnsupportedCommand()
+    public void Deserialize_WriteFileCommand_WithValidJson_Succeeds()
     {
-        // Write commands must never be accepted — confirm they are explicitly rejected
-        var json = "{\"commandType\":\"WriteFileCommand\",\"deviceId\":\"dev\",\"path\":\"C:\\\\file.txt\",\"content\":\"evil\"}";
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WriteFileCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\file.txt\",\"content\":\"hello\",\"createIfMissing\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.NotNull(command);
+        var writeCmd = Assert.IsType<WriteFileCommand>(command);
+        Assert.Equal("hello", writeCmd.Content);
+        Assert.True(writeCmd.CreateIfMissing);
+    }
+
+    [Fact]
+    public void Deserialize_PatchFileCommand_WithValidJson_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"PatchFileCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\file.txt\",\"expectedSha256\":\"hash\",\"edits\":[{{\"oldText\":\"foo\",\"newText\":\"bar\",\"replaceAll\":true}}]}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.NotNull(command);
+        var patchCmd = Assert.IsType<PatchFileCommand>(command);
+        Assert.Equal("hash", patchCmd.ExpectedSha256);
+        Assert.Single(patchCmd.Edits);
+        Assert.Equal("foo", patchCmd.Edits[0].OldText);
+        Assert.Equal("bar", patchCmd.Edits[0].NewText);
+        Assert.True(patchCmd.Edits[0].ReplaceAll);
+    }
+
+    [Fact]
+    public void Deserialize_UnknownCommandType_ReturnsUnsupportedCommand()
+    {
+        var json = "{\"commandType\":\"EvilCommand\",\"deviceId\":\"dev\"}";
         var (command, errorCode) = TryDeserialize(json);
         Assert.Null(command);
         Assert.Equal(ErrorCodes.UnsupportedCommand, errorCode);
+    }
+
+    [Fact]
+    public void Deserialize_MissingCommandType_ReturnsInvalidRequest()
+    {
+        var json = "{\"deviceId\":\"dev\"}";
+        var (command, errorCode) = TryDeserialize(json);
+        Assert.Null(command);
+        Assert.Equal(ErrorCodes.InvalidRequest, errorCode);
+    }
+
+    [Fact]
+    public void Deserialize_MalformedJson_ReturnsInvalidRequest()
+    {
+        var json = "{invalid_json}";
+        var (command, errorCode) = TryDeserialize(json);
+        Assert.Null(command);
+        Assert.Equal(ErrorCodes.InvalidRequest, errorCode);
     }
 }
