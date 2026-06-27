@@ -11,6 +11,14 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<ReadRangeResult>> ReadRangeAsync(
+        string path,
+        long startLine,
+        int lineCount,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<TreeResult>> GetTreeAsync(
         string path,
         int maxDepth,

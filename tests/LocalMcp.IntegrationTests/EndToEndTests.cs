@@ -134,6 +134,42 @@ public sealed class EndToEndTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FsReadRange_EndToEndFlow_ReadsRequestedLines()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var filePath = Path.Combine(_tempRoot, "range.txt");
+        var content = string.Join("\n", Enumerable.Range(1, 12).Select(i => $"line-{i}"));
+        await File.WriteAllTextAsync(filePath, content, new System.Text.UTF8Encoding(false));
+
+        var mcpTools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
+        );
+
+        var response = await mcpTools.ReadRangeAsync(_deviceId, filePath, startLine: 4, lineCount: 3);
+
+        Assert.False(response.IsError);
+        Assert.Single(response.Content);
+
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<ReadRangeResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal(4L, data.StartLine);
+        Assert.Equal(6L, data.EndLine);
+        Assert.Equal(12L, data.TotalLines);
+        Assert.Equal("line-4\nline-5\nline-6", data.Content);
+        Assert.True(data.Truncated);
+        Assert.NotEmpty(data.Sha256);
+    }
+
+    [Fact]
     public async Task FsRead_EndToEndFlow_ReportsPathOutsideAllowedRoot()
     {
         await InitializeAsync();

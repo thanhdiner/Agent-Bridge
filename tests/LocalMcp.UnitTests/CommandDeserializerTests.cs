@@ -45,6 +45,7 @@ public sealed class CommandDeserializerTests
             command = typeName switch
             {
                 nameof(ReadFileCommand) => JsonSerializer.Deserialize<ReadFileCommand>(payload, JsonOptions.Default),
+                nameof(ReadRangeCommand) => JsonSerializer.Deserialize<ReadRangeCommand>(payload, JsonOptions.Default),
                 nameof(ListDirectoryCommand) => JsonSerializer.Deserialize<ListDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(SearchFilesCommand) => JsonSerializer.Deserialize<SearchFilesCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
@@ -87,6 +88,35 @@ public sealed class CommandDeserializerTests
         Assert.Equal(id, readCmd.CommandId);
         Assert.Equal("dev", readCmd.DeviceId);
         Assert.Equal("C:\\file.txt", readCmd.Path);
+    }
+
+    [Fact]
+    public void Deserialize_ReadRangeCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ReadRangeCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/file.txt\",\"startLine\":25,\"lineCount\":50}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var rangeCommand = Assert.IsType<ReadRangeCommand>(command);
+        Assert.Equal("C:/src/file.txt", rangeCommand.Path);
+        Assert.Equal(25L, rangeCommand.StartLine);
+        Assert.Equal(50, rangeCommand.LineCount);
+    }
+
+    [Fact]
+    public void Deserialize_ReadRangeCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ReadRangeCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/file.txt\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var rangeCommand = Assert.IsType<ReadRangeCommand>(command);
+        Assert.Equal(1L, rangeCommand.StartLine);
+        Assert.Equal(200, rangeCommand.LineCount);
     }
 
     [Fact]

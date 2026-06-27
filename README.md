@@ -31,7 +31,7 @@ graph TD
     Client -->|"Bearer token (files:read or files:write)"| JwtMiddleware
     JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
     JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_list/fs_tree/fs_search/fs_write/fs_patch/fs_move/fs_copy/fs_delete| McpServer
+    ScopePolicies -->|fs_read/fs_read_range/fs_list/fs_tree/fs_search/fs_write/fs_patch/fs_move/fs_copy/fs_delete| McpServer
     McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
@@ -60,6 +60,7 @@ graph TD
 | `fs_list` | Lists immediate children of a directory, sorted directory-first then alphabetically. |
 | `fs_search` | Recursively searches for files matching a query (filename or content). |
 | `fs_read` | Reads the text of a single file. Returns size, encoding, SHA-256, and content. |
+| `fs_read_range` | Streams a UTF-8 text file and returns a bounded one-based line range, total line count, encoding, SHA-256, and truncation status without loading the whole file into memory. Defaults to 200 lines and allows at most 1000 lines per call. |
 | `fs_stat` | Returns metadata (existence, size, SHA-256, encoding, read-only flag, last-write-time, reparse point status) of a path. Returns `Exists = false` for non-existent paths. For files larger than `MaxReadBytes`, skips content hashing/encoding detection, returning `ContentMetadataSkipped = true`. |
 
 ### Write tools — require `files:write` scope
@@ -115,7 +116,7 @@ Every filesystem operation passes through `PathPolicy` before executing:
 9. **DeniedWriteExtensions** — blocks certificate/key file extensions (`.pem`, `.key`, `.pfx`, `.p12`, etc.).
 10. **ReadOnly file check** — write operations reject files with the `ReadOnly` attribute.
 11. **WritableRoots check** — write operations require the resolved path to be inside a writable root.
-12. **Size validation** — reads reject files > `MaxReadBytes` (default 2 MB); writes reject content > `MaxWriteBytes` (default 512 KB).
+12. **Size validation** — `fs_read` rejects files > `MaxReadBytes` (default 2 MB); `fs_read_range` may scan larger files but bounds the returned range to `MaxReadBytes`; writes reject content > `MaxWriteBytes` (default 512 KB).
 
 ### Device token (Agent → Gateway SignalR)
 
@@ -296,6 +297,7 @@ LocalMcp/
 │  ├─ LocalMcp.Contracts/
 │  │  ├─ Commands/
 │  │  │  ├─ ReadFileCommand.cs
+│  │  │  ├─ ReadRangeCommand.cs
 │  │  │  ├─ ListDirectoryCommand.cs
 │  │  │  ├─ TreeCommand.cs
 │  │  │  ├─ SearchFilesCommand.cs
@@ -310,6 +312,7 @@ LocalMcp/
 │  │     ├─ CommandError.cs
 │  │     ├─ CommandResult.cs
 │  │     ├─ ReadFileResult.cs
+│  │     ├─ ReadRangeResult.cs
 │  │     ├─ ListDirectoryResult.cs
 │  │     ├─ TreeResult.cs
 │  │     ├─ SearchFilesResult.cs
@@ -350,10 +353,11 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `DirectoryCreationTests` | Hardened recursive directory segment creation, rollbacks, and junction/symlink escape checks |
 | `StatTests` | Bounded file metadata status, encoding detection, oversized size skips, and unreadable files handling |
 | `DeleteTests` | File-only deletion policy, writable-root enforcement, hash conflicts, read-only files, denied paths, and reparse-point rejection |
+| `ReadRangeTests` | Bounded line-range streaming, large-file reads, UTF-8/BOM validation, binary rejection, response limits, and denied paths |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
-| `CommandDeserializerTests` | Strict command deserialization for all 11 commands |
+| `CommandDeserializerTests` | Strict command deserialization for all 12 commands |
 | `BenchmarkTests` | PathPolicy throughput under sustained load |
 | `EndToEndTests` | Full SignalR loop: Gateway → Agent → FileSystem → Gateway |
 | `ArchitectureTests` | No circular project references |

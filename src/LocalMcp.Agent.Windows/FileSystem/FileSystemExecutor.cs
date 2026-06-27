@@ -142,6 +142,271 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         }
     }
 
+    public async Task<CommandResult<ReadRangeResult>> ReadRangeAsync(
+        string path,
+        long startLine,
+        int lineCount,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Reading line range from {Path} for command {CommandId} (startLine={StartLine}, lineCount={LineCount})",
+            path,
+            commandId,
+            startLine,
+            lineCount);
+
+        if (startLine < 1)
+        {
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InvalidRequest, "startLine must be greater than or equal to 1.")
+            };
+        }
+
+        if (lineCount < 1 || lineCount > 1000)
+        {
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InvalidRequest, "lineCount must be between 1 and 1000.")
+            };
+        }
+
+        if (startLine > long.MaxValue - lineCount)
+        {
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InvalidRequest, "The requested line range is too large.")
+            };
+        }
+
+        var policyError = _pathPolicy.AuthorizeStat(path, out var physicalPath);
+        if (policyError is not null)
+        {
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = policyError
+            };
+        }
+
+        if (Directory.Exists(physicalPath))
+        {
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "The requested path is a directory, not a file.")
+            };
+        }
+
+        if (!File.Exists(physicalPath))
+        {
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.FileNotFound, "The requested file was not found.")
+            };
+        }
+
+        try
+        {
+            using var stream = new FileStream(
+                physicalPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 81920,
+                options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+            var prefix = new byte[4];
+            var prefixLength = await ReadPrefixAsync(stream, prefix, cancellationToken);
+
+            int bomLength;
+            string encoding;
+            if (prefixLength >= 4 &&
+                ((prefix[0] == 0x00 && prefix[1] == 0x00 && prefix[2] == 0xFE && prefix[3] == 0xFF) ||
+                 (prefix[0] == 0xFF && prefix[1] == 0xFE && prefix[2] == 0x00 && prefix[3] == 0x00)))
+            {
+                return new CommandResult<ReadRangeResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.UnsupportedTextEncoding, "Only UTF-8 text files are supported.")
+                };
+            }
+
+            if (prefixLength >= 2 &&
+                ((prefix[0] == 0xFF && prefix[1] == 0xFE) ||
+                 (prefix[0] == 0xFE && prefix[1] == 0xFF)))
+            {
+                return new CommandResult<ReadRangeResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.UnsupportedTextEncoding, "Only UTF-8 text files are supported.")
+                };
+            }
+
+            if (prefixLength >= 3 && prefix[0] == 0xEF && prefix[1] == 0xBB && prefix[2] == 0xBF)
+            {
+                bomLength = 3;
+                encoding = "utf-8-bom";
+            }
+            else
+            {
+                bomLength = 0;
+                encoding = "utf-8";
+            }
+
+            stream.Position = 0;
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[81920];
+            int bytesRead;
+            while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+            {
+                for (var i = 0; i < bytesRead; i++)
+                {
+                    if (buffer[i] == 0)
+                    {
+                        return new CommandResult<ReadRangeResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.BinaryFileNotSupported, "Binary files are not supported.")
+                        };
+                    }
+                }
+
+                hash.AppendData(buffer, 0, bytesRead);
+            }
+
+            var sha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+
+            stream.Position = bomLength;
+            using var reader = new StreamReader(
+                stream,
+                StrictUtf8Encoding,
+                detectEncodingFromByteOrderMarks: false,
+                bufferSize: 81920,
+                leaveOpen: true);
+
+            var selectedLines = new List<string>(lineCount);
+            long totalLines = 0;
+            long selectedBytes = 0;
+            var requestedEndExclusive = startLine + lineCount;
+
+            while (await reader.ReadLineAsync(cancellationToken) is { } line)
+            {
+                totalLines++;
+
+                if (totalLines < startLine || totalLines >= requestedEndExclusive)
+                {
+                    continue;
+                }
+
+                var lineBytes = StrictUtf8Encoding.GetByteCount(line);
+                if (selectedLines.Count > 0)
+                {
+                    selectedBytes++;
+                }
+                selectedBytes += lineBytes;
+
+                if (selectedBytes > _options.MaxReadBytes)
+                {
+                    return new CommandResult<ReadRangeResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(
+                            ErrorCodes.FileTooLarge,
+                            $"The requested line range exceeds the allowed response limit of {_options.MaxReadBytes} bytes.")
+                    };
+                }
+
+                selectedLines.Add(line);
+            }
+
+            var endLine = selectedLines.Count == 0
+                ? startLine - 1
+                : startLine + selectedLines.Count - 1;
+
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new ReadRangeResult
+                {
+                    Path = physicalPath,
+                    StartLine = startLine,
+                    EndLine = endLine,
+                    TotalLines = totalLines,
+                    Content = string.Join("\n", selectedLines),
+                    Truncated = totalLines >= requestedEndExclusive,
+                    Sha256 = sha256,
+                    Encoding = encoding
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The line range read operation was cancelled.")
+            };
+        }
+        catch (DecoderFallbackException ex)
+        {
+            _logger.LogWarning(ex, "File {Path} contains invalid UTF-8 while reading a line range.", physicalPath);
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.UnsupportedTextEncoding, "Only valid UTF-8 text files are supported.")
+            };
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied while reading a line range from {Path}.", physicalPath);
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "Access was denied while reading the file.")
+            };
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error while reading a line range from {Path}.", physicalPath);
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.ReadError, "An IO error occurred while reading the file.")
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read a line range from {Path} for command {CommandId}.", physicalPath, commandId);
+            return new CommandResult<ReadRangeResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while reading the file range.")
+            };
+        }
+    }
+
     public Task<CommandResult<TreeResult>> GetTreeAsync(
         string path,
         int maxDepth,
@@ -1595,6 +1860,28 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
     }
 
 
+
+    private static async Task<int> ReadPrefixAsync(
+        Stream stream,
+        byte[] buffer,
+        CancellationToken cancellationToken)
+    {
+        var totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            var read = await stream.ReadAsync(
+                buffer,
+                totalRead,
+                buffer.Length - totalRead,
+                cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+            totalRead += read;
+        }
+        return totalRead;
+    }
 
     private static string ComputeSha256(byte[] bytes)
     {
