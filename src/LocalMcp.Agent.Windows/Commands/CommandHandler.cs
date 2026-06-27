@@ -88,7 +88,12 @@ public sealed class CommandHandler
         {
             return await HandleProjectCheckAsync(projectCheckCommand, cancellationToken);
         }
-        else if (command is TreeCommand treeCommand)
+        else if (command is PowerShellExecuteCommand powerShellExecuteCommand)
+        {
+            return await HandlePowerShellExecuteAsync(
+                powerShellExecuteCommand,
+                cancellationToken);
+        }        else if (command is TreeCommand treeCommand)
         {
             return await HandleTreeAsync(treeCommand, cancellationToken);
         }
@@ -618,6 +623,65 @@ public sealed class CommandHandler
         };
     }
 
+    private async Task<CommandResult<JsonElement>> HandlePowerShellExecuteAsync(
+        PowerShellExecuteCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeCreateDirectory(
+            command.WorkingDirectory,
+            out var normalizedPath,
+            recursive: false);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        if (!Directory.Exists(normalizedPath))
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(
+                    ErrorCodes.DirectoryNotFound,
+                    "The PowerShell working directory was not found."),
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.PowerShellExecuteAsync(
+            normalizedPath,
+            command.Script,
+            command.TimeoutSeconds,
+            command.MaxOutputBytes,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
     private async Task<CommandResult<JsonElement>> HandleReadFileAsync(
         ReadFileCommand command,
         CancellationToken cancellationToken)

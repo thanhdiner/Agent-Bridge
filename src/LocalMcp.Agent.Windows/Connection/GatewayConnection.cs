@@ -139,7 +139,7 @@ public sealed class GatewayConnection : IAsyncDisposable
                         nameof(GitLogCommand) => JsonSerializer.Deserialize<GitLogCommand>(rawJson, JsonOptions.Default),
                         nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(rawJson, JsonOptions.Default),
                         nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(rawJson, JsonOptions.Default),
-                        nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(rawJson, JsonOptions.Default),
+                        nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(rawJson, JsonOptions.Default),                        nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(rawJson, JsonOptions.Default),
                         nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(rawJson, JsonOptions.Default),
                         nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(rawJson, JsonOptions.Default),
                         nameof(MultiFilePatchCommand) => JsonSerializer.Deserialize<MultiFilePatchCommand>(rawJson, JsonOptions.Default),
