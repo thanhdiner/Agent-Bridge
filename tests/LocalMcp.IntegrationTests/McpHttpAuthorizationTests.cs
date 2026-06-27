@@ -253,6 +253,67 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FilesWriteScope_CallingMultiFileEdit_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var arguments = new
+        {
+            deviceId = "missing-test-device",
+            items = new[]
+            {
+                new
+                {
+                    path = "C:/one.txt",
+                    expectedSha256 = new string('0', 64),
+                    edits = new[]
+                    {
+                        new { oldText = "old", newText = "new", replaceAll = false }
+                    }
+                }
+            }
+        };
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_batch_patch",
+            arguments: arguments);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingMultiFileEdit_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_batch_patch",
+            arguments: new
+            {
+                deviceId = "missing-test-device",
+                items = new[]
+                {
+                    new
+                    {
+                        path = "C:/one.txt",
+                        expectedSha256 = new string('0', 64),
+                        edits = new[]
+                        {
+                            new { oldText = "old", newText = "new", replaceAll = false }
+                        }
+                    }
+                }
+            });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task FilesReadScope_CallingFsBatchStat_ReachesDispatch_AgentOffline()
     {
         await StartServerAsync();

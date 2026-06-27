@@ -16,6 +16,8 @@ public sealed class CommandHandler
     private readonly IDirectoryCopyExecutor _directoryCopyExecutor;
     private readonly ILogger<CommandHandler> _logger;
 
+    internal Func<string, Task>? OnBeforeMultiFileEditHook { get; set; }
+
     public CommandHandler(
         IPathPolicy pathPolicy,
         IFileSystemExecutor fileSystemExecutor,
@@ -73,6 +75,10 @@ public sealed class CommandHandler
         else if (command is PatchFileCommand patchFileCommand)
         {
             return await HandlePatchFileAsync(patchFileCommand, cancellationToken);
+        }
+        else if (command is MultiFilePatchCommand batchPatchCommand)
+        {
+            return await HandleBatchPatchAsync(batchPatchCommand, cancellationToken);
         }
         else if (command is CreateDirectoryCommand createDirectoryCommand)
         {
@@ -460,6 +466,157 @@ public sealed class CommandHandler
             Data = dataJson
         };
     }
+
+    private async Task<CommandResult<JsonElement>> HandleBatchPatchAsync(
+        MultiFilePatchCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (command.Items is null || command.Items.Count < 1 || command.Items.Count > 20)
+        {
+            return BatchPatchFailure(
+                command.CommandId,
+                ErrorCodes.InvalidRequest,
+                "items must contain between 1 and 20 entries.");
+        }
+
+        var itemResults = new MultiFilePatchItemResult[command.Items.Count];
+        using var gate = new SemaphoreSlim(4, 4);
+        var tasks = command.Items.Select((item, index) =>
+            ProcessMultiFilePatchItemAsync(command, item, index, itemResults, gate, cancellationToken));
+
+        try
+        {
+            await Task.WhenAll(tasks);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            return BatchPatchFailure(command.CommandId, ErrorCodes.CommandCancelled, "The batch patch command was cancelled.");
+        }
+
+        var data = new MultiFilePatchResult
+        {
+            Items = itemResults,
+            Succeeded = itemResults.Count(item => item.Success),
+            Failed = itemResults.Count(item => !item.Success)
+        };
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task ProcessMultiFilePatchItemAsync(
+        MultiFilePatchCommand command,
+        MultiFilePatchItem? item,
+        int index,
+        MultiFilePatchItemResult[] results,
+        SemaphoreSlim gate,
+        CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (OnBeforeMultiFileEditHook is not null)
+                await OnBeforeMultiFileEditHook(item?.Path ?? string.Empty);
+
+            results[index] = await PatchBatchItemAsync(command, item, cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<MultiFilePatchItemResult> PatchBatchItemAsync(
+        MultiFilePatchCommand command,
+        MultiFilePatchItem? item,
+        CancellationToken cancellationToken)
+    {
+        var path = item?.Path ?? string.Empty;
+        if (item is null)
+            return MultiFilePatchItemFailure(path, ErrorCodes.InvalidRequest, "The batch patch item is required.");
+
+        return await ExecuteMultiFilePatchItemAsync(command, item, path, cancellationToken);
+    }
+
+    private async Task<MultiFilePatchItemResult> ExecuteMultiFilePatchItemAsync(
+        MultiFilePatchCommand command,
+        MultiFilePatchItem item,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(item.ExpectedSha256))
+            return MultiFilePatchItemFailure(path, ErrorCodes.ExpectedHashRequired, "expectedSha256 is required.");
+
+        if (item.Edits is null || item.Edits.Count == 0)
+            return MultiFilePatchItemFailure(path, ErrorCodes.PatchEditsRequired, "At least one patch edit is required.");
+
+        return await RunBatchItemAsync(command, item, path, cancellationToken);
+    }
+
+    private Task<MultiFilePatchItemResult> RunBatchItemAsync(
+        MultiFilePatchCommand command,
+        MultiFilePatchItem item,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var single = new PatchFileCommand
+        {
+            CommandId = command.CommandId,
+            DeviceId = command.DeviceId,
+            CreatedAt = command.CreatedAt,
+            Path = path,
+            ExpectedSha256 = item.ExpectedSha256,
+            Edits = item.Edits
+        };
+        return ConvertBatchPatchResultAsync(path, single, cancellationToken);
+    }
+
+    private async Task<MultiFilePatchItemResult> ConvertBatchPatchResultAsync(
+        string path,
+        PatchFileCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await HandlePatchFileAsync(command, cancellationToken);
+        return ConvertBatchPatchResult(path, result);
+    }
+
+    private static MultiFilePatchItemResult ConvertBatchPatchResult(
+        string path,
+        CommandResult<JsonElement> result)
+    {
+        if (!result.Success)
+            return new MultiFilePatchItemResult { Path = path, Success = false, Error = result.Error };
+
+        return ReadBatchPatchData(path, result.Data);
+    }
+
+    private static MultiFilePatchItemResult ReadBatchPatchData(string path, JsonElement dataElement)
+    {
+        var data = dataElement.Deserialize<PatchFileResult>(
+            LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+        return data is null
+            ? MultiFilePatchItemFailure(path, ErrorCodes.InternalError, "The file patch did not return data.")
+            : new MultiFilePatchItemResult { Path = path, Success = true, Data = data };
+    }
+
+    private static MultiFilePatchItemResult MultiFilePatchItemFailure(string path, string code, string message) => new()
+    {
+        Path = path,
+        Success = false,
+        Error = new CommandError(code, message)
+    };
+
+    private static CommandResult<JsonElement> BatchPatchFailure(Guid commandId, string code, string message) => new()
+    {
+        CommandId = commandId,
+        Success = false,
+        Error = new CommandError(code, message)
+    };
 
     private async Task<CommandResult<JsonElement>> HandleCreateDirectoryAsync(
         CreateDirectoryCommand command,
