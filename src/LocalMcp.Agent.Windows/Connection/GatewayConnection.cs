@@ -135,6 +135,8 @@ public sealed class GatewayConnection : IAsyncDisposable
                         nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(rawJson, JsonOptions.Default),
                         nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(rawJson, JsonOptions.Default),
                         nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(rawJson, JsonOptions.Default),
+                        nameof(CreateDirectoryCommand) => JsonSerializer.Deserialize<CreateDirectoryCommand>(rawJson, JsonOptions.Default),
+                        nameof(StatCommand) => JsonSerializer.Deserialize<StatCommand>(rawJson, JsonOptions.Default),
                         _ => null
                     };
                 }

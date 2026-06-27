@@ -26,6 +26,9 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
     private readonly FileAccessOptions _options;
     private readonly ILogger<FileSystemExecutor> _logger;
 
+    internal Func<string, Task>? OnBeforeContentReadHook { get; set; }
+    internal Action<string>? OnDirectorySegmentCreatedHook { get; set; }
+
     public FileSystemExecutor(
         IPathPolicy pathPolicy,
         IOptions<FileAccessOptions> options,
@@ -1078,6 +1081,521 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         }
     }
 
+    public Task<CommandResult<CreateDirectoryResult>> CreateDirectoryAsync(
+        string path,
+        bool recursive,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Creating directory {Path} for command {CommandId} (recursive={Recursive})", path, commandId, recursive);
+
+        try
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+                });
+            }
+
+            var policyError = _pathPolicy.AuthorizeCreateDirectory(path, out var physicalPath, recursive);
+            if (policyError is not null)
+            {
+                return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = policyError
+                });
+            }
+
+            var current = physicalPath;
+            var pathStack = new Stack<string>();
+            while (!string.IsNullOrEmpty(current))
+            {
+                if (Directory.Exists(current) || File.Exists(current))
+                {
+                    var attrs = File.GetAttributes(current);
+                    if (attrs.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.")
+                        });
+                    }
+                }
+
+                if (Directory.Exists(current))
+                {
+                    break;
+                }
+
+                pathStack.Push(current);
+                var parent = Path.GetDirectoryName(current);
+                if (string.IsNullOrEmpty(parent) || parent == current)
+                {
+                    break;
+                }
+                current = parent;
+            }
+
+            var ancestor = current;
+            if (string.IsNullOrEmpty(ancestor) || !Directory.Exists(ancestor))
+            {
+                return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotFound, "Parent directory does not exist.")
+                });
+            }
+
+            if (!recursive && pathStack.Count > 1)
+            {
+                return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotFound, "The parent directory was not found.")
+                });
+            }
+
+            var createdDirectories = new List<string>();
+
+            while (pathStack.Count > 0)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    RollbackCreatedDirectories(createdDirectories);
+                    return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+                    });
+                }
+
+                var nextDir = pathStack.Pop();
+                var nextDirName = Path.GetFileName(nextDir);
+                var segmentError = ValidateDirectoryName(nextDirName);
+                if (segmentError is not null)
+                {
+                    RollbackCreatedDirectories(createdDirectories);
+                    return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = segmentError
+                    });
+                }
+
+                if (Directory.Exists(nextDir) || File.Exists(nextDir))
+                {
+                    var originalAttrs = File.GetAttributes(nextDir);
+                    if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        RollbackCreatedDirectories(createdDirectories);
+                        return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed.")
+                        });
+                    }
+                }
+
+                try
+                {
+                    Directory.CreateDirectory(nextDir);
+                    createdDirectories.Add(nextDir);
+                }
+                catch (Exception ex)
+                {
+                    RollbackCreatedDirectories(createdDirectories);
+                    return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.AccessDenied, $"Failed to create directory '{nextDirName}': {ex.GetType().Name}")
+                    });
+                }
+
+                if (OnDirectorySegmentCreatedHook is not null)
+                {
+                    OnDirectorySegmentCreatedHook(nextDir);
+                }
+
+                var verifyError = VerifyDirectoryAfterCreation(nextDir);
+                if (verifyError is not null)
+                {
+                    RollbackCreatedDirectories(createdDirectories);
+                    return Task.FromResult(new CommandResult<CreateDirectoryResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = verifyError
+                    });
+                }
+            }
+
+            return Task.FromResult(new CommandResult<CreateDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new CreateDirectoryResult
+                {
+                    Path = physicalPath,
+                    Created = createdDirectories.Count > 0,
+                    DirectoriesCreated = createdDirectories
+                }
+            });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex, "Unauthorized access creating directory {Path} for command {CommandId}", path, commandId);
+            return Task.FromResult(new CommandResult<CreateDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "Access denied to create the directory.")
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create directory {Path} for command {CommandId}", path, commandId);
+            return Task.FromResult(new CommandResult<CreateDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An error occurred while creating the directory.")
+            });
+        }
+    }
+
+    public async Task<CommandResult<StatResult>> StatAsync(
+        string path,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Getting stats for {Path} for command {CommandId}", path, commandId);
+
+        try
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return new CommandResult<StatResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+                };
+            }
+
+            var policyError = _pathPolicy.AuthorizeStat(path, out var physicalPath);
+            if (policyError is not null)
+            {
+                return new CommandResult<StatResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = policyError
+                };
+            }
+
+            var result = new StatResult();
+
+            if (File.Exists(physicalPath))
+            {
+                var fileInfo = new FileInfo(physicalPath);
+                result.Exists = true;
+                result.Type = "file";
+                result.Size = fileInfo.Length;
+                result.ReadOnly = fileInfo.IsReadOnly;
+                result.LastWriteTimeUtc = fileInfo.LastWriteTimeUtc;
+                result.IsReparsePoint = fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
+
+                if (OnBeforeContentReadHook is not null)
+                {
+                    await OnBeforeContentReadHook(physicalPath);
+                }
+
+                try
+                {
+                    using (var stream = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true))
+                    {
+                        var streamLength = stream.Length;
+                        if (streamLength <= _options.MaxReadBytes)
+                        {
+                            var hashBytes = await SHA256.HashDataAsync(stream, cancellationToken);
+                            result.Sha256 = Convert.ToHexString(hashBytes).ToLowerInvariant();
+
+                            stream.Position = 0;
+
+                            int maxBuffer = (int)streamLength + 1;
+                            byte[] buffer = new byte[maxBuffer];
+                            int totalRead = 0;
+                            int read;
+                            while ((read = await stream.ReadAsync(buffer, totalRead, buffer.Length - totalRead, cancellationToken)) > 0)
+                            {
+                                totalRead += read;
+                                if (totalRead > _options.MaxReadBytes)
+                                {
+                                    break;
+                                }
+                            }
+
+                            if (totalRead > _options.MaxReadBytes)
+                            {
+                                result.ContentMetadataSkipped = true;
+                                result.Sha256 = null;
+                                result.Encoding = null;
+                            }
+                            else
+                            {
+                                byte[] contentBytes = new byte[totalRead];
+                                Array.Copy(buffer, contentBytes, totalRead);
+
+                                bool isBinary = IsBinary(contentBytes);
+                                string? detectedEncoding = null;
+                                if (!isBinary)
+                                {
+                                    try
+                                    {
+                                        var (_, encodingName) = DecodeText(contentBytes);
+                                        detectedEncoding = encodingName;
+                                    }
+                                    catch (Exception ex) when (ex is DecoderFallbackException || ex is ArgumentException)
+                                    {
+                                        // Invalid UTF-8
+                                    }
+                                }
+
+                                result.Encoding = detectedEncoding;
+                                result.ContentMetadataAvailable = true;
+                            }
+                        }
+                        else
+                        {
+                            result.ContentMetadataSkipped = true;
+                        }
+                    }
+                }
+                catch (IOException)
+                {
+                    result.ContentMetadataAvailable = false;
+                    result.ContentMetadataErrorCode = "IO_ERROR";
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    result.ContentMetadataAvailable = false;
+                    result.ContentMetadataErrorCode = "ACCESS_DENIED";
+                }
+                catch (Exception)
+                {
+                    result.ContentMetadataAvailable = false;
+                    result.ContentMetadataErrorCode = "READ_ERROR";
+                }
+            }
+            else if (Directory.Exists(physicalPath))
+            {
+                var dirInfo = new DirectoryInfo(physicalPath);
+                result.Exists = true;
+                result.Type = "directory";
+                result.ReadOnly = false;
+                result.LastWriteTimeUtc = dirInfo.LastWriteTimeUtc;
+                result.IsReparsePoint = dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            }
+            else
+            {
+                result.Exists = false;
+            }
+
+            return new CommandResult<StatResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = result
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get stats for path {Path} for command {CommandId}", path, commandId);
+            return new CommandResult<StatResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An error occurred while retrieving file status.")
+            };
+        }
+    }
+
+    private void RollbackCreatedDirectories(List<string> createdDirectories)
+    {
+        for (int i = createdDirectories.Count - 1; i >= 0; i--)
+        {
+            var dir = createdDirectories[i];
+            try
+            {
+                if (Directory.Exists(dir) || File.Exists(dir))
+                {
+                    var attrs = File.GetAttributes(dir);
+                    if (attrs.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        continue;
+                    }
+
+                    var physicalPath = ResolvePhysicalPath(dir);
+                    if (!string.Equals(Path.GetFullPath(dir), physicalPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (Directory.Exists(dir))
+                    {
+                        var dirInfo = new DirectoryInfo(dir);
+                        if (dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            continue;
+                        }
+
+                        if (Directory.GetFileSystemEntries(dir).Length == 0)
+                        {
+                            Directory.Delete(dir);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Best effort
+            }
+        }
+    }
+
+    private CommandError? ValidateDirectoryName(string dirName)
+    {
+        if (string.IsNullOrEmpty(dirName))
+        {
+            return null;
+        }
+
+        if (_options.DeniedSegments.Any(ds => string.Equals(ds, dirName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new CommandError(ErrorCodes.AccessDenied, $"Access denied to directory containing segment '{dirName}'.");
+        }
+
+        if (_options.DeniedFileNames.Any(df => PathPolicy.MatchFileName(dirName, df)) ||
+            _options.DeniedWriteFileNames.Any(dw => PathPolicy.MatchFileName(dirName, dw)))
+        {
+            return new CommandError(ErrorCodes.AccessDenied, $"Access denied to directory '{dirName}'.");
+        }
+
+        return null;
+    }
+
+    private CommandError? VerifyDirectoryAfterCreation(string dirPath)
+    {
+        try
+        {
+            if (Directory.Exists(dirPath) || File.Exists(dirPath))
+            {
+                var originalAttrs = File.GetAttributes(dirPath);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed.");
+                }
+            }
+
+            var physicalPath = ResolvePhysicalPath(dirPath);
+
+            var dirInfo = new DirectoryInfo(physicalPath);
+            if (dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed.");
+            }
+
+            bool inWritableRoot = false;
+            foreach (var root in _options.WritableRoots)
+            {
+                var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                var fullPath = physicalPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    inWritableRoot = true;
+                    break;
+                }
+            }
+            if (!inWritableRoot)
+            {
+                return new CommandError(ErrorCodes.WriteNotAllowed, "The directory escaped the writable root directory.");
+            }
+
+            bool inAllowedRoot = false;
+            foreach (var root in _options.AllowedRoots)
+            {
+                var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                var fullPath = physicalPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    inAllowedRoot = true;
+                    break;
+                }
+            }
+            if (!inAllowedRoot)
+            {
+                return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The directory escaped the allowed root directory.");
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Verification of created directory failed.");
+        }
+
+        return null;
+    }
+
+    private string ResolvePhysicalPath(string path)
+    {
+        var current = Path.GetFullPath(path);
+        while (!string.IsNullOrEmpty(current))
+        {
+            var fsi = new DirectoryInfo(current);
+            if (fsi.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                var target = fsi.ResolveLinkTarget(true);
+                if (target is not null)
+                {
+                    current = target.FullName;
+                    continue;
+                }
+            }
+
+            var currentParent = Path.GetDirectoryName(current);
+            if (currentParent is null)
+            {
+                break;
+            }
+
+            var resolvedCurrentParent = ResolvePhysicalPath(currentParent);
+            if (!string.Equals(resolvedCurrentParent, currentParent, StringComparison.OrdinalIgnoreCase))
+            {
+                current = Path.Combine(resolvedCurrentParent, Path.GetFileName(current));
+                continue;
+            }
+
+            break;
+        }
+
+        return Path.GetFullPath(current);
+    }
+
+
+
     private static string ComputeSha256(byte[] bytes)
     {
         var hashBytes = SHA256.HashData(bytes);
@@ -1096,6 +1614,7 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         }
         return false;
     }
+
 
     private static (string Content, string EncodingName) DecodeText(byte[] bytes)
     {

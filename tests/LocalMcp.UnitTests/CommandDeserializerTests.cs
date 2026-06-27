@@ -50,6 +50,8 @@ public sealed class CommandDeserializerTests
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
                 nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(payload, JsonOptions.Default),
                 nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
+                nameof(CreateDirectoryCommand) => JsonSerializer.Deserialize<CreateDirectoryCommand>(payload, JsonOptions.Default),
+                nameof(StatCommand) => JsonSerializer.Deserialize<StatCommand>(payload, JsonOptions.Default),
                 _ => null
             };
         }
@@ -146,6 +148,35 @@ public sealed class CommandDeserializerTests
         Assert.Equal("foo", patchCmd.Edits[0].OldText);
         Assert.Equal("bar", patchCmd.Edits[0].NewText);
         Assert.True(patchCmd.Edits[0].ReplaceAll);
+    }
+
+    [Fact]
+    public void Deserialize_CreateDirectoryCommand_WithValidJson_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"CreateDirectoryCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\new_dir\",\"recursive\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.NotNull(command);
+        var mkdirCmd = Assert.IsType<CreateDirectoryCommand>(command);
+        Assert.Equal("C:\\new_dir", mkdirCmd.Path);
+        Assert.True(mkdirCmd.Recursive);
+    }
+
+    [Fact]
+    public void Deserialize_StatCommand_WithValidJson_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"StatCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\file.txt\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.NotNull(command);
+        var statCmd = Assert.IsType<StatCommand>(command);
+        Assert.Equal("C:\\file.txt", statCmd.Path);
     }
 
     [Fact]

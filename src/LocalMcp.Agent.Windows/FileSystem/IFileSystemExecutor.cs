@@ -52,4 +52,17 @@ public interface IFileSystemExecutor
         Guid commandId,
         CancellationToken cancellationToken
     );
+
+    Task<CommandResult<CreateDirectoryResult>> CreateDirectoryAsync(
+        string path,
+        bool recursive,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
+    Task<CommandResult<StatResult>> StatAsync(
+        string path,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
 }

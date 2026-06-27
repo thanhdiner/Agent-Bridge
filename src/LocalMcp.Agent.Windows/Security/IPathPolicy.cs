@@ -26,4 +26,14 @@ public interface IPathPolicy
     /// <param name="normalizedPath">The output canonical physical path.</param>
     /// <param name="mustExist">If true, the target file must already exist.</param>
     CommandError? AuthorizeWriteFile(string rawPath, out string normalizedPath, bool mustExist = false);
+
+    /// <summary>
+    /// Authorises a path for directory creation.
+    /// </summary>
+    CommandError? AuthorizeCreateDirectory(string rawPath, out string normalizedPath, bool recursive);
+
+    /// <summary>
+    /// Authorises a path for checking its metadata (existence and stats).
+    /// </summary>
+    CommandError? AuthorizeStat(string rawPath, out string normalizedPath);
 }

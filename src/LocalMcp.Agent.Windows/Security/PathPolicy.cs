@@ -297,6 +297,229 @@ public sealed class PathPolicy : IPathPolicy
         return null;
     }
 
+    public CommandError? AuthorizeCreateDirectory(string rawPath, out string normalizedPath, bool recursive)
+    {
+        normalizedPath = string.Empty;
+
+        if (_options.WritableRoots == null || _options.WritableRoots.Count == 0)
+        {
+            return new CommandError(ErrorCodes.WritableRootNotConfigured, "No writable roots are configured on the agent.");
+        }
+
+        var pathError = ValidateBasicPath(rawPath, out var fullPath);
+        if (pathError is not null)
+        {
+            return pathError;
+        }
+
+        if (File.Exists(fullPath))
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "A file already exists at the target path.");
+        }
+
+        if (!recursive)
+        {
+            var parent = Path.GetDirectoryName(fullPath);
+            if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
+            {
+                return new CommandError(ErrorCodes.DirectoryNotFound, "The parent directory was not found.");
+            }
+        }
+
+        string physicalPath;
+        try
+        {
+            if (Directory.Exists(fullPath))
+            {
+                var originalAttrs = File.GetAttributes(fullPath);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.");
+                }
+                physicalPath = ResolvePhysicalPath(fullPath);
+            }
+            else
+            {
+                var current = fullPath;
+                string? existingAncestor = null;
+                while (!string.IsNullOrEmpty(current))
+                {
+                    if (Directory.Exists(current) || File.Exists(current))
+                    {
+                        var attrs = File.GetAttributes(current);
+                        if (attrs.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.");
+                        }
+                    }
+
+                    var parent = Path.GetDirectoryName(current);
+                    if (string.IsNullOrEmpty(parent))
+                    {
+                        break;
+                    }
+                    if (Directory.Exists(parent))
+                    {
+                        existingAncestor = parent;
+                        break;
+                    }
+                    current = parent;
+                }
+
+                if (!string.IsNullOrEmpty(existingAncestor))
+                {
+                    var ancestorAttrs = File.GetAttributes(existingAncestor);
+                    if (ancestorAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.");
+                    }
+                    var resolvedParent = ResolvePhysicalPath(existingAncestor);
+                    var relative = Path.GetRelativePath(existingAncestor, fullPath);
+                    physicalPath = Path.GetFullPath(Path.Combine(resolvedParent, relative));
+                }
+                else
+                {
+                    physicalPath = fullPath;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical path.");
+        }
+
+        var writableRoot = GetMatchingWritableRoot(physicalPath);
+        if (writableRoot is null)
+        {
+            return new CommandError(ErrorCodes.WriteNotAllowed, "The requested path lies outside the configured writable root directories.");
+        }
+
+        var originalWritableRoot = GetMatchingWritableRoot(fullPath);
+        if (originalWritableRoot is null)
+        {
+            return new CommandError(ErrorCodes.WriteNotAllowed, "The requested path lies outside the configured writable root directories.");
+        }
+
+        var allowedRoot = GetMatchingAllowedRoot(physicalPath);
+        if (allowedRoot is null)
+        {
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The requested path lies outside the configured allowed root directories.");
+        }
+
+        var originalAllowedRoot = GetMatchingAllowedRoot(fullPath);
+        if (originalAllowedRoot is null)
+        {
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The requested path lies outside the configured allowed root directories.");
+        }
+
+        var segments = physicalPath.Split(
+            new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+            StringSplitOptions.RemoveEmptyEntries
+        );
+        foreach (var segment in segments)
+        {
+            if (_options.DeniedSegments.Any(ds => string.Equals(ds, segment, StringComparison.OrdinalIgnoreCase)))
+            {
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to path containing segment '{segment}'.");
+            }
+        }
+
+        var fileName = Path.GetFileName(physicalPath);
+        if (!string.IsNullOrEmpty(fileName))
+        {
+            if (_options.DeniedFileNames.Any(df => MatchFileName(fileName, df)) ||
+                _options.DeniedWriteFileNames.Any(dw => MatchFileName(fileName, dw)))
+            {
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to directory '{fileName}'.");
+            }
+        }
+
+        normalizedPath = physicalPath;
+        return null;
+    }
+
+    public CommandError? AuthorizeStat(string rawPath, out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+
+        var pathError = ValidateBasicPath(rawPath, out var fullPath);
+        if (pathError is not null)
+        {
+            return pathError;
+        }
+
+        string physicalPath;
+        try
+        {
+            if (File.Exists(fullPath) || Directory.Exists(fullPath))
+            {
+                var originalAttrs = File.GetAttributes(fullPath);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.");
+                }
+                physicalPath = ResolvePhysicalPath(fullPath);
+            }
+            else
+            {
+                var current = fullPath;
+                string? existingAncestor = null;
+                while (!string.IsNullOrEmpty(current))
+                {
+                    if (Directory.Exists(current) || File.Exists(current))
+                    {
+                        var attrs = File.GetAttributes(current);
+                        if (attrs.HasFlag(FileAttributes.ReparsePoint))
+                        {
+                            return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.");
+                        }
+                    }
+
+                    var parent = Path.GetDirectoryName(current);
+                    if (string.IsNullOrEmpty(parent))
+                    {
+                        break;
+                    }
+                    if (Directory.Exists(parent))
+                    {
+                        existingAncestor = parent;
+                        break;
+                    }
+                    current = parent;
+                }
+
+                if (!string.IsNullOrEmpty(existingAncestor))
+                {
+                    var ancestorAttrs = File.GetAttributes(existingAncestor);
+                    if (ancestorAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.");
+                    }
+                    var resolvedParent = ResolvePhysicalPath(existingAncestor);
+                    var relative = Path.GetRelativePath(existingAncestor, fullPath);
+                    physicalPath = Path.GetFullPath(Path.Combine(resolvedParent, relative));
+                }
+                else
+                {
+                    physicalPath = fullPath;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical path.");
+        }
+
+        var rootError = ValidateAllowedRootsAndSegments(physicalPath, fullPath);
+        if (rootError is not null)
+        {
+            return rootError;
+        }
+
+        normalizedPath = physicalPath;
+        return null;
+    }
+
     private CommandError? ValidateBasicPath(string rawPath, out string fullPath)
     {
         fullPath = string.Empty;
@@ -495,7 +718,7 @@ public sealed class PathPolicy : IPathPolicy
         return Path.GetFullPath(current);
     }
 
-    private static bool MatchFileName(string fileName, string pattern)
+    internal static bool MatchFileName(string fileName, string pattern)
     {
         if (pattern.EndsWith('*'))
         {

@@ -72,6 +72,7 @@ public sealed class EndToEndTests : IAsyncDisposable
         var fileAccessOptions = new FileAccessOptions
         {
             AllowedRoots = new List<string> { _tempRoot },
+            WritableRoots = new List<string> { _tempRoot },
             DeniedSegments = new List<string> { ".git" },
             DeniedFileNames = new List<string> { ".env" },
             MaxReadBytes = 1024 * 1024
@@ -170,6 +171,51 @@ public sealed class EndToEndTests : IAsyncDisposable
                 File.Delete(outsidePath);
             }
         }
+    }
+
+    [Fact]
+    public async Task FsMkdirAndFsStat_EndToEndFlow_CreatesAndStatsSuccessfully()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var targetPath = Path.Combine(_tempRoot, "e2e_parent", "e2e_child");
+
+        var mcpTools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
+        );
+
+        // 1. Stat non-existent folder
+        var statResponseBefore = await mcpTools.StatAsync(_deviceId, targetPath);
+        Assert.False(statResponseBefore.IsError);
+        var textBlockBefore = Assert.IsType<TextContentBlock>(statResponseBefore.Content[0]);
+        var statResultBefore = JsonSerializer.Deserialize<StatResult>(textBlockBefore.Text, JsonOptions.Default);
+        Assert.NotNull(statResultBefore);
+        Assert.False(statResultBefore.Exists);
+
+        // 2. Create folder recursively
+        var mkdirResponse = await mcpTools.CreateDirectoryAsync(_deviceId, targetPath, recursive: true);
+        Assert.False(mkdirResponse.IsError);
+        var textBlockMkdir = Assert.IsType<TextContentBlock>(mkdirResponse.Content[0]);
+        var mkdirResult = JsonSerializer.Deserialize<CreateDirectoryResult>(textBlockMkdir.Text, JsonOptions.Default);
+        Assert.NotNull(mkdirResult);
+        Assert.True(mkdirResult.Created);
+        Assert.Equal(2, mkdirResult.DirectoriesCreated.Count);
+        Assert.True(Directory.Exists(targetPath));
+
+        // 3. Stat created folder
+        var statResponseAfter = await mcpTools.StatAsync(_deviceId, targetPath);
+        Assert.False(statResponseAfter.IsError);
+        var textBlockAfter = Assert.IsType<TextContentBlock>(statResponseAfter.Content[0]);
+        var statResultAfter = JsonSerializer.Deserialize<StatResult>(textBlockAfter.Text, JsonOptions.Default);
+        Assert.NotNull(statResultAfter);
+        Assert.True(statResultAfter.Exists);
+        Assert.Equal("directory", statResultAfter.Type);
     }
 
     public async ValueTask DisposeAsync()

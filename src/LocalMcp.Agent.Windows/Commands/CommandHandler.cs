@@ -54,6 +54,14 @@ public sealed class CommandHandler
         {
             return await HandlePatchFileAsync(patchFileCommand, cancellationToken);
         }
+        else if (command is CreateDirectoryCommand createDirectoryCommand)
+        {
+            return await HandleCreateDirectoryAsync(createDirectoryCommand, cancellationToken);
+        }
+        else if (command is StatCommand statCommand)
+        {
+            return await HandleStatAsync(statCommand, cancellationToken);
+        }
 
         _logger.LogWarning("Unsupported command type received: {CommandType}", command.GetType().Name);
         return new CommandResult<JsonElement>
@@ -369,6 +377,67 @@ public sealed class CommandHandler
         }
 
         var dataJson = JsonSerializer.SerializeToElement(patchResult.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleCreateDirectoryAsync(
+        CreateDirectoryCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _fileSystemExecutor.CreateDirectoryAsync(
+            command.Path,
+            command.Recursive,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!result.Success || result.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleStatAsync(
+        StatCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _fileSystemExecutor.StatAsync(
+            command.Path,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!result.Success || result.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
 
         return new CommandResult<JsonElement>
         {
