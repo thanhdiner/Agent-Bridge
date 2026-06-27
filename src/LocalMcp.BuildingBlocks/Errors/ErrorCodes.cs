@@ -16,6 +16,7 @@ public static class ErrorCodes
     public const string UnsupportedCommand = "UNSUPPORTED_COMMAND";
     public const string InternalError = "INTERNAL_ERROR";
     public const string DirectoryNotFound = "DIRECTORY_NOT_FOUND";
+    public const string DirectoryNotEmpty = "DIRECTORY_NOT_EMPTY";
     public const string InvalidSearchMode = "INVALID_SEARCH_MODE";
     public const string SearchQueryRequired = "SEARCH_QUERY_REQUIRED";
     public const string TreeDepthLimitExceeded = "TREE_DEPTH_LIMIT_EXCEEDED";

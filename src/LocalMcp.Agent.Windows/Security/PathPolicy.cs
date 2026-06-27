@@ -904,6 +904,118 @@ public sealed class PathPolicy : IPathPolicy
         return null;
     }
 
+    public CommandError? AuthorizeRemoveDirectory(string rawPath, bool missingOk, out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+
+        if (_options.WritableRoots == null || _options.WritableRoots.Count == 0)
+            return new CommandError(ErrorCodes.WritableRootNotConfigured, "No writable roots are configured on the agent.");
+
+        var pathError = ValidateBasicPath(rawPath, out var fullPath);
+        if (pathError is not null)
+            return pathError;
+
+        var reparseError = VerifyNoReparsePointsInOriginalPath(fullPath);
+        if (reparseError is not null)
+            return reparseError;
+
+        if (File.Exists(fullPath))
+            return new CommandError(ErrorCodes.AccessDenied, "The requested path is a file, not a directory.");
+
+        string physicalPath;
+        try
+        {
+            if (Directory.Exists(fullPath))
+            {
+                var attributes = File.GetAttributes(fullPath);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the directory removal path.");
+
+                physicalPath = ResolvePhysicalPath(fullPath);
+            }
+            else
+            {
+                var ancestor = Path.GetDirectoryName(fullPath);
+                while (!string.IsNullOrEmpty(ancestor) && !Directory.Exists(ancestor) && !File.Exists(ancestor))
+                {
+                    var parent = Path.GetDirectoryName(ancestor);
+                    if (string.IsNullOrEmpty(parent) || string.Equals(parent, ancestor, StringComparison.OrdinalIgnoreCase))
+                        break;
+                    ancestor = parent;
+                }
+
+                if (!string.IsNullOrEmpty(ancestor) && File.Exists(ancestor))
+                    return new CommandError(ErrorCodes.DirectoryNotFound, "A parent path component is a file, not a directory.");
+
+                if (!string.IsNullOrEmpty(ancestor) && Directory.Exists(ancestor))
+                {
+                    var resolvedAncestor = ResolvePhysicalPath(ancestor);
+                    var relative = Path.GetRelativePath(ancestor, fullPath);
+                    physicalPath = Path.GetFullPath(Path.Combine(resolvedAncestor, relative));
+                }
+                else
+                {
+                    physicalPath = fullPath;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical directory removal path.");
+        }
+
+        if (GetMatchingWritableRoot(physicalPath) is null || GetMatchingWritableRoot(fullPath) is null)
+            return new CommandError(ErrorCodes.WriteNotAllowed, "The requested path lies outside the configured writable root directories.");
+
+        if (GetMatchingAllowedRoot(physicalPath) is null || GetMatchingAllowedRoot(fullPath) is null)
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The requested path lies outside the configured allowed root directories.");
+
+        var comparableFullPath = Path.TrimEndingDirectorySeparator(fullPath);
+        var comparablePhysicalPath = Path.TrimEndingDirectorySeparator(physicalPath);
+        foreach (var configuredRoot in _options.AllowedRoots.Concat(_options.WritableRoots))
+        {
+            try
+            {
+                var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(configuredRoot));
+                if (string.Equals(comparableFullPath, fullRoot, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(comparablePhysicalPath, fullRoot, StringComparison.OrdinalIgnoreCase))
+                    return new CommandError(ErrorCodes.AccessDenied, "Configured root directories cannot be removed.");
+            }
+            catch
+            {
+                // Invalid configured roots are ignored by the existing root matching logic.
+            }
+        }
+
+        foreach (var segment in physicalPath.Split(
+                     new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (_options.DeniedSegments.Any(ds => string.Equals(ds, segment, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to directory removal path containing segment '{segment}'.");
+        }
+
+        var directoryName = Path.GetFileName(physicalPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrEmpty(directoryName) &&
+            (_options.DeniedFileNames.Any(df => MatchFileName(directoryName, df)) ||
+             _options.DeniedWriteFileNames.Any(dw => MatchFileName(directoryName, dw))))
+            return new CommandError(ErrorCodes.AccessDenied, $"Access denied to directory '{directoryName}'.");
+
+        if (Directory.Exists(physicalPath))
+        {
+            var attributes = File.GetAttributes(physicalPath);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the directory removal path.");
+        }
+        else if (!missingOk)
+        {
+            return new CommandError(ErrorCodes.DirectoryNotFound, "The requested directory was not found.");
+        }
+
+        normalizedPath = physicalPath;
+        return null;
+    }
+
     private CommandError? VerifyNoReparsePointsInOriginalPath(string fullPath)
     {
         var current = fullPath;

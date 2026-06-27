@@ -382,6 +382,35 @@ public sealed class EndToEndTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FsRmdir_EndToEndFlow_RemovesEmptyDirectorySuccessfully()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var directoryPath = Path.Combine(_tempRoot, "remove-empty-directory");
+        Directory.CreateDirectory(directoryPath);
+
+        var tools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>());
+
+        var response = await tools.RemoveDirectoryAsync(_deviceId, directoryPath, missingOk: false);
+
+        Assert.False(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<RemoveDirectoryResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal(directoryPath, data.Path);
+        Assert.True(data.Removed);
+        Assert.False(Directory.Exists(directoryPath));
+    }
+
+    [Fact]
     public async Task FsDelete_EndToEndFlow_RemovesFileSuccessfully()
     {
         await InitializeAsync();

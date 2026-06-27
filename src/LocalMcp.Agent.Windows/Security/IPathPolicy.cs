@@ -51,4 +51,9 @@ public interface IPathPolicy
     /// Authorises a file path for deletion. Directories are not supported.
     /// </summary>
     CommandError? AuthorizeDeleteFile(string rawPath, bool missingOk, out string normalizedPath);
+
+    /// <summary>
+    /// Authorises an empty directory path for non-recursive removal.
+    /// </summary>
+    CommandError? AuthorizeRemoveDirectory(string rawPath, bool missingOk, out string normalizedPath);
 }

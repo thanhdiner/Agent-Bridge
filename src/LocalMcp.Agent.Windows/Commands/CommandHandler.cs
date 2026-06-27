@@ -93,6 +93,10 @@ public sealed class CommandHandler
         {
             return await HandleDeleteAsync(deleteCommand, cancellationToken);
         }
+        else if (command is RemoveDirectoryCommand removeDirectoryCommand)
+        {
+            return await HandleRemoveDirectoryAsync(removeDirectoryCommand, cancellationToken);
+        }
 
         _logger.LogWarning("Unsupported command type received: {CommandType}", command.GetType().Name);
         return new CommandResult<JsonElement>
@@ -618,6 +622,36 @@ public sealed class CommandHandler
                 commandId,
                 cancellationToken);
         }
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleRemoveDirectoryAsync(
+        RemoveDirectoryCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _fileSystemExecutor.RemoveDirectoryAsync(
+            command.Path,
+            command.MissingOk,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!result.Success || result.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
     }
 
     private async Task<CommandResult<JsonElement>> HandleDeleteAsync(

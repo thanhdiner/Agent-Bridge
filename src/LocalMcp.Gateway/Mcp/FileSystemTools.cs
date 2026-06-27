@@ -460,6 +460,34 @@ public sealed class FileSystemTools
         return await DispatchAsync<DeleteResult>(command, "fs_delete", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_rmdir", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Removes one empty directory on a target Windows agent device. Recursive deletion is not supported. The path must be within configured writable roots and configured root directories cannot be removed. Requires files:write scope. Ask the user for confirmation before executing.")]
+    public async Task<CallToolResult> RemoveDirectoryAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the empty directory to remove")] string path,
+        [Description("Whether a missing directory should be treated as success (default: false)")] bool missingOk = false)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        var command = new RemoveDirectoryCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            MissingOk = missingOk
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<RemoveDirectoryResult>(command, "fs_rmdir", deviceId, cancellationToken);
+    }
+
     // ──────────────────────────────────────────────
     // Private transport and auth helpers
     // ──────────────────────────────────────────────
