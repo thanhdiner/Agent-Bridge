@@ -71,7 +71,7 @@ graph TD
 | `fs_write` | Creates or overwrites a single file using optimistic concurrency (SHA-256 ETag). |
 | `fs_patch` | Applies a list of exact text substitutions atomically to an existing file. |
 | `fs_mkdir` | Creates directory or directories. Gated by `WritableRoots` enforcement. For recursive creation (`recursive: true`), resolves the closest existing ancestor, validates it, checks every proposed subdirectory name against denied patterns, and creates them segment by segment with post-creation safety verification and automatic rollback on failure. |
-| `fs_move` | Moves or renames a file or directory within writable roots. Supports optional source SHA-256 concurrency checks. |
+| `fs_move` | Moves or renames a file or directory within writable roots. File moves support cross-volume copy-verify-delete fallback with SHA-256 verification, durable temporary writes, rollback on pre-delete failure, and optional source hash guards. Directory moves remain same-volume only. |
 | `fs_copy` | Copies a file or bounded directory tree into a writable root. Directory sources require `recursive: true`, reject merge/overwrite, enforce entry and byte limits, reject reparse points at every level, and publish through a temporary sibling directory followed by an atomic rename. |
 | `fs_delete` | Deletes one file from a writable root after confirmation. Directories are not supported; optional SHA-256 concurrency checks and `missingOk` are supported. |
 | `fs_rmdir` | Removes one empty directory from a writable root after confirmation. Recursive deletion is not supported, configured roots are protected, and `missingOk` is supported. |
@@ -364,6 +364,7 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `RemoveDirectoryTests` | Empty-directory-only removal, root protection, missing paths, non-empty races, denied paths, and reparse-point rejection |
 | `ReadRangeTests` | Bounded line-range streaming, large-file reads, UTF-8/BOM validation, binary rejection, response limits, and denied paths |
 | `MoveCopyTests` | File move/copy concurrency plus bounded recursive directory copy, entry/byte limits, denied descendants, destination containment, and temporary-tree cleanup |
+| `CrossVolumeMoveTests` | Same-volume fast path, cross-volume copy-verify-delete fallback, overwrite rollback, source mutation detection, cancellation, and temporary-file cleanup |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |

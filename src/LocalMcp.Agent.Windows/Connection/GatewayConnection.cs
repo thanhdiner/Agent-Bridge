@@ -205,8 +205,15 @@ public sealed class GatewayConnection : IAsyncDisposable
 
         try
         {
+            // System.Text.Json cannot serialize an undefined JsonElement. Many failed
+            // command results intentionally omit Data, so normalize it to JSON null
+            // before crossing the SignalR boundary.
+            var transportResult = result.Data.ValueKind == JsonValueKind.Undefined
+                ? result with { Data = JsonSerializer.SerializeToElement<object?>(null) }
+                : result;
+
             _logger.LogInformation("Sending result for command {CommandId} back to Gateway (Success={Success})", result.CommandId, result.Success);
-            await _connection.InvokeAsync("SubmitResult", result);
+            await _connection.InvokeAsync("SubmitResult", transportResult);
         }
         catch (Exception ex)
         {

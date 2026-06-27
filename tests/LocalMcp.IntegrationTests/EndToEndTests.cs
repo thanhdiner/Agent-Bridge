@@ -27,6 +27,7 @@ public sealed class EndToEndTests : IAsyncDisposable
 {
     private WebApplication? _gatewayApp;
     private GatewayConnection? _agentConnection;
+    private FileSystemExecutor? _fileSystemExecutor;
     private string? _tempRoot;
     private string? _gatewayUrl;
     private readonly string _deviceId = "e2e-test-device-" + Guid.NewGuid();
@@ -79,7 +80,11 @@ public sealed class EndToEndTests : IAsyncDisposable
         };
 
         var pathPolicy = new PathPolicy(Options.Create(fileAccessOptions));
-        var executor = new FileSystemExecutor(pathPolicy, Options.Create(fileAccessOptions), NullLogger<FileSystemExecutor>.Instance);
+        var executor = new FileSystemExecutor(
+            pathPolicy,
+            Options.Create(fileAccessOptions),
+            NullLogger<FileSystemExecutor>.Instance);
+        _fileSystemExecutor = executor;
         var directoryCopyExecutor = new DirectoryCopyExecutor(
             executor,
             pathPolicy,
@@ -333,9 +338,96 @@ public sealed class EndToEndTests : IAsyncDisposable
         Assert.NotNull(data);
         Assert.Equal(dstFile, data.Path);
         Assert.False(data.IsDirectory);
+        Assert.False(data.MovedAcrossVolume);
+        Assert.Equal(text.Length, data.BytesMoved);
+        Assert.NotNull(data.Sha256);
         Assert.False(File.Exists(srcFile));
         Assert.True(File.Exists(dstFile));
         Assert.Equal(text, await File.ReadAllTextAsync(dstFile));
+    }
+
+    [Fact]
+    public async Task FsMove_EndToEndFlow_UsesCrossVolumeFallback()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+        Assert.NotNull(_fileSystemExecutor);
+
+        var source = Path.Combine(_tempRoot, "move-fallback-source.txt");
+        var destination = Path.Combine(_tempRoot, "move-fallback-destination.txt");
+        const string content = "Cross-volume fallback through the full SignalR path";
+        await File.WriteAllTextAsync(source, content);
+        _fileSystemExecutor.ShouldUseCrossVolumeMoveFallbackHook = (_, _) => true;
+
+        var tools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>());
+
+        var response = await tools.MoveAsync(
+            _deviceId,
+            source,
+            destination,
+            overwrite: false,
+            expectedSha256: null);
+
+        Assert.False(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<MoveResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.True(data.MovedAcrossVolume);
+        Assert.Equal(content.Length, data.BytesMoved);
+        Assert.NotNull(data.Sha256);
+        Assert.False(File.Exists(source));
+        Assert.Equal(content, await File.ReadAllTextAsync(destination));
+        Assert.Empty(Directory.GetFiles(_tempRoot, "move-temp-*.tmp"));
+        Assert.Empty(Directory.GetFiles(_tempRoot, "move-backup-*.tmp"));
+    }
+
+    [Fact]
+    public async Task FsMove_EndToEndFlow_ReportsRollbackStateWhenSourceDeleteFails()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+        Assert.NotNull(_fileSystemExecutor);
+
+        var source = Path.Combine(_tempRoot, "move-rollback-source.txt");
+        var destination = Path.Combine(_tempRoot, "move-rollback-destination.txt");
+        await File.WriteAllTextAsync(source, "rollback");
+        _fileSystemExecutor.ShouldUseCrossVolumeMoveFallbackHook = (_, _) => true;
+        _fileSystemExecutor.OnBeforeCrossVolumeSourceDeleteHook = _ =>
+            throw new IOException("Injected source delete failure");
+
+        var tools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>());
+
+        var response = await tools.MoveAsync(
+            _deviceId,
+            source,
+            destination,
+            overwrite: false,
+            expectedSha256: null);
+
+        Assert.True(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        using var json = JsonDocument.Parse(textBlock.Text);
+        var error = json.RootElement.GetProperty("error");
+        Assert.Equal(ErrorCodes.WriteError, error.GetProperty("code").GetString());
+        var details = error.GetProperty("details");
+        Assert.Equal("true", details.GetProperty("sourceStillExists")[0].GetString());
+        Assert.Equal("false", details.GetProperty("destinationPublished")[0].GetString());
+        Assert.Equal("true", details.GetProperty("rollbackSucceeded")[0].GetString());
+        Assert.True(File.Exists(source));
+        Assert.False(File.Exists(destination));
     }
 
     [Fact]

@@ -374,7 +374,7 @@ public sealed class FileSystemTools
         return await DispatchAsync<BatchStatResult>(command, "fs_batch_stat", deviceId, cancellationToken);
     }
 
-    [McpServerTool(Name = "fs_move", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Moves or renames a file or directory on a target Windows agent device. Both source and destination must be within configured writable roots. Cross-volume moves are not supported. Requires files:write scope. Ask the user for confirmation before executing.")]
+    [McpServerTool(Name = "fs_move", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Moves or renames a file or directory on a target Windows agent device. File moves support cross-volume copy-verify-delete fallback; directory moves remain same-volume only. Both source and destination must be within configured writable roots. Requires files:write scope. Ask the user for confirmation before executing.")]
     public async Task<CallToolResult> MoveAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("The absolute path of the source file or directory")] string path,
@@ -552,7 +552,7 @@ public sealed class FileSystemTools
 
             var errorCode = result.Error?.Code ?? "INTERNAL_ERROR";
             var errorMessage = result.Error?.Message ?? "An unexpected error occurred during command execution.";
-            return CreateErrorResult(errorCode, errorMessage);
+            return CreateErrorResult(errorCode, errorMessage, result.Error?.Details);
         }
         catch (Exception ex)
         {
@@ -561,11 +561,28 @@ public sealed class FileSystemTools
         }
     }
 
-    private static CallToolResult CreateErrorResult(string code, string message)
+    private static CallToolResult CreateErrorResult(
+        string code,
+        string message,
+        IReadOnlyDictionary<string, string[]>? details = null)
     {
+        var text = details is null
+            ? $"Error [{code}]: {message}"
+            : JsonSerializer.Serialize(
+                new
+                {
+                    error = new
+                    {
+                        code,
+                        message,
+                        details
+                    }
+                },
+                JsonOptions.Default);
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = $"Error [{code}]: {message}" }],
+            Content = [new TextContentBlock { Text = text }],
             IsError = true
         };
     }
