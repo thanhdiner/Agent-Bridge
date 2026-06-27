@@ -213,6 +213,42 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FilesReadScope_CallingFsSearchContext_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_search_context",
+            arguments: new
+            {
+                deviceId = "missing-test-device",
+                path = "C:/src",
+                query = "needle",
+                includeGlobs = new[] { "**/*.cs" }
+            });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesWriteScope_CallingFsSearchContext_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "fs_search_context",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src", query = "needle" });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task FilesReadScope_CallingFsBatchRead_ReachesDispatch_AgentOffline()
     {
         await StartServerAsync();

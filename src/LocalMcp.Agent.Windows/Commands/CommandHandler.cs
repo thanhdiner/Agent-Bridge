@@ -64,6 +64,10 @@ public sealed class CommandHandler
         {
             return await HandleSearchFilesAsync(searchFilesCommand, cancellationToken);
         }
+        else if (command is SearchContextCommand searchContextCommand)
+        {
+            return await HandleSearchContextAsync(searchContextCommand, cancellationToken);
+        }
         else if (command is TreeCommand treeCommand)
         {
             return await HandleTreeAsync(treeCommand, cancellationToken);
@@ -300,6 +304,67 @@ public sealed class CommandHandler
             CommandId = command.CommandId,
             Success = true,
             Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleSearchContextAsync(
+        SearchContextCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            _logger.LogWarning("Path validation failed for contextual search command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.SearchContextAsync(
+            normalizedPath,
+            command.Query,
+            command.UseRegex,
+            command.CaseSensitive,
+            command.IncludeGlobs ?? [],
+            command.ExcludeGlobs ?? [],
+            command.ContextBefore,
+            command.ContextAfter,
+            command.MaxResults,
+            command.MaxDepth,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var filteredMatches = result.Data.Matches
+            .Where(match => _pathPolicy.AuthorizeReadFile(match.FullPath, out _) is null)
+            .ToList();
+
+        var filteredResult = new SearchContextResult
+        {
+            Matches = filteredMatches,
+            Truncated = result.Data.Truncated
+        };
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                filteredResult,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
         };
     }
 

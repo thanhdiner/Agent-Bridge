@@ -44,6 +44,21 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<SearchContextResult>> SearchContextAsync(
+        string path,
+        string query,
+        bool useRegex,
+        bool caseSensitive,
+        IReadOnlyList<string> includeGlobs,
+        IReadOnlyList<string> excludeGlobs,
+        int contextBefore,
+        int contextAfter,
+        int maxResults,
+        int maxDepth,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<WriteFileResult>> WriteFileAsync(
         string path,
         string content,

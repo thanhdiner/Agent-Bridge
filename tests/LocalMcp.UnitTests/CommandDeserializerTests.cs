@@ -48,6 +48,7 @@ public sealed class CommandDeserializerTests
                 nameof(ReadRangeCommand) => JsonSerializer.Deserialize<ReadRangeCommand>(payload, JsonOptions.Default),
                 nameof(ListDirectoryCommand) => JsonSerializer.Deserialize<ListDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(SearchFilesCommand) => JsonSerializer.Deserialize<SearchFilesCommand>(payload, JsonOptions.Default),
+                nameof(SearchContextCommand) => JsonSerializer.Deserialize<SearchContextCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
                 nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(payload, JsonOptions.Default),
                 nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
@@ -152,6 +153,47 @@ public sealed class CommandDeserializerTests
         Assert.Equal("MapMcp", searchCmd.Query);
         Assert.Equal(50, searchCmd.MaxResults);
         Assert.Equal(3, searchCmd.MaxDepth);
+    }
+
+    [Fact]
+    public void Deserialize_SearchContextCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"SearchContextCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src\",\"query\":\"TODO.*fix\",\"useRegex\":true,\"caseSensitive\":true,\"includeGlobs\":[\"**/*.cs\"],\"excludeGlobs\":[\"**/obj/**\"],\"contextBefore\":3,\"contextAfter\":4,\"maxResults\":25,\"maxDepth\":6}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var searchCommand = Assert.IsType<SearchContextCommand>(command);
+        Assert.Equal("TODO.*fix", searchCommand.Query);
+        Assert.True(searchCommand.UseRegex);
+        Assert.True(searchCommand.CaseSensitive);
+        Assert.Equal(new[] { "**/*.cs" }, searchCommand.IncludeGlobs);
+        Assert.Equal(new[] { "**/obj/**" }, searchCommand.ExcludeGlobs);
+        Assert.Equal(3, searchCommand.ContextBefore);
+        Assert.Equal(4, searchCommand.ContextAfter);
+        Assert.Equal(25, searchCommand.MaxResults);
+        Assert.Equal(6, searchCommand.MaxDepth);
+    }
+
+    [Fact]
+    public void Deserialize_SearchContextCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"SearchContextCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src\",\"query\":\"needle\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var searchCommand = Assert.IsType<SearchContextCommand>(command);
+        Assert.False(searchCommand.UseRegex);
+        Assert.False(searchCommand.CaseSensitive);
+        Assert.Empty(searchCommand.IncludeGlobs);
+        Assert.Empty(searchCommand.ExcludeGlobs);
+        Assert.Equal(2, searchCommand.ContextBefore);
+        Assert.Equal(2, searchCommand.ContextAfter);
+        Assert.Equal(100, searchCommand.MaxResults);
+        Assert.Equal(4, searchCommand.MaxDepth);
     }
 
     [Fact]
