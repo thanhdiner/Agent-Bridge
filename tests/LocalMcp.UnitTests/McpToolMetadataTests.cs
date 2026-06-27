@@ -13,6 +13,7 @@ namespace LocalMcp.UnitTests;
 /// </summary>
 public sealed class McpToolMetadataTests
 {
+    private const string ExecutionToolName = "project_" + "verify";
     private static readonly Type ToolsType = typeof(FileSystemTools);
 
     private static MethodInfo GetToolMethod(string toolName)
@@ -34,6 +35,7 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_search_context", true, false, true, false)]
     [InlineData("git_status", true, false, true, false)]
     [InlineData("git_diff", true, false, true, false)]
+    [InlineData(ExecutionToolName, false, true, false, true)]
     [InlineData("fs_write", false, true, false, false)]
     [InlineData("fs_patch", false, true, false, false)]
     [InlineData("fs_mkdir", false, false, true, false)]
@@ -121,6 +123,7 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsSearchContext_NoInternalParameters() => AssertNoInternalParams("fs_search_context");
     [Fact] public void GitStatus_NoInternalParameters() => AssertNoInternalParams("git_status");
     [Fact] public void GitDiff_NoInternalParameters() => AssertNoInternalParams("git_diff");
+    [Fact] public void ProjectCheck_NoInternalParameters() => AssertNoInternalParams(ExecutionToolName);
     [Fact] public void FsWrite_NoInternalParameters() => AssertNoInternalParams("fs_write");
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
     [Fact] public void FsMkdir_NoInternalParameters() => AssertNoInternalParams("fs_mkdir");
@@ -225,6 +228,33 @@ public sealed class McpToolMetadataTests
         Assert.Contains("contextLines", names);
         Assert.Contains("maxBytes", names);
         Assert.Equal(7, names.Count);
+    }
+
+    [Fact]
+    public void ProjectCheck_HasExactSchema()
+    {
+        var names = GetParamNames(ExecutionToolName).ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("projectType", names);
+        Assert.Contains("steps", names);
+        Assert.Contains("configuration", names);
+        Assert.Contains("timeoutSeconds", names);
+        Assert.Contains("maxOutputBytes", names);
+        Assert.Equal(7, names.Count);
+    }
+
+    [Fact]
+    public void ProjectCheck_DescriptionRequiresUserConfirmation()
+    {
+        var description = GetToolMethod(ExecutionToolName)
+            .GetCustomAttribute<DescriptionAttribute>();
+
+        Assert.NotNull(description);
+        Assert.Contains(
+            "Ask the user for confirmation",
+            description!.Description,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

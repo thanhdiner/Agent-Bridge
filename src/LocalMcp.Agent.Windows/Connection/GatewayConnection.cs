@@ -136,6 +136,7 @@ public sealed class GatewayConnection : IAsyncDisposable
                         nameof(SearchContextCommand) => JsonSerializer.Deserialize<SearchContextCommand>(rawJson, JsonOptions.Default),
                         nameof(GitStatusCommand) => JsonSerializer.Deserialize<GitStatusCommand>(rawJson, JsonOptions.Default),
                         nameof(GitDiffCommand) => JsonSerializer.Deserialize<GitDiffCommand>(rawJson, JsonOptions.Default),
+                        nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(rawJson, JsonOptions.Default),
                         nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(rawJson, JsonOptions.Default),
                         nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(rawJson, JsonOptions.Default),
                         nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(rawJson, JsonOptions.Default),
@@ -177,7 +178,8 @@ public sealed class GatewayConnection : IAsyncDisposable
                     return;
                 }
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var cts = new CancellationTokenSource(
+                    AgentCommandTimeouts.GetTimeout(command));
                 var result = await _commandHandler.HandleAsync(command, cts.Token);
 
                 await SendResultAsync(result);

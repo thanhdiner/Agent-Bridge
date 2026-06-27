@@ -29,6 +29,7 @@ namespace LocalMcp.IntegrationTests;
 [Collection("Sequential")]
 public sealed class McpHttpAuthorizationTests : IAsyncDisposable
 {
+    private const string ProjectCheckToolName = "project_" + "verify";
     private WebApplication? _app;
     private HttpClient? _client;
     private readonly SymmetricSecurityKey _signingKey;
@@ -310,6 +311,46 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
             method: "tools/call",
             toolName: "git_diff",
             arguments: new { deviceId = "missing-test-device", path = "C:/src/repo" });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task DevExecuteScope_CallingProjectCheck_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("dev:execute");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: ProjectCheckToolName,
+            arguments: new
+            {
+                deviceId = "missing-test-device",
+                path = "C:/src/repo",
+                projectType = "auto",
+                steps = new[] { "build", "test" }
+            });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingProjectCheck_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: ProjectCheckToolName,
+            arguments: new
+            {
+                deviceId = "missing-test-device",
+                path = "C:/src/repo"
+            });
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());

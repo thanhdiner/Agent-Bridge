@@ -78,6 +78,17 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<ProjectVerifyResult>> ProjectCheckAsync(
+        string path,
+        string projectType,
+        IReadOnlyList<string> steps,
+        string configuration,
+        int timeoutSeconds,
+        int maxOutputBytes,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<WriteFileResult>> WriteFileAsync(
         string path,
         string content,

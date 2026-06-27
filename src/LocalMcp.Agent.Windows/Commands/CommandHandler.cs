@@ -76,6 +76,10 @@ public sealed class CommandHandler
         {
             return await HandleGitDiffAsync(gitDiffCommand, cancellationToken);
         }
+        else if (command is ProjectCheckCommand projectCheckCommand)
+        {
+            return await HandleProjectCheckAsync(projectCheckCommand, cancellationToken);
+        }
         else if (command is TreeCommand treeCommand)
         {
             return await HandleTreeAsync(treeCommand, cancellationToken);
@@ -442,6 +446,52 @@ public sealed class CommandHandler
             command.PathSpecs ?? [],
             command.ContextLines,
             command.MaxBytes,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleProjectCheckAsync(
+        ProjectCheckCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.ProjectCheckAsync(
+            normalizedPath,
+            command.ProjectType,
+            command.Steps ?? [],
+            command.Configuration,
+            command.TimeoutSeconds,
+            command.MaxOutputBytes,
             command.CommandId,
             cancellationToken);
 

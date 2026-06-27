@@ -35,8 +35,8 @@ if (securityOptions.PublicExposure && !securityOptions.AuthenticationEnabled)
         logger.LogWarning(
             "⚠️  SECURITY WARNING: Gateway is configured with PublicExposure=true and AuthenticationEnabled=false. " +
             "The MCP endpoint is publicly reachable without any authentication. " +
-            "Only read-only tools (fs_read, fs_list, fs_tree, fs_search) are currently enabled. " +
-            "Do NOT enable write tools while authentication is disabled. " +
+            "Tool policies allow anonymous access while authentication is disabled. " +
+            "Do NOT expose write or project-execution tools in this configuration. " +
             "This configuration is only permitted in the Development environment.");
     }
     else
@@ -62,7 +62,7 @@ var metadataHandler = (IOptions<SecurityOptions> options) =>
     {
         resource = security.PublicBaseUrl,
         authorization_servers = new[] { security.OAuth.Authority },
-        scopes_supported = new[] { "files:read", "files:write" },
+        scopes_supported = new[] { "files:read", "files:write", "dev:execute" },
         resource_documentation = $"{security.PublicBaseUrl}/docs"
     };
     return Results.Json(response, contentType: "application/json");

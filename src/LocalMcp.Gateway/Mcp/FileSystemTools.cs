@@ -344,6 +344,70 @@ public sealed class FileSystemTools
         return await DispatchAsync<GitDiffResult>(command, "git_diff", deviceId, GetCancellationToken());
     }
 
+    [McpServerTool(Name = "project_verify", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description("Detects a supported project type and runs fixed build, test, lint, or typecheck steps on the target Windows agent. Supports .NET, Node.js, Rust, and PHP/Laravel projects. This executes project-defined code and may generate build artifacts. Requires dev:execute scope. Ask the user for confirmation before executing.")]
+    public async Task<CallToolResult> ProjectCheckAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute project directory inside an allowed root")] string path,
+        [Description("Project type: auto, dotnet, node, rust, or php (default: auto)")] string projectType = "auto",
+        [Description("Verification steps chosen from build, test, lint, and typecheck (default: build and test)")] List<string>? steps = null,
+        [Description("Build configuration: Debug or Release (default: Debug)")] string configuration = "Debug",
+        [Description("Overall execution timeout in seconds (default: 300, hard limit: 900)")] int timeoutSeconds = 300,
+        [Description("Maximum UTF-8 output bytes returned across all steps (default: 1048576, hard limit: 4194304)")] int maxOutputBytes = 1_048_576)
+    {
+        if (!await AuthorizeScopeAsync("DevExecutePolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        var normalizedProjectType = projectType?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (normalizedProjectType is not ("auto" or "dotnet" or "node" or "rust" or "php"))
+            return CreateErrorResult("INVALID_REQUEST", "projectType must be auto, dotnet, node, rust, or php.");
+
+        var requestedSteps = steps?
+            .Select(step => step?.Trim().ToLowerInvariant() ?? string.Empty)
+            .ToList() ?? ["build", "test"];
+
+        if (requestedSteps.Count is < 1 or > 4 ||
+            requestedSteps.Any(step => step is not ("build" or "test" or "lint" or "typecheck")) ||
+            requestedSteps.Distinct(StringComparer.Ordinal).Count() != requestedSteps.Count)
+        {
+            return CreateErrorResult(
+                "INVALID_REQUEST",
+                "steps must contain between 1 and 4 unique values chosen from build, test, lint, and typecheck.");
+        }
+
+        if (!string.Equals(configuration, "Debug", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(configuration, "Release", StringComparison.OrdinalIgnoreCase))
+            return CreateErrorResult("INVALID_REQUEST", "configuration must be Debug or Release.");
+        if (timeoutSeconds is < 30 or > 900)
+            return CreateErrorResult("INVALID_REQUEST", "timeoutSeconds must be between 30 and 900.");
+        if (maxOutputBytes is < 1024 or > 4_194_304)
+            return CreateErrorResult("INVALID_REQUEST", "maxOutputBytes must be between 1024 and 4194304.");
+
+        var command = new ProjectCheckCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            ProjectType = normalizedProjectType,
+            Steps = requestedSteps,
+            Configuration = string.Equals(configuration, "Release", StringComparison.OrdinalIgnoreCase)
+                ? "Release"
+                : "Debug",
+            TimeoutSeconds = timeoutSeconds,
+            MaxOutputBytes = maxOutputBytes
+        };
+
+        return await DispatchAsync<ProjectVerifyResult>(
+            command,
+            "project_verify",
+            deviceId,
+            GetCancellationToken());
+    }
+
     [McpServerTool(Name = "fs_write", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Creates a new UTF-8 text file or replaces the complete content of an existing text file on a target Windows agent device. Requires files:write scope. Safe workflow: (1) Call fs_read first; (2) Inspect content; (3) Pass returned sha256 as expectedSha256; (4) Call fs_write. Re-read on conflict.")]
     public async Task<CallToolResult> WriteFileAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,

@@ -17,7 +17,7 @@ graph TD
         Dispatcher["SignalR Command Dispatcher"]
         Hub["AgentHub (SignalR)"]
         JwtMiddleware["JWT Bearer Middleware"]
-        ScopePolicies["Scope Policies (files:read / files:write)"]
+        ScopePolicies["Scope Policies (files:read / files:write / dev:execute)"]
     end
 
     subgraph ExecutionPlane["Execution Plane (Windows Agent)"]
@@ -28,10 +28,10 @@ graph TD
         Disk["Windows File System"]
     end
 
-    Client -->|"Bearer token (files:read or files:write)"| JwtMiddleware
+    Client -->|"Bearer token (files:read, files:write, or dev:execute)"| JwtMiddleware
     JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
     JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_search_context/git_status/git_diff/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
+    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_search_context/git_status/git_diff/project_verify/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
     McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
@@ -68,6 +68,15 @@ graph TD
 | `fs_stat` | Returns metadata (existence, size, SHA-256, encoding, read-only flag, last-write-time, reparse point status) of a path. Returns `Exists = false` for non-existent paths. For files larger than `MaxReadBytes`, skips content hashing/encoding detection, returning `ContentMetadataSkipped = true`. |
 | `fs_batch_stat` | Returns ordered status results for 1–100 paths in one call. Each path is evaluated independently, failures do not abort the batch, and internal concurrency is capped at eight operations. |
 
+### Execution tools — require `dev:execute` scope
+
+| Tool | Description |
+|---|---|
+| <code>project_verify</code> | Detects .NET, Node.js, Rust, or PHP/Laravel projects and runs fixed `build`, `test`, `lint`, or `typecheck` steps with bounded output and timeout controls. |
+
+> [!CAUTION]
+> Project verification executes repository-defined code and may generate build artifacts. It is not an operating-system sandbox. Grant `dev:execute` only to trusted clients and run it only against trusted projects. Execution is denied entirely when `Security:AuthenticationEnabled=false`.
+
 ### Write tools — require `files:write` scope
 
 | Tool | Description |
@@ -100,7 +109,7 @@ Token validation enforces:
 - **Issuer** — must match `Security:OAuth:Authority`
 - **Audience** — must match `Security:OAuth:Audience`
 - **Lifetime** — `nbf`/`exp` checked with zero clock skew
-- **Scope** — `files:read` for read tools; `files:write` for write tools
+- **Scope** — `files:read` for read tools; `files:write` for write tools; `dev:execute` for project checks
 
 The OAuth 2.1 protected-resource metadata is published at:
 ```
@@ -125,6 +134,7 @@ Every filesystem operation passes through `PathPolicy` before executing:
 11. **WritableRoots check** — write operations require the resolved path to be inside a writable root.
 12. **Size validation** — `fs_read` rejects files > `MaxReadBytes` (default 2 MB); `fs_read_range` may scan larger files but bounds the returned range to `MaxReadBytes`; writes reject content > `MaxWriteBytes` (default 512 KB); directory copy additionally enforces caller-supplied `maxEntries` and `maxTotalBytes` limits with hard caps of 5000 entries and 1 GiB.
 13. **Git inspection hardening** — Git tools are read-only, disable external diff drivers, text conversion, pagers, prompts, fsmonitor, and submodule recursion. They reject executable clean/process filters configured by the repository itself, while ignoring unrelated global filters such as Git LFS, bound process output/time, and omit paths denied by `PathPolicy`.
+14. **Project execution hardening** — Project verification accepts no arbitrary command or argument string. It selects fixed commands from project adapters, resolves toolchains from `PATH`, requires `dev:execute`, bounds output and runtime, disables interactive and color features, and kills the complete process tree on timeout or cancellation.
 
 ### Device token (Agent → Gateway SignalR)
 
@@ -181,6 +191,8 @@ The Windows Agent authenticates to the Gateway's AgentHub using a separate devic
 ```
 
 Use `appsettings.Local.json` (git-ignored) for secrets. Never commit tokens to source control.
+
+To enable project verification through Auth0, add the `dev:execute` permission to the API and request that scope from the connector. Do not grant it to ordinary read-only clients.
 
 ---
 
@@ -299,7 +311,8 @@ LocalMcp/
 │  │  │  ├─ IFileSystemExecutor.cs
 │  │  │  ├─ ITransferExecutor.cs        # Bounded file/directory copy orchestration
 │  │  │  ├─ FileSystemExecutor.cs       # Atomic write, patch, read, list, search
-│  │  │  └─ FileSystemExecutor.Git.cs   # Bounded, policy-filtered Git status and diff
+│  │  │  ├─ FileSystemExecutor.Git.cs   # Bounded, policy-filtered Git status and diff
+│  │  │  └─ FileSystemExecutor.ProjectCheck.cs # Fixed project verification adapters
 │  │  └─ Security/
 │  │     ├─ FileAccessOptions.cs
 │  │     ├─ IPathPolicy.cs
@@ -315,6 +328,8 @@ LocalMcp/
 │  │  │  ├─ SearchContextCommand.cs
 │  │  │  ├─ GitStatusCommand.cs
 │  │  │  ├─ GitDiffCommand.cs
+│  │  │  ├─ ProjectCheckCommand.cs
+│  │  │  ├─ AgentCommandTimeouts.cs
 │  │  │  ├─ WriteFileCommand.cs
 │  │  │  ├─ PatchFileCommand.cs
 │  │  │  ├─ CreateDirectoryCommand.cs
@@ -336,6 +351,7 @@ LocalMcp/
 │  │     ├─ SearchContextResult.cs
 │  │     ├─ GitStatusResult.cs
 │  │     ├─ GitDiffResult.cs
+│  │     ├─ ProjectVerifyResult.cs
 │  │     ├─ WriteFileResult.cs
 │  │     ├─ PatchFileResult.cs
 │  │     ├─ CreateDirectoryResult.cs
@@ -383,6 +399,7 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `MoveCopyTests` | File move/copy concurrency plus bounded recursive directory copy, entry/byte limits, denied descendants, destination containment, and temporary-tree cleanup |
 | `CrossVolumeMoveTests` | Same-volume fast path, cross-volume copy-verify-delete fallback, overwrite rollback, source mutation detection, cancellation, and temporary-file cleanup |
 | `GitToolsTests` | Git filter-scope regression coverage, porcelain status parsing, and synthetic untracked-file patch formatting for the read-only Git inspection tools |
+| `ProjectCheckTests` | Project detection, package-manager selection, fixed command planning, and extended transport timeout coverage |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
