@@ -1106,7 +1106,7 @@ public sealed partial class FileSystemExecutor
         return null;
     }
 
-    private static string? ResolveToolExecutable(
+    internal static string? ResolveToolExecutable(
         string executable,
         string workingDirectory)
     {

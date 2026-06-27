@@ -1,4 +1,5 @@
 using LocalMcp.Agent.Windows.Connection;
+using LocalMcp.Agent.Windows.PowerShell;
 using LocalMcp.Agent.Windows.Security;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -10,15 +11,18 @@ public sealed class Worker : BackgroundService
 {
     private readonly GatewayConnection _gatewayConnection;
     private readonly FileAccessOptions _fileAccessOptions;
+    private readonly IPowerShellSessionCoordinator _sessionCoordinator;
     private readonly ILogger<Worker> _logger;
 
     public Worker(
         GatewayConnection gatewayConnection,
         IOptions<FileAccessOptions> fileAccessOptions,
+        IPowerShellSessionCoordinator sessionCoordinator,
         ILogger<Worker> logger)
     {
         _gatewayConnection = gatewayConnection;
         _fileAccessOptions = fileAccessOptions.Value;
+        _sessionCoordinator = sessionCoordinator;
         _logger = logger;
     }
 
@@ -45,6 +49,9 @@ public sealed class Worker : BackgroundService
         }
         finally
         {
+            // Cancel all active PowerShell sessions before disconnecting to prevent orphaned processes.
+            _sessionCoordinator.CancelAll();
+
             try
             {
                 await _gatewayConnection.StopAsync(CancellationToken.None);

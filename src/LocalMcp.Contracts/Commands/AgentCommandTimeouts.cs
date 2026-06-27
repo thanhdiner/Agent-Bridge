@@ -17,6 +17,16 @@ public static class AgentCommandTimeouts
                 900);
             return TimeSpan.FromSeconds(requestedPowerShellSeconds + 15);
         }
+
+        // powershell_start: fire-and-return, the agent launches the process and
+        // responds immediately; 15 s is ample for process startup handshake.
+        if (command is PowerShellStartCommand)
+            return TimeSpan.FromSeconds(15);
+
+        // powershell_status / powershell_cancel: lightweight in-memory poll.
+        if (command is PowerShellStatusCommand or PowerShellCancelCommand)
+            return TimeSpan.FromSeconds(10);
+
         if (command is not ProjectCheckCommand projectCommand)
             return DefaultTimeout;
 
