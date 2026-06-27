@@ -35,6 +35,7 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_patch", false, true, false, false)]
     [InlineData("fs_mkdir", false, false, true, false)]
     [InlineData("fs_stat", true, false, true, false)]
+    [InlineData("fs_batch_stat", true, false, true, false)]
     [InlineData("fs_move", false, false, false, false)]
     [InlineData("fs_copy", false, false, false, false)]
     [InlineData("fs_delete", false, true, false, false)]
@@ -118,6 +119,7 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
     [Fact] public void FsMkdir_NoInternalParameters() => AssertNoInternalParams("fs_mkdir");
     [Fact] public void FsStat_NoInternalParameters() => AssertNoInternalParams("fs_stat");
+    [Fact] public void FsBatchStat_NoInternalParameters() => AssertNoInternalParams("fs_batch_stat");
     [Fact] public void FsMove_NoInternalParameters() => AssertNoInternalParams("fs_move");
     [Fact] public void FsCopy_NoInternalParameters() => AssertNoInternalParams("fs_copy");
     [Fact] public void FsDelete_NoInternalParameters() => AssertNoInternalParams("fs_delete");
@@ -215,6 +217,15 @@ public sealed class McpToolMetadataTests
         var names = GetParamNames("fs_stat").ToHashSet();
         Assert.Contains("deviceId", names);
         Assert.Contains("path", names);
+        Assert.Equal(2, names.Count);
+    }
+
+    [Fact]
+    public void FsBatchStat_HasExactSchema()
+    {
+        var names = GetParamNames("fs_batch_stat").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("paths", names);
         Assert.Equal(2, names.Count);
     }
 

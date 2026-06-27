@@ -264,6 +264,48 @@ public sealed class McpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task BatchStatTool_WithWriteScopeOnly_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:write");
+
+        var result = await tools.BatchStatAsync("test-device", new List<string> { "C:/test.txt" });
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.Contains("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BatchStatTool_WithReadScope_Proceeds()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:read");
+
+        var result = await tools.BatchStatAsync("test-device", new List<string> { "C:/nonexistent.txt" });
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.DoesNotContain("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(101)]
+    public async Task BatchStatTool_InvalidPathCount_ReturnsInvalidRequest(int count)
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:read");
+        var paths = Enumerable.Range(0, count).Select(index => $"C:/item-{index}.txt").ToList();
+
+        var result = await tools.BatchStatAsync("test-device", paths);
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.Contains("INVALID_REQUEST", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task WriteTool_WithReadScopeOnly_ReturnsForbidden()
     {
         await StartServerAsync();

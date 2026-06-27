@@ -53,6 +53,7 @@ public sealed class CommandDeserializerTests
                 nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
                 nameof(CreateDirectoryCommand) => JsonSerializer.Deserialize<CreateDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(StatCommand) => JsonSerializer.Deserialize<StatCommand>(payload, JsonOptions.Default),
+                nameof(BatchStatCommand) => JsonSerializer.Deserialize<BatchStatCommand>(payload, JsonOptions.Default),
                 nameof(MoveCommand) => JsonSerializer.Deserialize<MoveCommand>(payload, JsonOptions.Default),
                 nameof(CopyCommand) => JsonSerializer.Deserialize<CopyCommand>(payload, JsonOptions.Default),
                 nameof(DeleteCommand) => JsonSerializer.Deserialize<DeleteCommand>(payload, JsonOptions.Default),
@@ -211,6 +212,19 @@ public sealed class CommandDeserializerTests
         Assert.NotNull(command);
         var statCmd = Assert.IsType<StatCommand>(command);
         Assert.Equal("C:\\file.txt", statCmd.Path);
+    }
+
+    [Fact]
+    public void Deserialize_BatchStatCommand_WithPaths_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"BatchStatCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"paths\":[\"C:/src/a.txt\",\"C:/src/b\"]}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var batchCommand = Assert.IsType<BatchStatCommand>(command);
+        Assert.Equal(new[] { "C:/src/a.txt", "C:/src/b" }, batchCommand.Paths);
     }
 
     [Fact]

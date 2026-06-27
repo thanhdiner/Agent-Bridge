@@ -348,6 +348,32 @@ public sealed class FileSystemTools
         return await DispatchAsync<StatResult>(command, "fs_stat", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_batch_stat", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Gets status metadata for between 1 and 100 file or directory paths on a target Windows agent device. Each path is evaluated independently and input order is preserved. Requires files:read scope.")]
+    public async Task<CallToolResult> BatchStatAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute file or directory paths to check (1 to 100 entries)")] List<string> paths)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (paths is null || paths.Count < 1 || paths.Count > 100)
+            return CreateErrorResult("INVALID_REQUEST", "paths must contain between 1 and 100 entries.");
+
+        var command = new BatchStatCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Paths = paths.ToList()
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<BatchStatResult>(command, "fs_batch_stat", deviceId, cancellationToken);
+    }
+
     [McpServerTool(Name = "fs_move", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Moves or renames a file or directory on a target Windows agent device. Both source and destination must be within configured writable roots. Cross-volume moves are not supported. Requires files:write scope. Ask the user for confirmation before executing.")]
     public async Task<CallToolResult> MoveAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
