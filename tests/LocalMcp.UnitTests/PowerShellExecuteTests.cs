@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using LocalMcp.Agent.Windows.FileSystem;
@@ -10,13 +11,13 @@ namespace LocalMcp.UnitTests;
 
 public sealed class PowerShellExecuteTests
 {
-    private static MethodInfo GetToolMethod()
+    private static MethodInfo GetToolMethod(string toolName = "powershell_exec")
     {
         var method = typeof(FileSystemTools)
             .GetMethods()
             .SingleOrDefault(candidate =>
                 candidate.GetCustomAttribute<McpServerToolAttribute>()?.Name ==
-                "powershell_exec");
+                toolName);
 
         Assert.NotNull(method);
         return method!;
@@ -34,6 +35,8 @@ public sealed class PowerShellExecuteTests
             Script = "git status"
         };
 
+        Assert.False(command.Visible);
+        Assert.False(command.Elevated);
         Assert.Equal(120, command.TimeoutSeconds);
         Assert.Equal(1_048_576, command.MaxOutputBytes);
         Assert.Equal(

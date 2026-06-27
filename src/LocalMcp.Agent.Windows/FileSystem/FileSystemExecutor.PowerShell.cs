@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 using LocalMcp.BuildingBlocks.Errors;
 using LocalMcp.Contracts.Results;
 
@@ -18,6 +19,8 @@ public sealed partial class FileSystemExecutor
     public async Task<CommandResult<PowerShellExecuteResult>> PowerShellExecuteAsync(
         string workingDirectory,
         string script,
+        bool visible,
+        bool elevated,
         int timeoutSeconds,
         int maxOutputBytes,
         Guid commandId,
@@ -49,6 +52,14 @@ public sealed partial class FileSystemExecutor
                 "maxOutputBytes must be between 1024 and 4194304.");
         }
 
+        if (elevated && !visible)
+        {
+            return PowerShellFailure(
+                commandId,
+                ErrorCodes.InvalidRequest,
+                "elevated=true is only supported for visible PowerShell execution.");
+        }
+
         if (IsCurrentProcessElevated())
         {
             return PowerShellFailure(
@@ -64,6 +75,19 @@ public sealed partial class FileSystemExecutor
                 commandId,
                 ErrorCodes.InvalidRequest,
                 "PowerShell 7 (pwsh.exe) is not available on the Windows agent.");
+        }
+
+        if (visible)
+        {
+            return await PowerShellExecuteVisibleAsync(
+                executable,
+                workingDirectory,
+                script,
+                elevated,
+                timeoutSeconds,
+                maxOutputBytes,
+                commandId,
+                cancellationToken);
         }
 
         var startInfo = CreatePowerShellStartInfo(executable, workingDirectory);
@@ -204,6 +228,450 @@ public sealed partial class FileSystemExecutor
                 "An unexpected error occurred while executing PowerShell.");
         }
     }
+
+    private async Task<CommandResult<PowerShellExecuteResult>> PowerShellExecuteVisibleAsync(
+        string executable,
+        string workingDirectory,
+        string script,
+        bool elevated,
+        int timeoutSeconds,
+        int maxOutputBytes,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        var executionDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "LocalMcp",
+            "powershell-visible",
+            commandId.ToString("N"));
+        var userScriptPath = Path.Combine(executionDirectory, "user-script.ps1");
+        var runnerScriptPath = Path.Combine(executionDirectory, "runner.ps1");
+        var wrapperScriptPath = Path.Combine(executionDirectory, "visible-wrapper.ps1");
+        var commandFilePath = Path.Combine(executionDirectory, "launch.cmd");
+        var outputPath = Path.Combine(executionDirectory, "output.log");
+        var statusPath = Path.Combine(executionDirectory, "status.json");
+        var cancelPath = Path.Combine(executionDirectory, "cancel.signal");
+        var stopwatch = Stopwatch.StartNew();
+        var canCleanup = true;
+
+        try
+        {
+            Directory.CreateDirectory(executionDirectory);
+            await File.WriteAllTextAsync(
+                userScriptPath,
+                script,
+                PowerShellOutputEncoding,
+                cancellationToken);
+            await File.WriteAllTextAsync(
+                runnerScriptPath,
+                BuildVisiblePowerShellRunnerScript(userScriptPath, outputPath),
+                PowerShellOutputEncoding,
+                cancellationToken);
+            await File.WriteAllTextAsync(
+                wrapperScriptPath,
+                BuildVisiblePowerShellWrapperScript(
+                    executable,
+                    workingDirectory,
+                    runnerScriptPath,
+                    outputPath,
+                    statusPath,
+                    cancelPath,
+                    timeoutSeconds),
+                PowerShellOutputEncoding,
+                cancellationToken);
+            await File.WriteAllTextAsync(
+                commandFilePath,
+                BuildVisiblePowerShellCommandFile(executable, wrapperScriptPath),
+                PowerShellOutputEncoding,
+                cancellationToken);
+
+            var startInfo = CreateVisiblePowerShellStartInfo(
+                commandFilePath,
+                workingDirectory,
+                elevated);
+            using var process = new Process { StartInfo = startInfo };
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!process.Start())
+            {
+                return PowerShellFailure(
+                    commandId,
+                    ErrorCodes.InternalError,
+                    "The visible PowerShell console could not be started.");
+            }
+
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                TrySignalVisiblePowerShellCancellation(cancelPath);
+                await WaitForVisiblePowerShellExitAsync(process);
+                canCleanup = process.HasExited;
+
+                return PowerShellFailure(
+                    commandId,
+                    ErrorCodes.CommandCancelled,
+                    "The visible PowerShell command was cancelled.");
+            }
+
+            stopwatch.Stop();
+            var output = await ReadPowerShellOutputFileAsync(outputPath, maxOutputBytes);
+            var bounded = BoundPowerShellOutput(
+                PowerShellOutputEncoding.GetString(output.Bytes),
+                string.Empty,
+                maxOutputBytes);
+            var status = ReadVisiblePowerShellStatus(
+                statusPath,
+                process.HasExited ? process.ExitCode : null,
+                stopwatch.ElapsedMilliseconds);
+
+            return new CommandResult<PowerShellExecuteResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new PowerShellExecuteResult
+                {
+                    WorkingDirectory = workingDirectory,
+                    Success = !status.TimedOut &&
+                        !status.Cancelled &&
+                        status.ExitCode == 0,
+                    ExitCode = status.ExitCode,
+                    Stdout = bounded.Stdout,
+                    Stderr = bounded.Stderr,
+                    DurationMs = status.DurationMs,
+                    TimedOut = status.TimedOut,
+                    Truncated = output.Truncated || bounded.Truncated,
+                    BytesReturned = bounded.BytesReturned
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            TrySignalVisiblePowerShellCancellation(cancelPath);
+            return PowerShellFailure(
+                commandId,
+                ErrorCodes.CommandCancelled,
+                "The visible PowerShell command was cancelled.");
+        }
+        catch (Win32Exception ex) when (elevated && ex.NativeErrorCode == 1223)
+        {
+            return PowerShellFailure(
+                commandId,
+                ErrorCodes.CommandCancelled,
+                "UAC elevation was declined by the user.");
+        }
+        catch (Exception ex) when (
+            ex is Win32Exception or
+            InvalidOperationException or
+            IOException or
+            UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Visible PowerShell execution failed to start or communicate.");
+            return PowerShellFailure(
+                commandId,
+                ErrorCodes.InternalError,
+                "Visible PowerShell execution failed to start or communicate.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Unexpected visible PowerShell execution failure for command {CommandId}.",
+                commandId);
+            return PowerShellFailure(
+                commandId,
+                ErrorCodes.InternalError,
+                "An unexpected error occurred while executing visible PowerShell.");
+        }
+        finally
+        {
+            if (canCleanup)
+                TryDeleteVisiblePowerShellDirectory(executionDirectory);
+        }
+    }
+
+    internal static ProcessStartInfo CreateVisiblePowerShellStartInfo(
+        string commandFilePath,
+        string workingDirectory,
+        bool elevated)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = true,
+            CreateNoWindow = false,
+            WindowStyle = ProcessWindowStyle.Normal
+        };
+
+        startInfo.ArgumentList.Add("/d");
+        startInfo.ArgumentList.Add("/c");
+        startInfo.ArgumentList.Add(commandFilePath);
+        if (elevated)
+            startInfo.Verb = "runas";
+
+        return startInfo;
+    }
+
+    private static string BuildVisiblePowerShellRunnerScript(
+        string userScriptPath,
+        string outputPath)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("$ErrorActionPreference = 'Continue'");
+        builder.AppendLine("[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)");
+        builder.AppendLine("$OutputEncoding = [Console]::OutputEncoding");
+        builder.AppendLine("try {");
+        builder.Append("    & ");
+        builder.Append(PowerShellSingleQuote(userScriptPath));
+        builder.Append(" *>&1 | Tee-Object -LiteralPath ");
+        builder.AppendLine(PowerShellSingleQuote(outputPath));
+        builder.AppendLine("    if ($LASTEXITCODE -is [int]) { exit [int]$LASTEXITCODE }");
+        builder.AppendLine("    if ($?) { exit 0 }");
+        builder.AppendLine("    exit 1");
+        builder.AppendLine("}");
+        builder.AppendLine("catch {");
+        builder.AppendLine("    $__localMcpError = $_ | Out-String");
+        builder.Append("    $__localMcpError | Tee-Object -LiteralPath ");
+        builder.Append(PowerShellSingleQuote(outputPath));
+        builder.AppendLine(" -Append | Write-Error");
+        builder.AppendLine("    exit 1");
+        builder.AppendLine("}");
+        return builder.ToString();
+    }
+
+    private static string BuildVisiblePowerShellWrapperScript(
+        string executable,
+        string workingDirectory,
+        string runnerScriptPath,
+        string outputPath,
+        string statusPath,
+        string cancelPath,
+        int timeoutSeconds)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("$ErrorActionPreference = 'Stop'");
+        builder.AppendLine("[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)");
+        builder.AppendLine("$OutputEncoding = [Console]::OutputEncoding");
+        builder.AppendLine("$__localMcpSecretFragments = @('TOKEN','SECRET','PASSWORD','PASSWD','API_KEY','APIKEY','PRIVATE_KEY','CLIENT_SECRET','CREDENTIAL','COOKIE','BEARER')");
+        builder.AppendLine("Get-ChildItem Env: | ForEach-Object {");
+        builder.AppendLine("    $__localMcpNormalized = $_.Name.Replace('-', '_').ToUpperInvariant()");
+        builder.AppendLine("    foreach ($__localMcpFragment in $__localMcpSecretFragments) {");
+        builder.AppendLine("        if ($__localMcpNormalized.Contains($__localMcpFragment)) {");
+        builder.AppendLine("            [Environment]::SetEnvironmentVariable($_.Name, $null, 'Process')");
+        builder.AppendLine("            break");
+        builder.AppendLine("        }");
+        builder.AppendLine("    }");
+        builder.AppendLine("}");
+        builder.AppendLine("$env:POWERSHELL_TELEMETRY_OPTOUT = '1'");
+        builder.AppendLine("$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'");
+        builder.AppendLine("$env:NO_COLOR = '1'");
+        builder.AppendLine("$__localMcpStartInfo = [System.Diagnostics.ProcessStartInfo]::new()");
+        builder.Append("$__localMcpStartInfo.FileName = ");
+        builder.AppendLine(PowerShellSingleQuote(executable));
+        builder.Append("$__localMcpStartInfo.WorkingDirectory = ");
+        builder.AppendLine(PowerShellSingleQuote(workingDirectory));
+        builder.AppendLine("$__localMcpStartInfo.UseShellExecute = $false");
+        builder.AppendLine("$__localMcpStartInfo.CreateNoWindow = $false");
+        builder.AppendLine("$__localMcpStartInfo.ArgumentList.Add('-NoLogo')");
+        builder.AppendLine("$__localMcpStartInfo.ArgumentList.Add('-NoProfile')");
+        builder.AppendLine("$__localMcpStartInfo.ArgumentList.Add('-ExecutionPolicy')");
+        builder.AppendLine("$__localMcpStartInfo.ArgumentList.Add('Bypass')");
+        builder.AppendLine("$__localMcpStartInfo.ArgumentList.Add('-File')");
+        builder.Append("$__localMcpStartInfo.ArgumentList.Add(");
+        builder.Append(PowerShellSingleQuote(runnerScriptPath));
+        builder.AppendLine(")");
+        builder.AppendLine("$__localMcpProcess = [System.Diagnostics.Process]::new()");
+        builder.AppendLine("$__localMcpProcess.StartInfo = $__localMcpStartInfo");
+        builder.AppendLine("$__localMcpWatch = [System.Diagnostics.Stopwatch]::StartNew()");
+        builder.AppendLine("$__localMcpTimedOut = $false");
+        builder.AppendLine("$__localMcpCancelled = $false");
+        builder.AppendLine("$__localMcpExitCode = $null");
+        builder.AppendLine("try {");
+        builder.AppendLine("    if (-not $__localMcpProcess.Start()) { throw 'PowerShell child process could not be started.' }");
+        builder.AppendLine("    while (-not $__localMcpProcess.WaitForExit(250)) {");
+        builder.Append("        if (Test-Path -LiteralPath ");
+        builder.Append(PowerShellSingleQuote(cancelPath));
+        builder.AppendLine(") {");
+        builder.AppendLine("            $__localMcpCancelled = $true");
+        builder.AppendLine("            try { $__localMcpProcess.Kill($true) } catch { }");
+        builder.AppendLine("            break");
+        builder.AppendLine("        }");
+        builder.Append("        if ($__localMcpWatch.ElapsedMilliseconds -ge ");
+        builder.Append(timeoutSeconds * 1000L);
+        builder.AppendLine(") {");
+        builder.AppendLine("            $__localMcpTimedOut = $true");
+        builder.AppendLine("            try { $__localMcpProcess.Kill($true) } catch { }");
+        builder.AppendLine("            break");
+        builder.AppendLine("        }");
+        builder.AppendLine("    }");
+        builder.AppendLine("    if ($__localMcpTimedOut -or $__localMcpCancelled) {");
+        builder.AppendLine("        try { $__localMcpProcess.WaitForExit() } catch { }");
+        builder.AppendLine("    } else {");
+        builder.AppendLine("        $__localMcpExitCode = $__localMcpProcess.ExitCode");
+        builder.AppendLine("    }");
+        builder.AppendLine("}");
+        builder.AppendLine("catch {");
+        builder.AppendLine("    $__localMcpFailure = $_ | Out-String");
+        builder.Append("    $__localMcpFailure | Tee-Object -LiteralPath ");
+        builder.Append(PowerShellSingleQuote(outputPath));
+        builder.AppendLine(" -Append | Write-Error");
+        builder.AppendLine("    $__localMcpExitCode = 1");
+        builder.AppendLine("}");
+        builder.AppendLine("finally {");
+        builder.AppendLine("    $__localMcpWatch.Stop()");
+        builder.AppendLine("    $__localMcpStatus = [ordered]@{");
+        builder.AppendLine("        timedOut = $__localMcpTimedOut");
+        builder.AppendLine("        cancelled = $__localMcpCancelled");
+        builder.AppendLine("        exitCode = $__localMcpExitCode");
+        builder.AppendLine("        durationMs = $__localMcpWatch.ElapsedMilliseconds");
+        builder.AppendLine("    }");
+        builder.Append("    $__localMcpStatus | ConvertTo-Json -Compress | Set-Content -LiteralPath ");
+        builder.Append(PowerShellSingleQuote(statusPath));
+        builder.AppendLine(" -Encoding utf8NoBOM");
+        builder.AppendLine("    $__localMcpProcess.Dispose()");
+        builder.AppendLine("}");
+        builder.AppendLine("if ($__localMcpCancelled) { exit 125 }");
+        builder.AppendLine("if ($__localMcpTimedOut) { exit 124 }");
+        builder.AppendLine("if ($null -eq $__localMcpExitCode) { exit 1 }");
+        builder.AppendLine("exit [int]$__localMcpExitCode");
+        return builder.ToString();
+    }
+
+    private static string BuildVisiblePowerShellCommandFile(
+        string executable,
+        string wrapperScriptPath)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("@echo off");
+        builder.AppendLine("chcp 65001 >nul");
+        builder.AppendLine("title LocalMcp PowerShell");
+        builder.Append('"');
+        builder.Append(executable);
+        builder.Append("\" -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"");
+        builder.Append(wrapperScriptPath);
+        builder.AppendLine("\"");
+        builder.AppendLine("exit /b %ERRORLEVEL%");
+        return builder.ToString();
+    }
+
+    private static string PowerShellSingleQuote(string value) =>
+        $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+
+    private static async Task<PowerShellBoundedOutput> ReadPowerShellOutputFileAsync(
+        string path,
+        int maxBytes)
+    {
+        if (!File.Exists(path))
+            return new PowerShellBoundedOutput([], Truncated: false);
+
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 8192,
+            useAsync: true);
+        return await ReadPowerShellOutputAsync(stream, maxBytes);
+    }
+
+    private static VisiblePowerShellStatus ReadVisiblePowerShellStatus(
+        string path,
+        int? fallbackExitCode,
+        long fallbackDurationMs)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return new VisiblePowerShellStatus(
+                    TimedOut: fallbackExitCode == 124,
+                    Cancelled: fallbackExitCode == 125,
+                    ExitCode: fallbackExitCode,
+                    DurationMs: fallbackDurationMs);
+            }
+
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+            var timedOut = root.TryGetProperty("timedOut", out var timedOutElement) &&
+                timedOutElement.ValueKind == JsonValueKind.True;
+            var cancelled = root.TryGetProperty("cancelled", out var cancelledElement) &&
+                cancelledElement.ValueKind == JsonValueKind.True;
+            int? exitCode = null;
+            if (root.TryGetProperty("exitCode", out var exitCodeElement) &&
+                exitCodeElement.ValueKind == JsonValueKind.Number &&
+                exitCodeElement.TryGetInt32(out var parsedExitCode))
+            {
+                exitCode = parsedExitCode;
+            }
+
+            var durationMs = fallbackDurationMs;
+            if (root.TryGetProperty("durationMs", out var durationElement) &&
+                durationElement.ValueKind == JsonValueKind.Number &&
+                durationElement.TryGetInt64(out var parsedDuration))
+            {
+                durationMs = parsedDuration;
+            }
+
+            return new VisiblePowerShellStatus(
+                timedOut,
+                cancelled,
+                exitCode,
+                durationMs);
+        }
+        catch (JsonException)
+        {
+            return new VisiblePowerShellStatus(
+                TimedOut: fallbackExitCode == 124,
+                Cancelled: fallbackExitCode == 125,
+                ExitCode: fallbackExitCode,
+                DurationMs: fallbackDurationMs);
+        }
+    }
+
+    private static void TrySignalVisiblePowerShellCancellation(string cancelPath)
+    {
+        try
+        {
+            File.WriteAllText(cancelPath, string.Empty, PowerShellOutputEncoding);
+        }
+        catch
+        {
+        }
+    }
+
+    private static async Task WaitForVisiblePowerShellExitAsync(Process process)
+    {
+        try
+        {
+            using var waitSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(waitSource.Token);
+        }
+        catch
+        {
+            TryKillPowerShellProcess(process);
+        }
+    }
+
+    private static void TryDeleteVisiblePowerShellDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+        }
+    }
+
+    private sealed record VisiblePowerShellStatus(
+        bool TimedOut,
+        bool Cancelled,
+        int? ExitCode,
+        long DurationMs);
 
     private static ProcessStartInfo CreatePowerShellStartInfo(
         string executable,
