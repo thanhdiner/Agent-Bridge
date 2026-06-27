@@ -109,4 +109,11 @@ public interface IFileSystemExecutor
         Guid commandId,
         CancellationToken cancellationToken
     );
+
+    Task<CommandResult<RemoveDirectoryResult>> RemoveDirectoryAsync(
+        string path,
+        bool missingOk,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
 }

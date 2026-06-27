@@ -319,6 +319,32 @@ public sealed class McpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task RemoveDirectoryTool_WithReadScopeOnly_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:read");
+
+        var result = await tools.RemoveDirectoryAsync("test-device", "C:/empty");
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.Contains("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RemoveDirectoryTool_WithWriteScope_Proceeds()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:write");
+
+        var result = await tools.RemoveDirectoryAsync("test-device", "C:/nonexistent");
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.DoesNotContain("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task DeleteTool_WithReadScopeOnly_ReturnsForbidden()
     {
         await StartServerAsync();

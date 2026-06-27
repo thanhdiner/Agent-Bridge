@@ -28,6 +28,7 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
 
     internal Func<string, Task>? OnBeforeContentReadHook { get; set; }
     internal Action<string>? OnDirectorySegmentCreatedHook { get; set; }
+    internal Func<string, Task>? OnBeforeDirectoryDeleteHook { get; set; }
 
     public FileSystemExecutor(
         IPathPolicy pathPolicy,
@@ -2424,6 +2425,247 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                 CommandId = commandId,
                 Success = false,
                 Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while deleting the file.")
+            };
+        }
+    }
+
+    // ── fs_rmdir ─────────────────────────────────────────────────────────────
+
+    public async Task<CommandResult<RemoveDirectoryResult>> RemoveDirectoryAsync(
+        string path,
+        bool missingOk,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+        }
+
+        var policyError = _pathPolicy.AuthorizeRemoveDirectory(path, missingOk, out var physicalPath);
+        if (policyError is not null)
+            return new CommandResult<RemoveDirectoryResult> { CommandId = commandId, Success = false, Error = policyError };
+
+        if (!Directory.Exists(physicalPath))
+        {
+            if (File.Exists(physicalPath))
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Target path changed from a directory to a file.")
+                };
+            }
+
+            if (!missingOk)
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotFound, "The requested directory was not found.")
+                };
+            }
+
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new RemoveDirectoryResult
+                {
+                    Path = physicalPath,
+                    Removed = false
+                }
+            };
+        }
+
+        try
+        {
+            var attributes = File.GetAttributes(physicalPath);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the directory removal path.")
+                };
+            }
+
+            if (Directory.EnumerateFileSystemEntries(physicalPath).Any())
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotEmpty, "The directory is not empty.")
+                };
+            }
+
+            if (OnBeforeDirectoryDeleteHook is not null)
+                await OnBeforeDirectoryDeleteHook(physicalPath);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var revalidationError = _pathPolicy.AuthorizeRemoveDirectory(physicalPath, missingOk, out var revalidatedPath);
+            if (revalidationError is not null)
+                return new CommandResult<RemoveDirectoryResult> { CommandId = commandId, Success = false, Error = revalidationError };
+
+            if (!string.Equals(physicalPath, revalidatedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Target directory path changed during removal validation.")
+                };
+            }
+
+            if (!Directory.Exists(revalidatedPath))
+            {
+                if (missingOk)
+                {
+                    return new CommandResult<RemoveDirectoryResult>
+                    {
+                        CommandId = commandId,
+                        Success = true,
+                        Data = new RemoveDirectoryResult { Path = revalidatedPath, Removed = false }
+                    };
+                }
+
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotFound, "The requested directory was not found.")
+                };
+            }
+
+            attributes = File.GetAttributes(revalidatedPath);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the directory removal path.")
+                };
+            }
+
+            if (Directory.EnumerateFileSystemEntries(revalidatedPath).Any())
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.DirectoryNotEmpty, "The directory is not empty.")
+                };
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.Delete(revalidatedPath, recursive: false);
+
+            if (Directory.Exists(revalidatedPath))
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.WriteError, "The directory still exists after the removal operation.")
+                };
+            }
+
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new RemoveDirectoryResult
+                {
+                    Path = revalidatedPath,
+                    Removed = true
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+        }
+        catch (DirectoryNotFoundException)
+        {
+            if (missingOk)
+            {
+                return new CommandResult<RemoveDirectoryResult>
+                {
+                    CommandId = commandId,
+                    Success = true,
+                    Data = new RemoveDirectoryResult { Path = physicalPath, Removed = false }
+                };
+            }
+
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.DirectoryNotFound, "The requested directory was not found.")
+            };
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied during directory removal. CommandId: {CommandId}", commandId);
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "Access was denied when attempting to remove the directory.")
+            };
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error during directory removal. CommandId: {CommandId}", commandId);
+
+            try
+            {
+                if (Directory.Exists(physicalPath) && Directory.EnumerateFileSystemEntries(physicalPath).Any())
+                {
+                    return new CommandResult<RemoveDirectoryResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.DirectoryNotEmpty, "The directory is not empty.")
+                    };
+                }
+            }
+            catch
+            {
+                // Preserve the original IO error mapping.
+            }
+
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.WriteError, "Failed to remove the directory due to an IO error.")
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during directory removal. CommandId: {CommandId}", commandId);
+            return new CommandResult<RemoveDirectoryResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while removing the directory.")
             };
         }
     }
