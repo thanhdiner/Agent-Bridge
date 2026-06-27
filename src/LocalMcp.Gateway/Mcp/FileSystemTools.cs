@@ -379,6 +379,36 @@ public sealed class FileSystemTools
         return await DispatchAsync<CopyResult>(command, "fs_copy", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_delete", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Deletes a single file on a target Windows agent device. Directories are not supported. The path must be within configured writable roots. Requires files:write scope. Ask the user for confirmation before executing.")]
+    public async Task<CallToolResult> DeleteAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the file to delete")] string path,
+        [Description("Optional SHA-256 hex digest of the current file. If provided, deletion is aborted when the actual hash does not match.")] string? expectedSha256 = null,
+        [Description("Whether a missing file should be treated as success (default: false)")] bool missingOk = false)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+
+        var command = new DeleteCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            ExpectedSha256 = string.IsNullOrWhiteSpace(expectedSha256) ? null : expectedSha256,
+            MissingOk = missingOk
+        };
+
+        var cancellationToken = GetCancellationToken();
+        return await DispatchAsync<DeleteResult>(command, "fs_delete", deviceId, cancellationToken);
+    }
+
     // ──────────────────────────────────────────────
     // Private transport and auth helpers
     // ──────────────────────────────────────────────

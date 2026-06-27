@@ -83,4 +83,12 @@ public interface IFileSystemExecutor
         Guid commandId,
         CancellationToken cancellationToken
     );
+
+    Task<CommandResult<DeleteResult>> DeleteAsync(
+        string path,
+        string? expectedSha256,
+        bool missingOk,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
 }

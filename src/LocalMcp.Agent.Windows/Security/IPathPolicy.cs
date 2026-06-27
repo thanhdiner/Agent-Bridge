@@ -46,4 +46,9 @@ public interface IPathPolicy
     /// Authorises a path for copying files.
     /// </summary>
     CommandError? AuthorizeCopy(string rawSource, string rawDestination, bool overwrite, out string normalizedSource, out string normalizedDestination);
+
+    /// <summary>
+    /// Authorises a file path for deletion. Directories are not supported.
+    /// </summary>
+    CommandError? AuthorizeDeleteFile(string rawPath, bool missingOk, out string normalizedPath);
 }

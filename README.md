@@ -31,7 +31,7 @@ graph TD
     Client -->|"Bearer token (files:read or files:write)"| JwtMiddleware
     JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
     JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_list/fs_tree/fs_search/fs_write/fs_patch| McpServer
+    ScopePolicies -->|fs_read/fs_list/fs_tree/fs_search/fs_write/fs_patch/fs_move/fs_copy/fs_delete| McpServer
     McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
@@ -69,6 +69,9 @@ graph TD
 | `fs_write` | Creates or overwrites a single file using optimistic concurrency (SHA-256 ETag). |
 | `fs_patch` | Applies a list of exact text substitutions atomically to an existing file. |
 | `fs_mkdir` | Creates directory or directories. Gated by `WritableRoots` enforcement. For recursive creation (`recursive: true`), resolves the closest existing ancestor, validates it, checks every proposed subdirectory name against denied patterns, and creates them segment by segment with post-creation safety verification and automatic rollback on failure. |
+| `fs_move` | Moves or renames a file or directory within writable roots. Supports optional source SHA-256 concurrency checks. |
+| `fs_copy` | Copies one file into a writable root using a temporary file and atomic rename. Directories are not supported. |
+| `fs_delete` | Deletes one file from a writable root after confirmation. Directories are not supported; optional SHA-256 concurrency checks and `missingOk` are supported. |
 
 > [!IMPORTANT]
 > **Write tools (including `fs_mkdir`) are disabled by default.** `WritableRoots` in `appsettings.json` is an empty list. You must explicitly add directories before write tools can succeed.
@@ -144,7 +147,7 @@ The Windows Agent authenticates to the Gateway's AgentHub using a separate devic
 ```
 
 > [!IMPORTANT]
-> To enable `fs_write` and `fs_patch`, add the target directory to `WritableRoots`.
+> To enable write tools (`fs_write`, `fs_patch`, `fs_mkdir`, `fs_move`, `fs_copy`, and `fs_delete`), add the target directory to `WritableRoots`.
 > Start with a dedicated scratch directory (`F:\scratch`) and only expand after testing.
 
 ### Gateway — `src/LocalMcp.Gateway/appsettings.json`
@@ -299,7 +302,10 @@ LocalMcp/
 │  │  │  ├─ WriteFileCommand.cs
 │  │  │  ├─ PatchFileCommand.cs
 │  │  │  ├─ CreateDirectoryCommand.cs
-│  │  │  └─ StatCommand.cs
+│  │  │  ├─ StatCommand.cs
+│  │  │  ├─ MoveCommand.cs
+│  │  │  ├─ CopyCommand.cs
+│  │  │  └─ DeleteCommand.cs
 │  │  └─ Results/
 │  │     ├─ CommandError.cs
 │  │     ├─ CommandResult.cs
@@ -310,7 +316,10 @@ LocalMcp/
 │  │     ├─ WriteFileResult.cs
 │  │     ├─ PatchFileResult.cs
 │  │     ├─ CreateDirectoryResult.cs
-│  │     └─ StatResult.cs
+│  │     ├─ StatResult.cs
+│  │     ├─ MoveResult.cs
+│  │     ├─ CopyResult.cs
+│  │     └─ DeleteResult.cs
 │  │
 │  └─ LocalMcp.BuildingBlocks/
 │     ├─ Errors/ErrorCodes.cs           # Standard error code constants
@@ -340,10 +349,11 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `WriteToolsTests` | Executor write/patch safety, BOM absence, UTF-8, conflict, temp cleanup |
 | `DirectoryCreationTests` | Hardened recursive directory segment creation, rollbacks, and junction/symlink escape checks |
 | `StatTests` | Bounded file metadata status, encoding detection, oversized size skips, and unreadable files handling |
+| `DeleteTests` | File-only deletion policy, writable-root enforcement, hash conflicts, read-only files, denied paths, and reparse-point rejection |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
 | `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
-| `CommandDeserializerTests` | Strict command deserialization for all 8 commands |
+| `CommandDeserializerTests` | Strict command deserialization for all 11 commands |
 | `BenchmarkTests` | PathPolicy throughput under sustained load |
 | `EndToEndTests` | Full SignalR loop: Gateway → Agent → FileSystem → Gateway |
 | `ArchitectureTests` | No circular project references |
