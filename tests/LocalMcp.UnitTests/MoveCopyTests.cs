@@ -17,7 +17,7 @@ namespace LocalMcp.UnitTests;
 /// <summary>
 /// Integration tests for fs_move and fs_copy: PathPolicy authorization and
 /// FileSystemExecutor physical execution, including concurrency-guard SHA-256 checks,
-/// temp-file cleanup on failure, and cross-volume rejection.
+/// temp-file cleanup on failure, and cross-volume file fallback behavior.
 /// </summary>
 public sealed class MoveCopyTests : IDisposable
 {
@@ -345,6 +345,9 @@ public sealed class MoveCopyTests : IDisposable
 
         Assert.True(result.Success);
         Assert.NotNull(result.Data);
+        Assert.False(result.Data!.MovedAcrossVolume);
+        Assert.Equal((long)NoBomUtf8.GetByteCount(content), result.Data.BytesMoved);
+        Assert.Equal(Sha256Hex(content), result.Data.Sha256);
         Assert.False(File.Exists(src));
         Assert.True(File.Exists(dst));
         Assert.Equal(content, File.ReadAllText(dst));
@@ -363,6 +366,9 @@ public sealed class MoveCopyTests : IDisposable
         Assert.True(result.Success);
         Assert.NotNull(result.Data);
         Assert.True(result.Data!.IsDirectory);
+        Assert.False(result.Data.MovedAcrossVolume);
+        Assert.Equal(0, result.Data.BytesMoved);
+        Assert.Null(result.Data.Sha256);
         Assert.False(Directory.Exists(srcDir));
         Assert.True(File.Exists(Path.Combine(dstDir, "child.txt")));
     }

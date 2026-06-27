@@ -648,11 +648,12 @@ public sealed class PathPolicy : IPathPolicy
                 return new CommandError(ErrorCodes.AccessDenied, $"Access denied to destination with extension '{ext}'.");
         }
 
-        // Reject cross-volume moves
+        // Cross-volume fallback is supported for files only.
         var srcRoot = Path.GetPathRoot(physicalSource);
         var dstRoot = Path.GetPathRoot(physicalDest);
-        if (!string.Equals(srcRoot, dstRoot, StringComparison.OrdinalIgnoreCase))
-            return new CommandError(ErrorCodes.AccessDenied, "Cross-volume moves are not supported.");
+        if (Directory.Exists(physicalSource) &&
+            !string.Equals(srcRoot, dstRoot, StringComparison.OrdinalIgnoreCase))
+            return new CommandError(ErrorCodes.AccessDenied, "Cross-volume directory moves are not supported.");
 
         normalizedSource = physicalSource;
         normalizedDestination = physicalDest;

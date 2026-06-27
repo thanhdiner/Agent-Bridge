@@ -29,6 +29,11 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
     internal Func<string, Task>? OnBeforeContentReadHook { get; set; }
     internal Action<string>? OnDirectorySegmentCreatedHook { get; set; }
     internal Func<string, Task>? OnBeforeDirectoryDeleteHook { get; set; }
+    internal Func<string, string, bool>? ShouldUseCrossVolumeMoveFallbackHook { get; set; }
+    internal Func<string, Task>? OnBeforeCrossVolumeCopyHook { get; set; }
+    internal Func<string, Task>? OnAfterCrossVolumeCopyHook { get; set; }
+    internal Func<string, Task>? OnBeforeCrossVolumePublishHook { get; set; }
+    internal Func<string, Task>? OnBeforeCrossVolumeSourceDeleteHook { get; set; }
 
     public FileSystemExecutor(
         IPathPolicy pathPolicy,
@@ -1934,97 +1939,654 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested)
-            return new CommandResult<MoveResult>
-            {
-                CommandId = commandId,
-                Success = false,
-                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
-            };
+            return MoveFailure(commandId, ErrorCodes.CommandCancelled, "The command was cancelled.");
 
-        var policyError = _pathPolicy.AuthorizeMove(sourcePath, destinationPath, overwrite, out var physicalSource, out var physicalDest);
+        var policyError = _pathPolicy.AuthorizeMove(
+            sourcePath,
+            destinationPath,
+            overwrite,
+            out var physicalSource,
+            out var physicalDestination);
         if (policyError is not null)
             return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = policyError };
 
-        bool isDirectory = Directory.Exists(physicalSource);
-
-        // SHA-256 concurrency check on files only
-        if (!isDirectory && !string.IsNullOrEmpty(expectedSha256))
+        var isDirectory = Directory.Exists(physicalSource);
+        if (isDirectory)
         {
             try
             {
-                using var stream = new FileStream(physicalSource, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
-                var hashBytes = await SHA256.HashDataAsync(stream, cancellationToken);
-                var actualHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
-                if (!string.Equals(actualHash, expectedSha256.ToLowerInvariant(), StringComparison.Ordinal))
-                    return new CommandResult<MoveResult>
-                    {
-                        CommandId = commandId,
-                        Success = false,
-                        Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Source file has changed since the expected SHA-256 was computed.")
-                    };
+                cancellationToken.ThrowIfCancellationRequested();
+                Directory.Move(physicalSource, physicalDestination);
+                return MoveSuccess(
+                    commandId,
+                    physicalDestination,
+                    isDirectory: true,
+                    movedAcrossVolume: false,
+                    bytesMoved: 0,
+                    sha256: null);
             }
             catch (OperationCanceledException)
             {
-                return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.") };
+                return MoveFailure(commandId, ErrorCodes.CommandCancelled, "The command was cancelled.");
             }
-            catch (Exception ex)
+            catch (IOException ex)
             {
-                _logger.LogWarning(ex, "Failed to compute SHA-256 for pre-move verification. CommandId: {CommandId}", commandId);
-                return new CommandResult<MoveResult>
-                {
-                    CommandId = commandId,
-                    Success = false,
-                    Error = new CommandError(ErrorCodes.ReadError, "Failed to read source file for SHA-256 verification.")
-                };
+                _logger.LogWarning(ex, "IO error during directory move. CommandId: {CommandId}", commandId);
+                return MoveFailure(commandId, ErrorCodes.WriteError, "Failed to move the directory due to an IO error.");
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Access denied during directory move. CommandId: {CommandId}", commandId);
+                return MoveFailure(commandId, ErrorCodes.AccessDenied, "Access was denied when attempting to move the directory.");
+            }
+        }
+
+        var sourceRoot = Path.GetPathRoot(physicalSource);
+        var destinationRoot = Path.GetPathRoot(physicalDestination);
+        var useCrossVolumeFallback =
+            !string.Equals(sourceRoot, destinationRoot, StringComparison.OrdinalIgnoreCase) ||
+            (ShouldUseCrossVolumeMoveFallbackHook?.Invoke(physicalSource, physicalDestination) ?? false);
+
+        if (useCrossVolumeFallback)
+        {
+            return await MoveFileAcrossVolumeAsync(
+                physicalSource,
+                physicalDestination,
+                overwrite,
+                expectedSha256,
+                commandId,
+                cancellationToken);
         }
 
         try
         {
-            if (isDirectory)
+            var fingerprint = await ReadMoveFingerprintAsync(physicalSource, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(expectedSha256) &&
+                !string.Equals(fingerprint.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
             {
-                Directory.Move(physicalSource, physicalDest);
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.ConcurrencyConflict,
+                    "Source file has changed since the expected SHA-256 was computed.");
             }
-            else
-            {
-                File.Move(physicalSource, physicalDest, overwrite);
-            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(physicalSource, physicalDestination, overwrite);
+
+            return MoveSuccess(
+                commandId,
+                physicalDestination,
+                isDirectory: false,
+                movedAcrossVolume: false,
+                bytesMoved: fingerprint.Length,
+                sha256: fingerprint.Sha256);
         }
         catch (OperationCanceledException)
         {
-            return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.") };
+            return MoveFailure(commandId, ErrorCodes.CommandCancelled, "The command was cancelled.");
+        }
+        catch (IOException ex) when (IsCrossVolumeMoveError(ex))
+        {
+            _logger.LogInformation(
+                ex,
+                "Fast file move crossed a volume boundary; using copy-verify-delete fallback. CommandId: {CommandId}",
+                commandId);
+            return await MoveFileAcrossVolumeAsync(
+                physicalSource,
+                physicalDestination,
+                overwrite,
+                expectedSha256,
+                commandId,
+                cancellationToken);
         }
         catch (IOException ex)
         {
-            _logger.LogWarning(ex, "IO error during move. CommandId: {CommandId}", commandId);
-            return new CommandResult<MoveResult>
-            {
-                CommandId = commandId,
-                Success = false,
-                Error = new CommandError(ErrorCodes.WriteError, "Failed to move the path due to an IO error.")
-            };
+            _logger.LogWarning(ex, "IO error during file move. CommandId: {CommandId}", commandId);
+            return MoveFailure(commandId, ErrorCodes.WriteError, "Failed to move the file due to an IO error.");
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogWarning(ex, "Access denied during move. CommandId: {CommandId}", commandId);
-            return new CommandResult<MoveResult>
-            {
-                CommandId = commandId,
-                Success = false,
-                Error = new CommandError(ErrorCodes.AccessDenied, "Access was denied when attempting to move the path.")
-            };
+            _logger.LogWarning(ex, "Access denied during file move. CommandId: {CommandId}", commandId);
+            return MoveFailure(commandId, ErrorCodes.AccessDenied, "Access was denied when attempting to move the file.");
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during file move. CommandId: {CommandId}", commandId);
+            return MoveFailure(commandId, ErrorCodes.InternalError, "An unexpected error occurred while moving the file.");
+        }
+    }
 
-        DateTime lastWrite;
+    private async Task<CommandResult<MoveResult>> MoveFileAcrossVolumeAsync(
+        string physicalSource,
+        string physicalDestination,
+        bool overwrite,
+        string? expectedSha256,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        var destinationParent = Path.GetDirectoryName(physicalDestination)!;
+        string? temporaryPath = Path.Combine(destinationParent, $"move-temp-{Guid.NewGuid():N}.tmp");
+        string? backupPath = null;
+        var destinationPublished = false;
+        var destinationExistedBeforePublish = false;
+        var preserveBackup = false;
+        long bytesMoved = 0;
+        string? copiedSha256 = null;
+
         try
         {
-            lastWrite = isDirectory
-                ? new DirectoryInfo(physicalDest).LastWriteTimeUtc
-                : new FileInfo(physicalDest).LastWriteTimeUtc;
+            if (OnBeforeCrossVolumeCopyHook is not null)
+                await OnBeforeCrossVolumeCopyHook(physicalSource);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using (var sourceStream = new FileStream(
+                       physicalSource,
+                       FileMode.Open,
+                       FileAccess.Read,
+                       FileShare.Read,
+                       81920,
+                       FileOptions.Asynchronous | FileOptions.SequentialScan))
+            using (var destinationStream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       81920,
+                       FileOptions.Asynchronous | FileOptions.SequentialScan))
+            using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
+            {
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await sourceStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+                {
+                    await destinationStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    hash.AppendData(buffer, 0, read);
+                    checked { bytesMoved += read; }
+                }
+
+                destinationStream.Flush(flushToDisk: true);
+                copiedSha256 = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+            }
+
+            if (!string.IsNullOrWhiteSpace(expectedSha256) &&
+                !string.Equals(copiedSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.ConcurrencyConflict,
+                    "Source file has changed since the expected SHA-256 was computed.");
+            }
+
+            if (OnAfterCrossVolumeCopyHook is not null)
+                await OnAfterCrossVolumeCopyHook(physicalSource);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var temporaryFingerprint = await ReadMoveFingerprintAsync(temporaryPath, cancellationToken);
+            if (temporaryFingerprint.Length != bytesMoved ||
+                !string.Equals(temporaryFingerprint.Sha256, copiedSha256, StringComparison.Ordinal))
+            {
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.WriteError,
+                    "The temporary destination failed byte-count or SHA-256 verification.");
+            }
+
+            var reauthorizationError = _pathPolicy.AuthorizeMove(
+                physicalSource,
+                physicalDestination,
+                overwrite,
+                out var reauthorizedSource,
+                out var reauthorizedDestination);
+            if (reauthorizationError is not null)
+                return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = reauthorizationError };
+
+            if (!string.Equals(physicalSource, reauthorizedSource, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(physicalDestination, reauthorizedDestination, StringComparison.OrdinalIgnoreCase))
+            {
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.ConcurrencyConflict,
+                    "The source or destination path changed during move validation.");
+            }
+
+            var sourceFingerprint = await ReadMoveFingerprintAsync(physicalSource, cancellationToken);
+            if (sourceFingerprint.Length != bytesMoved ||
+                !string.Equals(sourceFingerprint.Sha256, copiedSha256, StringComparison.Ordinal))
+            {
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.ConcurrencyConflict,
+                    "Source file changed during the cross-volume move.");
+            }
+
+            if (OnBeforeCrossVolumePublishHook is not null)
+                await OnBeforeCrossVolumePublishHook(physicalDestination);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var finalAuthorizationError = _pathPolicy.AuthorizeMove(
+                physicalSource,
+                physicalDestination,
+                overwrite,
+                out var finalSourcePath,
+                out var finalDestinationPath);
+            if (finalAuthorizationError is not null)
+                return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = finalAuthorizationError };
+
+            if (!string.Equals(physicalSource, finalSourcePath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(physicalDestination, finalDestinationPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.ConcurrencyConflict,
+                    "The source or destination path changed immediately before publish.");
+            }
+
+            var temporaryAttributes = File.GetAttributes(temporaryPath);
+            if (temporaryAttributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.AccessDenied,
+                    "Reparse points are not allowed for the temporary move file.");
+            }
+
+            var publishFingerprint = await ReadMoveFingerprintAsync(temporaryPath, cancellationToken);
+            if (publishFingerprint.Length != bytesMoved ||
+                !string.Equals(publishFingerprint.Sha256, copiedSha256, StringComparison.Ordinal))
+            {
+                return MoveFailure(
+                    commandId,
+                    ErrorCodes.ConcurrencyConflict,
+                    "The temporary move file changed before publish.");
+            }
+
+            destinationExistedBeforePublish = File.Exists(physicalDestination);
+
+            if (destinationExistedBeforePublish)
+            {
+                if (!overwrite)
+                {
+                    return MoveFailure(
+                        commandId,
+                        ErrorCodes.AccessDenied,
+                        "The destination file appeared concurrently.");
+                }
+
+                backupPath = Path.Combine(destinationParent, $"move-backup-{Guid.NewGuid():N}.tmp");
+                File.Replace(temporaryPath, physicalDestination, backupPath, ignoreMetadataErrors: true);
+                temporaryPath = null;
+            }
+            else
+            {
+                File.Move(temporaryPath, physicalDestination, overwrite: false);
+                temporaryPath = null;
+            }
+
+            destinationPublished = true;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (OnBeforeCrossVolumeSourceDeleteHook is not null)
+                await OnBeforeCrossVolumeSourceDeleteHook(physicalSource);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var deleteAuthorizationError = _pathPolicy.AuthorizeDeleteFile(
+                physicalSource,
+                missingOk: false,
+                out var deleteSourcePath);
+            if (deleteAuthorizationError is not null)
+            {
+                var rollbackSucceeded = TryRollbackPublishedMove(
+                    physicalDestination,
+                    backupPath,
+                    destinationExistedBeforePublish);
+                preserveBackup = !rollbackSucceeded && !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+                return MoveFailureWithState(
+                    commandId,
+                    deleteAuthorizationError.Code,
+                    deleteAuthorizationError.Message,
+                    physicalSource,
+                    physicalDestination,
+                    destinationPublished: !rollbackSucceeded,
+                    rollbackSucceeded,
+                    preserveBackup ? backupPath : null);
+            }
+
+            if (!string.Equals(physicalSource, deleteSourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                var rollbackSucceeded = TryRollbackPublishedMove(
+                    physicalDestination,
+                    backupPath,
+                    destinationExistedBeforePublish);
+                preserveBackup = !rollbackSucceeded && !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+                return MoveFailureWithState(
+                    commandId,
+                    ErrorCodes.ConcurrencyConflict,
+                    "Source path changed before the delete phase.",
+                    physicalSource,
+                    physicalDestination,
+                    destinationPublished: !rollbackSucceeded,
+                    rollbackSucceeded,
+                    preserveBackup ? backupPath : null);
+            }
+
+            FileStream? finalDestinationStream = null;
+            try
+            {
+                var destinationAttributes = File.GetAttributes(physicalDestination);
+                if (destinationAttributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    var rollbackSucceeded = TryRollbackPublishedMove(
+                        physicalDestination,
+                        backupPath,
+                        destinationExistedBeforePublish);
+                    preserveBackup = !rollbackSucceeded && !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+                    return MoveFailureWithState(
+                        commandId,
+                        ErrorCodes.AccessDenied,
+                        "Reparse points are not allowed on the published destination.",
+                        physicalSource,
+                        physicalDestination,
+                        destinationPublished: !rollbackSucceeded,
+                        rollbackSucceeded,
+                        preserveBackup ? backupPath : null);
+                }
+
+                finalDestinationStream = new FileStream(
+                    physicalDestination,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    81920,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                var finalDestinationLength = finalDestinationStream.Length;
+                var finalDestinationHash = Convert.ToHexString(
+                    await SHA256.HashDataAsync(finalDestinationStream, cancellationToken)).ToLowerInvariant();
+
+                if (finalDestinationLength != bytesMoved ||
+                    !string.Equals(finalDestinationHash, copiedSha256, StringComparison.Ordinal))
+                {
+                    finalDestinationStream.Dispose();
+                    finalDestinationStream = null;
+                    var rollbackSucceeded = TryRollbackPublishedMove(
+                        physicalDestination,
+                        backupPath,
+                        destinationExistedBeforePublish);
+                    preserveBackup = !rollbackSucceeded && !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+                    return MoveFailureWithState(
+                        commandId,
+                        ErrorCodes.ConcurrencyConflict,
+                        "The published destination changed before the source delete phase.",
+                        physicalSource,
+                        physicalDestination,
+                        destinationPublished: !rollbackSucceeded,
+                        rollbackSucceeded,
+                        preserveBackup ? backupPath : null);
+                }
+
+                using var finalSourceStream = new FileStream(
+                    deleteSourcePath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read | FileShare.Delete,
+                    81920,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                var finalLength = finalSourceStream.Length;
+                var finalHash = Convert.ToHexString(
+                    await SHA256.HashDataAsync(finalSourceStream, cancellationToken)).ToLowerInvariant();
+
+                if (finalLength != bytesMoved ||
+                    !string.Equals(finalHash, copiedSha256, StringComparison.Ordinal))
+                {
+                    finalDestinationStream.Dispose();
+                    finalDestinationStream = null;
+                    var rollbackSucceeded = TryRollbackPublishedMove(
+                        physicalDestination,
+                        backupPath,
+                        destinationExistedBeforePublish);
+                    preserveBackup = !rollbackSucceeded && !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+                    return MoveFailureWithState(
+                        commandId,
+                        ErrorCodes.ConcurrencyConflict,
+                        "Source file changed before the delete phase.",
+                        physicalSource,
+                        physicalDestination,
+                        destinationPublished: !rollbackSucceeded,
+                        rollbackSucceeded,
+                        preserveBackup ? backupPath : null);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                File.Delete(deleteSourcePath);
+            }
+            finally
+            {
+                finalDestinationStream?.Dispose();
+            }
+
+            if (File.Exists(physicalSource))
+            {
+                var rollbackSucceeded = TryRollbackPublishedMove(
+                    physicalDestination,
+                    backupPath,
+                    destinationExistedBeforePublish);
+                preserveBackup = !rollbackSucceeded && !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+                return MoveFailureWithState(
+                    commandId,
+                    ErrorCodes.WriteError,
+                    "The source file still exists after the delete phase.",
+                    physicalSource,
+                    physicalDestination,
+                    destinationPublished: !rollbackSucceeded,
+                    rollbackSucceeded,
+                    preserveBackup ? backupPath : null);
+            }
+
+            destinationPublished = false;
+            if (!string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath))
+            {
+                try
+                {
+                    File.Delete(backupPath);
+                    backupPath = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Cross-volume move succeeded but backup cleanup failed. CommandId: {CommandId}", commandId);
+                    preserveBackup = true;
+                    return MoveFailureWithState(
+                        commandId,
+                        ErrorCodes.WriteError,
+                        "The move completed, but the destination backup could not be removed.",
+                        physicalSource,
+                        physicalDestination,
+                        destinationPublished: true,
+                        rollbackSucceeded: false,
+                        backupPath);
+                }
+            }
+
+            return MoveSuccess(
+                commandId,
+                physicalDestination,
+                isDirectory: false,
+                movedAcrossVolume: true,
+                bytesMoved,
+                copiedSha256);
+        }
+        catch (OperationCanceledException)
+        {
+            var rollbackSucceeded = !destinationPublished || TryRollbackPublishedMove(
+                physicalDestination,
+                backupPath,
+                destinationExistedBeforePublish);
+            preserveBackup = destinationPublished && !rollbackSucceeded &&
+                !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+            return MoveFailureWithState(
+                commandId,
+                ErrorCodes.CommandCancelled,
+                "The command was cancelled.",
+                physicalSource,
+                physicalDestination,
+                destinationPublished: destinationPublished && !rollbackSucceeded,
+                rollbackSucceeded,
+                preserveBackup ? backupPath : null);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied during cross-volume move. CommandId: {CommandId}", commandId);
+            var rollbackSucceeded = !destinationPublished || TryRollbackPublishedMove(
+                physicalDestination,
+                backupPath,
+                destinationExistedBeforePublish);
+            preserveBackup = destinationPublished && !rollbackSucceeded &&
+                !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+            return MoveFailureWithState(
+                commandId,
+                ErrorCodes.AccessDenied,
+                "Access was denied during the cross-volume move.",
+                physicalSource,
+                physicalDestination,
+                destinationPublished: destinationPublished && !rollbackSucceeded,
+                rollbackSucceeded,
+                preserveBackup ? backupPath : null);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error during cross-volume move. CommandId: {CommandId}", commandId);
+            var rollbackSucceeded = !destinationPublished || TryRollbackPublishedMove(
+                physicalDestination,
+                backupPath,
+                destinationExistedBeforePublish);
+            preserveBackup = destinationPublished && !rollbackSucceeded &&
+                !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+            return MoveFailureWithState(
+                commandId,
+                ErrorCodes.WriteError,
+                "The cross-volume move failed due to an IO error.",
+                physicalSource,
+                physicalDestination,
+                destinationPublished: destinationPublished && !rollbackSucceeded,
+                rollbackSucceeded,
+                preserveBackup ? backupPath : null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected cross-volume move failure. CommandId: {CommandId}", commandId);
+            var rollbackSucceeded = !destinationPublished || TryRollbackPublishedMove(
+                physicalDestination,
+                backupPath,
+                destinationExistedBeforePublish);
+            preserveBackup = destinationPublished && !rollbackSucceeded &&
+                !string.IsNullOrWhiteSpace(backupPath) && File.Exists(backupPath);
+            return MoveFailureWithState(
+                commandId,
+                ErrorCodes.InternalError,
+                "An unexpected error occurred during the cross-volume move.",
+                physicalSource,
+                physicalDestination,
+                destinationPublished: destinationPublished && !rollbackSucceeded,
+                rollbackSucceeded,
+                preserveBackup ? backupPath : null);
+        }
+        finally
+        {
+            TryDeleteMoveArtifact(temporaryPath);
+            if (!preserveBackup)
+                TryDeleteMoveArtifact(backupPath);
+        }
+    }
+
+    private static async Task<(long Length, string Sha256)> ReadMoveFingerprintAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var length = stream.Length;
+        var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+        return (length, hash);
+    }
+
+    internal static bool IsCrossVolumeMoveError(IOException exception)
+    {
+        const int errorNotSameDevice = 17;
+        return (exception.HResult & 0xFFFF) == errorNotSameDevice;
+    }
+
+    private static bool TryRollbackPublishedMove(
+        string destinationPath,
+        string? backupPath,
+        bool destinationExistedBeforePublish)
+    {
+        try
+        {
+            if (destinationExistedBeforePublish)
+            {
+                if (string.IsNullOrWhiteSpace(backupPath) || !File.Exists(backupPath))
+                    return false;
+
+                if (File.Exists(destinationPath))
+                    File.Replace(backupPath, destinationPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+                else
+                    File.Move(backupPath, destinationPath, overwrite: false);
+
+                return File.Exists(destinationPath) && !File.Exists(backupPath);
+            }
+
+            if (File.Exists(destinationPath))
+                File.Delete(destinationPath);
+
+            return !File.Exists(destinationPath);
         }
         catch
         {
-            lastWrite = DateTime.UtcNow;
+            return false;
+        }
+    }
+
+    private static void TryDeleteMoveArtifact(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // Best-effort cleanup only.
+        }
+    }
+
+    private static CommandResult<MoveResult> MoveSuccess(
+        Guid commandId,
+        string destinationPath,
+        bool isDirectory,
+        bool movedAcrossVolume,
+        long bytesMoved,
+        string? sha256)
+    {
+        DateTime lastWriteTimeUtc;
+        try
+        {
+            lastWriteTimeUtc = isDirectory
+                ? new DirectoryInfo(destinationPath).LastWriteTimeUtc
+                : new FileInfo(destinationPath).LastWriteTimeUtc;
+        }
+        catch
+        {
+            lastWriteTimeUtc = DateTime.UtcNow;
         }
 
         return new CommandResult<MoveResult>
@@ -2033,10 +2595,55 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             Success = true,
             Data = new MoveResult
             {
-                Path = physicalDest,
+                Path = destinationPath,
                 IsDirectory = isDirectory,
-                LastWriteTimeUtc = lastWrite
+                MovedAcrossVolume = movedAcrossVolume,
+                BytesMoved = bytesMoved,
+                Sha256 = sha256,
+                LastWriteTimeUtc = lastWriteTimeUtc
             }
+        };
+    }
+
+    private static CommandResult<MoveResult> MoveFailure(
+        Guid commandId,
+        string code,
+        string message)
+    {
+        return new CommandResult<MoveResult>
+        {
+            CommandId = commandId,
+            Success = false,
+            Error = new CommandError(code, message)
+        };
+    }
+
+    private static CommandResult<MoveResult> MoveFailureWithState(
+        Guid commandId,
+        string code,
+        string message,
+        string sourcePath,
+        string destinationPath,
+        bool destinationPublished,
+        bool rollbackSucceeded,
+        string? backupPath)
+    {
+        _ = backupPath;
+
+        var details = new Dictionary<string, string[]>
+        {
+            ["sourcePath"] = new[] { sourcePath },
+            ["destinationPath"] = new[] { destinationPath },
+            ["sourceStillExists"] = new[] { File.Exists(sourcePath).ToString().ToLowerInvariant() },
+            ["destinationPublished"] = new[] { destinationPublished.ToString().ToLowerInvariant() },
+            ["rollbackSucceeded"] = new[] { rollbackSucceeded.ToString().ToLowerInvariant() }
+        };
+
+        return new CommandResult<MoveResult>
+        {
+            CommandId = commandId,
+            Success = false,
+            Error = new CommandError(code, message, details)
         };
     }
 
