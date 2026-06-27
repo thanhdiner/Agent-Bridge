@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -76,7 +78,7 @@ public sealed class EndToEndTests : IAsyncDisposable
         };
 
         var pathPolicy = new PathPolicy(Options.Create(fileAccessOptions));
-        var executor = new FileSystemExecutor(pathPolicy, NullLogger<FileSystemExecutor>.Instance);
+        var executor = new FileSystemExecutor(pathPolicy, Options.Create(fileAccessOptions), NullLogger<FileSystemExecutor>.Instance);
         var handler = new CommandHandler(pathPolicy, executor, NullLogger<CommandHandler>.Instance);
 
         _agentConnection = new GatewayConnection(
@@ -106,11 +108,13 @@ public sealed class EndToEndTests : IAsyncDisposable
         // Resolve dependencies from Gateway app to call the MCP tool
         var mcpTools = new FileSystemTools(
             _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
-            NullLogger<FileSystemTools>.Instance
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
         );
 
         // Call the tool
-        var response = await mcpTools.ReadFileAsync(_deviceId, filePath, CancellationToken.None);
+        var response = await mcpTools.ReadFileAsync(_deviceId, filePath);
 
         // Assert
         Assert.False(response.IsError);
@@ -143,11 +147,13 @@ public sealed class EndToEndTests : IAsyncDisposable
         {
             var mcpTools = new FileSystemTools(
                 _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
-                NullLogger<FileSystemTools>.Instance
+                _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+                NullLogger<FileSystemTools>.Instance,
+                _gatewayApp.Services.GetService<IHttpContextAccessor>()
             );
 
             // Call the tool
-            var response = await mcpTools.ReadFileAsync(_deviceId, outsidePath, CancellationToken.None);
+            var response = await mcpTools.ReadFileAsync(_deviceId, outsidePath);
 
             // Assert
             Assert.True(response.IsError);

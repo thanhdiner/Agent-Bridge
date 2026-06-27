@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -76,7 +78,7 @@ public sealed class BenchmarkTests : IAsyncDisposable
         };
 
         var pathPolicy = new PathPolicy(Options.Create(fileAccessOptions));
-        var executor = new FileSystemExecutor(pathPolicy, NullLogger<FileSystemExecutor>.Instance);
+        var executor = new FileSystemExecutor(pathPolicy, Options.Create(fileAccessOptions), NullLogger<FileSystemExecutor>.Instance);
         var handler = new CommandHandler(pathPolicy, executor, NullLogger<CommandHandler>.Instance);
 
         _agentConnection = new GatewayConnection(
@@ -107,13 +109,15 @@ public sealed class BenchmarkTests : IAsyncDisposable
 
         var mcpTools = new FileSystemTools(
             _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
-            NullLogger<FileSystemTools>.Instance
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
         );
 
         // Warm up (10 calls)
         for (int i = 0; i < 10; i++)
         {
-            await mcpTools.ReadFileAsync(_deviceId, filePath, CancellationToken.None);
+            await mcpTools.ReadFileAsync(_deviceId, filePath);
         }
 
         var timings = new List<double>();
@@ -123,7 +127,7 @@ public sealed class BenchmarkTests : IAsyncDisposable
         for (int i = 0; i < 100; i++)
         {
             sw.Restart();
-            var response = await mcpTools.ReadFileAsync(_deviceId, filePath, CancellationToken.None);
+            var response = await mcpTools.ReadFileAsync(_deviceId, filePath);
             sw.Stop();
 
             Assert.False(response.IsError);

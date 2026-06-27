@@ -62,7 +62,7 @@ var metadataHandler = (IOptions<SecurityOptions> options) =>
     {
         resource = security.PublicBaseUrl,
         authorization_servers = new[] { security.OAuth.Authority },
-        scopes_supported = security.OAuth.RequiredScopes,
+        scopes_supported = new[] { "files:read", "files:write" },
         resource_documentation = $"{security.PublicBaseUrl}/docs"
     };
     return Results.Json(response, contentType: "application/json");
@@ -76,7 +76,7 @@ app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAn
 app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
 
 // Map MCP endpoints (Streamable HTTP Transport — default path: POST /)
-app.MapMcp().RequireAuthorization("McpPolicy");
+app.MapMcp().RequireAuthorization("McpAuthenticatedPolicy");
 
 app.Run();
 

@@ -16,8 +16,13 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Reflection;
 using Xunit;
 using LocalMcp.Gateway.Security;
+using LocalMcp.Gateway.Mcp;
+using LocalMcp.Gateway.Commands;
+using Microsoft.AspNetCore.Authorization;
+using ModelContextProtocol.Protocol;
 
 namespace LocalMcp.UnitTests;
 
@@ -111,7 +116,7 @@ public sealed class GatewayAuthTests : IAsyncDisposable
 
         _app.MapGet("/.well-known/oauth-protected-resource", metadataHandler).AllowAnonymous();
         _app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAnonymous();
-        _app.MapMcp().RequireAuthorization("McpPolicy");
+        _app.MapMcp().RequireAuthorization("McpAuthenticatedPolicy");
 
         await _app.StartAsync();
 
@@ -273,16 +278,26 @@ public sealed class GatewayAuthTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task McpEndpoint_MissingScope_Returns403()
+    public async Task McpEndpoint_MissingScope_ReturnsForbiddenAtToolLevel()
     {
         await SetupServerAsync();
 
-        // Valid signature/audience/issuer but missing required files:read scope
-        var token = GenerateToken(additionalClaims: new[] { new Claim("scope", "other:scope") });
-        _client!.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        var response = await _client.PostAsync("/", new StringContent("{}", Encoding.UTF8, "application/json"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("scope", "other:scope") }, "Bearer"));
+        var httpContext = new DefaultHttpContext { User = principal };
+        var httpContextAccessor = new HttpContextAccessor { HttpContext = httpContext };
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var mcpTools = new FileSystemTools(
+            _app!.Services.GetRequiredService<ICommandDispatcher>(),
+            _app.Services.GetRequiredService<IAuthorizationService>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<FileSystemTools>.Instance,
+            httpContextAccessor
+        );
+
+        var response = await mcpTools.ReadFileAsync("test-device", "C:\\test.txt");
+
+        Assert.True(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        Assert.Contains("FORBIDDEN", textBlock.Text);
     }
 
     [Theory]

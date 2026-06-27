@@ -46,6 +46,14 @@ public sealed class CommandHandler
         {
             return await HandleTreeAsync(treeCommand, cancellationToken);
         }
+        else if (command is WriteFileCommand writeFileCommand)
+        {
+            return await HandleWriteFileAsync(writeFileCommand, cancellationToken);
+        }
+        else if (command is PatchFileCommand patchFileCommand)
+        {
+            return await HandlePatchFileAsync(patchFileCommand, cancellationToken);
+        }
 
         _logger.LogWarning("Unsupported command type received: {CommandType}", command.GetType().Name);
         return new CommandResult<JsonElement>
@@ -61,8 +69,8 @@ public sealed class CommandHandler
         TreeCommand command,
         CancellationToken cancellationToken)
     {
-        // 1. Validate path policy (sandbox check)
-        var error = _pathPolicy.Validate(command.Path, out var normalizedPath, isDirectory: true);
+        // Use explicit read-directory authorization
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
         if (error is not null)
         {
             _logger.LogWarning("Path validation failed for tree command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
@@ -75,7 +83,6 @@ public sealed class CommandHandler
             };
         }
 
-        // 2. Execute tree
         var treeResult = await _fileSystemExecutor.GetTreeAsync(
             normalizedPath,
             command.MaxDepth,
@@ -109,8 +116,8 @@ public sealed class CommandHandler
         ListDirectoryCommand command,
         CancellationToken cancellationToken)
     {
-        // 1. Validate path policy (sandbox check)
-        var error = _pathPolicy.Validate(command.Path, out var normalizedPath, isDirectory: true);
+        // Use explicit read-directory authorization
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
         if (error is not null)
         {
             _logger.LogWarning("Path validation failed for list command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
@@ -123,8 +130,7 @@ public sealed class CommandHandler
             };
         }
 
-        // 2. Execute list
-        var listResult = await _fileSystemExecutor.ListDirectoryAsync(normalizedPath, command.IncludeHidden, command.CommandId, cancellationToken);
+        var listResult = await _fileSystemExecutor.ListDirectoryAsync(normalizedPath, command.MaxEntries, command.CommandId, cancellationToken);
 
         if (!listResult.Success || listResult.Data == null)
         {
@@ -136,11 +142,11 @@ public sealed class CommandHandler
             };
         }
 
-        // 3. Filter children using the same PathPolicy sandbox rules
+        // Filter directories and files with explicit path policy checks
         var filteredDirs = new List<DirectoryEntry>();
         foreach (var dir in listResult.Data.Directories)
         {
-            var itemError = _pathPolicy.Validate(dir.Path, out _, isDirectory: true);
+            var itemError = _pathPolicy.AuthorizeReadDirectory(dir.Path, out _);
             if (itemError is null)
             {
                 filteredDirs.Add(dir);
@@ -150,7 +156,7 @@ public sealed class CommandHandler
         var filteredFiles = new List<FileEntry>();
         foreach (var file in listResult.Data.Files)
         {
-            var itemError = _pathPolicy.Validate(file.Path, out _, isDirectory: false);
+            var itemError = _pathPolicy.AuthorizeReadFile(file.Path, out _);
             if (itemError is null)
             {
                 filteredFiles.Add(file);
@@ -180,8 +186,8 @@ public sealed class CommandHandler
         SearchFilesCommand command,
         CancellationToken cancellationToken)
     {
-        // 1. Validate path policy (sandbox check)
-        var error = _pathPolicy.Validate(command.Path, out var normalizedPath, isDirectory: true);
+        // Use explicit read-directory authorization
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
         if (error is not null)
         {
             _logger.LogWarning("Path validation failed for search command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
@@ -194,15 +200,11 @@ public sealed class CommandHandler
             };
         }
 
-        // 2. Execute search
         var searchResult = await _fileSystemExecutor.SearchFilesAsync(
             normalizedPath,
             command.Query,
-            command.Mode,
-            command.FilePattern,
-            command.CaseSensitive,
             command.MaxResults,
-            command.MaxFileBytes,
+            command.MaxDepth,
             command.CommandId,
             cancellationToken
         );
@@ -217,12 +219,11 @@ public sealed class CommandHandler
             };
         }
 
-        // 3. Filter matches using the same PathPolicy sandbox rules
+        // Filter files with explicit path policy checks
         var filteredMatches = new List<SearchMatch>();
         foreach (var item in searchResult.Data.Matches)
         {
-            // We search files, so isDirectory is false
-            var itemError = _pathPolicy.Validate(item.FullPath, out _, isDirectory: false);
+            var itemError = _pathPolicy.AuthorizeReadFile(item.FullPath, out _);
             if (itemError is null)
             {
                 filteredMatches.Add(item);
@@ -248,11 +249,11 @@ public sealed class CommandHandler
         ReadFileCommand command,
         CancellationToken cancellationToken)
     {
-        // 1. Validate path policy (sandbox check)
-        var error = _pathPolicy.Validate(command.Path, out var normalizedPath);
+        // Use explicit read-file authorization
+        var error = _pathPolicy.AuthorizeReadFile(command.Path, out var normalizedPath);
         if (error is not null)
         {
-            _logger.LogWarning("Path validation failed for command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
+            _logger.LogWarning("Path validation failed for read command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
             return new CommandResult<JsonElement>
             {
                 CommandId = command.CommandId,
@@ -262,7 +263,6 @@ public sealed class CommandHandler
             };
         }
 
-        // 2. Execute read
         var readResult = await _fileSystemExecutor.ReadFileAsync(normalizedPath, command.CommandId, cancellationToken);
 
         if (!readResult.Success)
@@ -276,6 +276,99 @@ public sealed class CommandHandler
         }
 
         var dataJson = JsonSerializer.SerializeToElement(readResult.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleWriteFileAsync(
+        WriteFileCommand command,
+        CancellationToken cancellationToken)
+    {
+        // Use explicit write-file authorization (file does not need to exist yet)
+        var error = _pathPolicy.AuthorizeWriteFile(command.Path, out var normalizedPath, mustExist: false);
+        if (error is not null)
+        {
+            _logger.LogWarning("Path validation failed for write command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var writeResult = await _fileSystemExecutor.WriteFileAsync(
+            normalizedPath,
+            command.Content,
+            command.ExpectedSha256,
+            command.CreateIfMissing,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!writeResult.Success || writeResult.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = writeResult.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(writeResult.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandlePatchFileAsync(
+        PatchFileCommand command,
+        CancellationToken cancellationToken)
+    {
+        // Use explicit write-file authorization (target file MUST exist)
+        var error = _pathPolicy.AuthorizeWriteFile(command.Path, out var normalizedPath, mustExist: true);
+        if (error is not null)
+        {
+            _logger.LogWarning("Path validation failed for patch command {CommandId}: {ErrorCode} - {ErrorMessage}", command.CommandId, error.Code, error.Message);
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var patchResult = await _fileSystemExecutor.PatchFileAsync(
+            normalizedPath,
+            command.ExpectedSha256,
+            command.Edits,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!patchResult.Success || patchResult.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = patchResult.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(patchResult.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
 
         return new CommandResult<JsonElement>
         {

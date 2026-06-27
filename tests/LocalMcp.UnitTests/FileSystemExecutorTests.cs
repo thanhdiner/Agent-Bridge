@@ -23,7 +23,7 @@ public sealed class FileSystemExecutorTests : IDisposable
             MaxReadBytes = 10 * 1024 * 1024
         };
         var policy = new LocalMcp.Agent.Windows.Security.PathPolicy(Microsoft.Extensions.Options.Options.Create(options));
-        _executor = new FileSystemExecutor(policy, NullLogger<FileSystemExecutor>.Instance);
+        _executor = new FileSystemExecutor(policy, Microsoft.Extensions.Options.Options.Create(options), NullLogger<FileSystemExecutor>.Instance);
     }
 
     public void Dispose()
@@ -261,7 +261,7 @@ public sealed class FileSystemExecutorTests : IDisposable
         await File.WriteAllTextAsync(fileA, "A");
         await File.WriteAllTextAsync(fileB, "B");
 
-        var result = await _executor.ListDirectoryAsync(_tempDir, includeHidden: false, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
+        var result = await _executor.ListDirectoryAsync(_tempDir, maxEntries: 1000, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.NotNull(result.Data);
@@ -278,7 +278,7 @@ public sealed class FileSystemExecutorTests : IDisposable
     public async Task ListDirectoryAsync_MissingDirectory_ReturnsDirectoryNotFound()
     {
         var missingPath = Path.Combine(_tempDir, "missing_folder");
-        var result = await _executor.ListDirectoryAsync(missingPath, includeHidden: false, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
+        var result = await _executor.ListDirectoryAsync(missingPath, maxEntries: 1000, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal(ErrorCodes.DirectoryNotFound, result.Error?.Code);
@@ -296,7 +296,7 @@ public sealed class FileSystemExecutorTests : IDisposable
         await File.WriteAllTextAsync(matchedFile, "content");
         await File.WriteAllTextAsync(otherFile, "content");
 
-        var result = await _executor.SearchFilesAsync(_tempDir, "find_me", "name", filePattern: null, caseSensitive: false, maxResults: 100, maxFileBytes: 1048576, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
+        var result = await _executor.SearchFilesAsync(_tempDir, query: "find_me", maxResults: 100, maxDepth: 4, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.NotNull(result.Data);
@@ -311,7 +311,7 @@ public sealed class FileSystemExecutorTests : IDisposable
         var file = Path.Combine(_tempDir, "search_content.txt");
         await File.WriteAllTextAsync(file, "Line 1\nTarget keyword here\nLine 3");
 
-        var result = await _executor.SearchFilesAsync(_tempDir, "Target keyword", "content", filePattern: "*.txt", caseSensitive: false, maxResults: 100, maxFileBytes: 1048576, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
+        var result = await _executor.SearchFilesAsync(_tempDir, query: "Target keyword", maxResults: 100, maxDepth: 4, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.NotNull(result.Data);
@@ -322,44 +322,35 @@ public sealed class FileSystemExecutorTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchFilesAsync_CaseSensitiveContent_RespectsSensitivity()
+    public async Task SearchFilesAsync_CaseInsensitive_FindsText()
     {
         var file = Path.Combine(_tempDir, "case.txt");
         await File.WriteAllTextAsync(file, "keyword Keyword KEYWORD");
 
-        var sensitiveResult = await _executor.SearchFilesAsync(_tempDir, "Keyword", "content", filePattern: null, caseSensitive: true, maxResults: 100, maxFileBytes: 1048576, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
-        var insensitiveResult = await _executor.SearchFilesAsync(_tempDir, "Keyword", "content", filePattern: null, caseSensitive: false, maxResults: 100, maxFileBytes: 1048576, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
+        var result = await _executor.SearchFilesAsync(_tempDir, query: "Keyword", maxResults: 100, maxDepth: 4, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
 
-        Assert.True(sensitiveResult.Success);
-        Assert.NotNull(sensitiveResult.Data);
-        Assert.Single(sensitiveResult.Data.Matches); // Should match only "Keyword"
-
-        Assert.True(insensitiveResult.Success);
-        Assert.NotNull(insensitiveResult.Data);
-        Assert.Single(insensitiveResult.Data.Matches); // It matches the single line containing all keywords
+        Assert.True(result.Success);
+        Assert.NotNull(result.Data);
+        Assert.Single(result.Data.Matches); // Matches the single line containing all keywords
     }
 
     [Fact]
     public async Task SearchFilesAsync_OversizedFile_IsSkipped()
     {
         var file = Path.Combine(_tempDir, "large_search.txt");
-        await File.WriteAllTextAsync(file, "keyword");
+        using (var fs = new FileStream(file, FileMode.Create, FileAccess.Write))
+        {
+            fs.SetLength(1100000);
+            fs.Seek(1099000, SeekOrigin.Begin);
+            var bytes = Encoding.UTF8.GetBytes("keyword");
+            fs.Write(bytes, 0, bytes.Length);
+        }
 
-        // maxFileBytes = 2, but file size > 2
-        var result = await _executor.SearchFilesAsync(_tempDir, "keyword", "content", filePattern: null, caseSensitive: false, maxResults: 100, maxFileBytes: 2, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
+        var result = await _executor.SearchFilesAsync(_tempDir, query: "keyword", maxResults: 100, maxDepth: 4, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.NotNull(result.Data);
         Assert.Empty(result.Data.Matches);
-    }
-
-    [Fact]
-    public async Task SearchFilesAsync_InvalidMode_ReturnsInvalidSearchMode()
-    {
-        var result = await _executor.SearchFilesAsync(_tempDir, "keyword", "invalid_mode", filePattern: null, caseSensitive: false, maxResults: 100, maxFileBytes: 1000, commandId: Guid.NewGuid(), cancellationToken: CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Equal(ErrorCodes.InvalidSearchMode, result.Error?.Code);
     }
 
     #endregion

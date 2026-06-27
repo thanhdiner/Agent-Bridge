@@ -23,3 +23,10 @@ appsettings.Local.json
 
 # Testing outputs
 TestResults/
+
+# Scratch & diagnostic outputs (never committed)
+scratch/
+endpoints.txt
+type_info.txt
+policies.txt
+mcp_types_dump.txt

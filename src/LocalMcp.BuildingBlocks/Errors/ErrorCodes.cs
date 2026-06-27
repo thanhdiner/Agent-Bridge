@@ -20,4 +20,19 @@ public static class ErrorCodes
     public const string SearchQueryRequired = "SEARCH_QUERY_REQUIRED";
     public const string TreeDepthLimitExceeded = "TREE_DEPTH_LIMIT_EXCEEDED";
     public const string ResultLimitExceeded = "RESULT_LIMIT_EXCEEDED";
+
+    // Write-related error codes
+    public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";
+    public const string WritableRootNotConfigured = "WRITABLE_ROOT_NOT_CONFIGURED";
+    public const string FileAlreadyExists = "FILE_ALREADY_EXISTS";
+    public const string FileConflict = "FILE_CONFLICT";
+    public const string ExpectedHashRequired = "EXPECTED_HASH_REQUIRED";
+    public const string HashMismatch = "HASH_MISMATCH";
+    public const string PatchEditsRequired = "PATCH_EDITS_REQUIRED";
+    public const string PatchTargetNotFound = "PATCH_TARGET_NOT_FOUND";
+    public const string PatchTargetAmbiguous = "PATCH_TARGET_AMBIGUOUS";
+    public const string PatchEditsOverlap = "PATCH_EDITS_OVERLAP";
+    public const string UnsupportedTextEncoding = "UNSUPPORTED_TEXT_ENCODING";
+    public const string FileReadOnly = "FILE_READ_ONLY";
+    public const string AtomicReplaceFailed = "ATOMIC_REPLACE_FAILED";
 }
