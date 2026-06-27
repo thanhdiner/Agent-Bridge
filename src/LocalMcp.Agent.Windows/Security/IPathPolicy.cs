@@ -36,4 +36,14 @@ public interface IPathPolicy
     /// Authorises a path for checking its metadata (existence and stats).
     /// </summary>
     CommandError? AuthorizeStat(string rawPath, out string normalizedPath);
+
+    /// <summary>
+    /// Authorises a path for moving files or directories.
+    /// </summary>
+    CommandError? AuthorizeMove(string rawSource, string rawDestination, bool overwrite, out string normalizedSource, out string normalizedDestination);
+
+    /// <summary>
+    /// Authorises a path for copying files.
+    /// </summary>
+    CommandError? AuthorizeCopy(string rawSource, string rawDestination, bool overwrite, out string normalizedSource, out string normalizedDestination);
 }

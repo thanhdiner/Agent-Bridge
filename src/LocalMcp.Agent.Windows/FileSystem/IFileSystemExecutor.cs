@@ -65,4 +65,22 @@ public interface IFileSystemExecutor
         Guid commandId,
         CancellationToken cancellationToken
     );
+
+    Task<CommandResult<MoveResult>> MoveAsync(
+        string sourcePath,
+        string destinationPath,
+        bool overwrite,
+        string? expectedSha256,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
+    Task<CommandResult<CopyResult>> CopyAsync(
+        string sourcePath,
+        string destinationPath,
+        bool overwrite,
+        string? expectedSourceSha256,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
 }

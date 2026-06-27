@@ -62,6 +62,14 @@ public sealed class CommandHandler
         {
             return await HandleStatAsync(statCommand, cancellationToken);
         }
+        else if (command is MoveCommand moveCommand)
+        {
+            return await HandleMoveAsync(moveCommand, cancellationToken);
+        }
+        else if (command is CopyCommand copyCommand)
+        {
+            return await HandleCopyAsync(copyCommand, cancellationToken);
+        }
 
         _logger.LogWarning("Unsupported command type received: {CommandType}", command.GetType().Name);
         return new CommandResult<JsonElement>
@@ -439,6 +447,70 @@ public sealed class CommandHandler
 
         var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
 
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleMoveAsync(
+        MoveCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _fileSystemExecutor.MoveAsync(
+            command.Path,
+            command.Destination,
+            command.Overwrite,
+            command.ExpectedSha256,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!result.Success || result.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = dataJson
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleCopyAsync(
+        CopyCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await _fileSystemExecutor.CopyAsync(
+            command.Path,
+            command.Destination,
+            command.Overwrite,
+            command.ExpectedSourceSha256,
+            command.CommandId,
+            cancellationToken
+        );
+
+        if (!result.Success || result.Data == null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        var dataJson = JsonSerializer.SerializeToElement(result.Data, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default);
         return new CommandResult<JsonElement>
         {
             CommandId = command.CommandId,

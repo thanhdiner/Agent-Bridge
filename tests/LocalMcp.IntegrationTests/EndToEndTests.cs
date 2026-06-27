@@ -218,6 +218,82 @@ public sealed class EndToEndTests : IAsyncDisposable
         Assert.Equal("directory", statResultAfter.Type);
     }
 
+    [Fact]
+    public async Task FsMove_EndToEndFlow_MovesFileSuccessfully()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var srcFile = Path.Combine(_tempRoot, "move_src.txt");
+        var dstFile = Path.Combine(_tempRoot, "move_dst.txt");
+        const string text = "Move test content";
+        await File.WriteAllTextAsync(srcFile, text);
+
+        var mcpTools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
+        );
+
+        // Call fs_move
+        var response = await mcpTools.MoveAsync(_deviceId, srcFile, dstFile, overwrite: false, expectedSha256: null);
+
+        Assert.False(response.IsError);
+        Assert.NotNull(response.Content);
+        Assert.Single(response.Content);
+
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<MoveResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal(dstFile, data.Path);
+        Assert.False(data.IsDirectory);
+        Assert.False(File.Exists(srcFile));
+        Assert.True(File.Exists(dstFile));
+        Assert.Equal(text, await File.ReadAllTextAsync(dstFile));
+    }
+
+    [Fact]
+    public async Task FsCopy_EndToEndFlow_CopiesFileSuccessfully()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var srcFile = Path.Combine(_tempRoot, "copy_src.txt");
+        var dstFile = Path.Combine(_tempRoot, "copy_dst.txt");
+        const string text = "Copy test content";
+        await File.WriteAllTextAsync(srcFile, text);
+
+        var mcpTools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
+        );
+
+        // Call fs_copy
+        var response = await mcpTools.CopyAsync(_deviceId, srcFile, dstFile, overwrite: false, expectedSourceSha256: null);
+
+        Assert.False(response.IsError);
+        Assert.NotNull(response.Content);
+        Assert.Single(response.Content);
+
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<CopyResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal(dstFile, data.Path);
+        Assert.Equal(text.Length, data.BytesCopied);
+        Assert.True(File.Exists(srcFile));
+        Assert.True(File.Exists(dstFile));
+        Assert.Equal(text, await File.ReadAllTextAsync(dstFile));
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_agentConnection is not null)

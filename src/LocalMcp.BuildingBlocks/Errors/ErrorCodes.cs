@@ -35,4 +35,9 @@ public static class ErrorCodes
     public const string UnsupportedTextEncoding = "UNSUPPORTED_TEXT_ENCODING";
     public const string FileReadOnly = "FILE_READ_ONLY";
     public const string AtomicReplaceFailed = "ATOMIC_REPLACE_FAILED";
+
+    // Move / Copy error codes
+    public const string ConcurrencyConflict = "CONCURRENCY_CONFLICT";
+    public const string ReadError = "READ_ERROR";
+    public const string WriteError = "WRITE_ERROR";
 }

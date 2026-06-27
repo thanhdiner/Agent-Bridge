@@ -520,6 +520,302 @@ public sealed class PathPolicy : IPathPolicy
         return null;
     }
 
+    public CommandError? AuthorizeMove(
+        string rawSource,
+        string rawDestination,
+        bool overwrite,
+        out string normalizedSource,
+        out string normalizedDestination)
+    {
+        normalizedSource = string.Empty;
+        normalizedDestination = string.Empty;
+
+        if (_options.WritableRoots == null || _options.WritableRoots.Count == 0)
+            return new CommandError(ErrorCodes.WritableRootNotConfigured, "No writable roots are configured on the agent.");
+
+        var srcError = ValidateBasicPath(rawSource, out var fullSource);
+        if (srcError is not null) return srcError;
+
+        var destError = ValidateBasicPath(rawDestination, out var fullDest);
+        if (destError is not null) return destError;
+
+        var reparseSrc = VerifyNoReparsePointsInOriginalPath(fullSource);
+        if (reparseSrc is not null) return reparseSrc;
+
+        var reparseDest = VerifyNoReparsePointsInOriginalPath(fullDest);
+        if (reparseDest is not null) return reparseDest;
+
+        // Resolve source – must exist
+        string physicalSource;
+        try
+        {
+            if (File.Exists(fullSource) || Directory.Exists(fullSource))
+            {
+                var originalAttrs = File.GetAttributes(fullSource);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the source path.");
+                physicalSource = ResolvePhysicalPath(fullSource);
+            }
+            else
+            {
+                return new CommandError(ErrorCodes.FileNotFound, "Source path was not found.");
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical source path.");
+        }
+
+        // Resolve destination
+        string physicalDest;
+        try
+        {
+            if (File.Exists(fullDest) || Directory.Exists(fullDest))
+            {
+                var originalAttrs = File.GetAttributes(fullDest);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the destination path.");
+                physicalDest = ResolvePhysicalPath(fullDest);
+            }
+            else
+            {
+                var parent = Path.GetDirectoryName(fullDest);
+                if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+                    return new CommandError(ErrorCodes.DirectoryNotFound, "The parent directory of the destination was not found.");
+                var physicalParent = ResolvePhysicalPath(parent);
+                physicalDest = Path.Combine(physicalParent, Path.GetFileName(fullDest));
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical destination path.");
+        }
+
+        // Directory overwrite is never allowed
+        if (Directory.Exists(physicalDest))
+            return new CommandError(ErrorCodes.AccessDenied, "Directory overwrite is not allowed.");
+
+        // File overwrite
+        if (File.Exists(physicalDest))
+        {
+            if (!overwrite)
+                return new CommandError(ErrorCodes.AccessDenied, "The destination file already exists.");
+            var destAttrs = File.GetAttributes(physicalDest);
+            if (destAttrs.HasFlag(FileAttributes.ReadOnly))
+                return new CommandError(ErrorCodes.FileReadOnly, "The destination file is read-only.");
+        }
+
+        // Source sandboxing: WritableRoots AND AllowedRoots (move deletes source)
+        if (GetMatchingWritableRoot(physicalSource) is null || GetMatchingWritableRoot(fullSource) is null)
+            return new CommandError(ErrorCodes.WriteNotAllowed, "The source path lies outside the configured writable root directories.");
+        if (GetMatchingAllowedRoot(physicalSource) is null || GetMatchingAllowedRoot(fullSource) is null)
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The source path lies outside the configured allowed root directories.");
+
+        // Destination sandboxing: WritableRoots AND AllowedRoots
+        if (GetMatchingWritableRoot(physicalDest) is null || GetMatchingWritableRoot(fullDest) is null)
+            return new CommandError(ErrorCodes.WriteNotAllowed, "The destination path lies outside the configured writable root directories.");
+        if (GetMatchingAllowedRoot(physicalDest) is null || GetMatchingAllowedRoot(fullDest) is null)
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The destination path lies outside the configured allowed root directories.");
+
+        // Denied segments + filenames – source
+        foreach (var seg in physicalSource.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (_options.DeniedSegments.Any(ds => string.Equals(ds, seg, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to source path containing segment '{seg}'.");
+        }
+        var srcFileName = Path.GetFileName(physicalSource);
+        if (!string.IsNullOrEmpty(srcFileName) &&
+            (_options.DeniedFileNames.Any(df => MatchFileName(srcFileName, df)) ||
+             _options.DeniedWriteFileNames.Any(dw => MatchFileName(srcFileName, dw))))
+            return new CommandError(ErrorCodes.AccessDenied, $"Access denied to source '{srcFileName}'.");
+
+        // Denied segments + filenames + extensions – destination
+        foreach (var seg in physicalDest.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (_options.DeniedSegments.Any(ds => string.Equals(ds, seg, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to destination path containing segment '{seg}'.");
+        }
+        var destFileName = Path.GetFileName(physicalDest);
+        if (!string.IsNullOrEmpty(destFileName))
+        {
+            if (_options.DeniedFileNames.Any(df => MatchFileName(destFileName, df)) ||
+                _options.DeniedWriteFileNames.Any(dw => MatchFileName(destFileName, dw)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to destination '{destFileName}'.");
+
+            var ext = Path.GetExtension(physicalDest);
+            if (!string.IsNullOrEmpty(ext) &&
+                _options.DeniedWriteExtensions.Any(de => string.Equals(de, ext, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to destination with extension '{ext}'.");
+        }
+
+        // Reject cross-volume moves
+        var srcRoot = Path.GetPathRoot(physicalSource);
+        var dstRoot = Path.GetPathRoot(physicalDest);
+        if (!string.Equals(srcRoot, dstRoot, StringComparison.OrdinalIgnoreCase))
+            return new CommandError(ErrorCodes.AccessDenied, "Cross-volume moves are not supported.");
+
+        normalizedSource = physicalSource;
+        normalizedDestination = physicalDest;
+        return null;
+    }
+
+    public CommandError? AuthorizeCopy(
+        string rawSource,
+        string rawDestination,
+        bool overwrite,
+        out string normalizedSource,
+        out string normalizedDestination)
+    {
+        normalizedSource = string.Empty;
+        normalizedDestination = string.Empty;
+
+        if (_options.WritableRoots == null || _options.WritableRoots.Count == 0)
+            return new CommandError(ErrorCodes.WritableRootNotConfigured, "No writable roots are configured on the agent.");
+
+        var srcError = ValidateBasicPath(rawSource, out var fullSource);
+        if (srcError is not null) return srcError;
+
+        var destError = ValidateBasicPath(rawDestination, out var fullDest);
+        if (destError is not null) return destError;
+
+        var reparseSrc = VerifyNoReparsePointsInOriginalPath(fullSource);
+        if (reparseSrc is not null) return reparseSrc;
+
+        var reparseDest = VerifyNoReparsePointsInOriginalPath(fullDest);
+        if (reparseDest is not null) return reparseDest;
+
+        // Resolve source – must exist and must be a file
+        string physicalSource;
+        try
+        {
+            if (Directory.Exists(fullSource))
+                return new CommandError(ErrorCodes.AccessDenied, "Copying directories is not supported.");
+
+            if (File.Exists(fullSource))
+            {
+                var originalAttrs = File.GetAttributes(fullSource);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the source path.");
+                physicalSource = ResolvePhysicalPath(fullSource);
+            }
+            else
+            {
+                return new CommandError(ErrorCodes.FileNotFound, "Source file was not found.");
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical source path.");
+        }
+
+        // Resolve destination
+        string physicalDest;
+        try
+        {
+            if (File.Exists(fullDest) || Directory.Exists(fullDest))
+            {
+                var originalAttrs = File.GetAttributes(fullDest);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the destination path.");
+                physicalDest = ResolvePhysicalPath(fullDest);
+            }
+            else
+            {
+                var parent = Path.GetDirectoryName(fullDest);
+                if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent))
+                    return new CommandError(ErrorCodes.DirectoryNotFound, "The parent directory of the destination was not found.");
+                var physicalParent = ResolvePhysicalPath(parent);
+                physicalDest = Path.Combine(physicalParent, Path.GetFileName(fullDest));
+            }
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical destination path.");
+        }
+
+        if (Directory.Exists(physicalDest))
+            return new CommandError(ErrorCodes.AccessDenied, "Destination is a directory.");
+
+        if (File.Exists(physicalDest))
+        {
+            if (!overwrite)
+                return new CommandError(ErrorCodes.AccessDenied, "The destination file already exists.");
+            var destAttrs = File.GetAttributes(physicalDest);
+            if (destAttrs.HasFlag(FileAttributes.ReadOnly))
+                return new CommandError(ErrorCodes.FileReadOnly, "The destination file is read-only.");
+        }
+
+        // Source sandboxing: AllowedRoots only (we only read it)
+        if (GetMatchingAllowedRoot(physicalSource) is null || GetMatchingAllowedRoot(fullSource) is null)
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The source path lies outside the configured allowed root directories.");
+
+        // Destination sandboxing: WritableRoots AND AllowedRoots
+        if (GetMatchingWritableRoot(physicalDest) is null || GetMatchingWritableRoot(fullDest) is null)
+            return new CommandError(ErrorCodes.WriteNotAllowed, "The destination path lies outside the configured writable root directories.");
+        if (GetMatchingAllowedRoot(physicalDest) is null || GetMatchingAllowedRoot(fullDest) is null)
+            return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The destination path lies outside the configured allowed root directories.");
+
+        // Denied segments + filenames – source (read-only denied list)
+        foreach (var seg in physicalSource.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (_options.DeniedSegments.Any(ds => string.Equals(ds, seg, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to source path containing segment '{seg}'.");
+        }
+        var srcFileName = Path.GetFileName(physicalSource);
+        if (!string.IsNullOrEmpty(srcFileName) && _options.DeniedFileNames.Any(df => MatchFileName(srcFileName, df)))
+            return new CommandError(ErrorCodes.AccessDenied, $"Access denied to source '{srcFileName}'.");
+
+        // Denied segments + filenames + extensions – destination
+        foreach (var seg in physicalDest.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (_options.DeniedSegments.Any(ds => string.Equals(ds, seg, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to destination path containing segment '{seg}'.");
+        }
+        var destFileName = Path.GetFileName(physicalDest);
+        if (!string.IsNullOrEmpty(destFileName))
+        {
+            if (_options.DeniedFileNames.Any(df => MatchFileName(destFileName, df)) ||
+                _options.DeniedWriteFileNames.Any(dw => MatchFileName(destFileName, dw)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to destination '{destFileName}'.");
+
+            var ext = Path.GetExtension(physicalDest);
+            if (!string.IsNullOrEmpty(ext) &&
+                _options.DeniedWriteExtensions.Any(de => string.Equals(de, ext, StringComparison.OrdinalIgnoreCase)))
+                return new CommandError(ErrorCodes.AccessDenied, $"Access denied to destination with extension '{ext}'.");
+        }
+
+        normalizedSource = physicalSource;
+        normalizedDestination = physicalDest;
+        return null;
+    }
+
+    private CommandError? VerifyNoReparsePointsInOriginalPath(string fullPath)
+    {
+        var current = fullPath;
+        while (!string.IsNullOrEmpty(current))
+        {
+            try
+            {
+                if (Directory.Exists(current) || File.Exists(current))
+                {
+                    var attrs = File.GetAttributes(current);
+                    if (attrs.HasFlag(FileAttributes.ReparsePoint))
+                        return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the path.");
+                }
+            }
+            catch (Exception)
+            {
+                // Transient errors on attribute checks – let the main resolution handle it
+            }
+
+            var parent = Path.GetDirectoryName(current);
+            if (string.IsNullOrEmpty(parent) || string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+                break;
+            current = parent;
+        }
+        return null;
+    }
+
     private CommandError? ValidateBasicPath(string rawPath, out string fullPath)
     {
         fullPath = string.Empty;

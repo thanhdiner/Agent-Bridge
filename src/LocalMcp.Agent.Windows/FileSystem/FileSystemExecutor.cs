@@ -1634,4 +1634,269 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         public int End { get; set; }
         public string NewText { get; set; } = string.Empty;
     }
+
+    // ── fs_move ──────────────────────────────────────────────────────────────
+
+    public async Task<CommandResult<MoveResult>> MoveAsync(
+        string sourcePath,
+        string destinationPath,
+        bool overwrite,
+        string? expectedSha256,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return new CommandResult<MoveResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+
+        var policyError = _pathPolicy.AuthorizeMove(sourcePath, destinationPath, overwrite, out var physicalSource, out var physicalDest);
+        if (policyError is not null)
+            return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = policyError };
+
+        bool isDirectory = Directory.Exists(physicalSource);
+
+        // SHA-256 concurrency check on files only
+        if (!isDirectory && !string.IsNullOrEmpty(expectedSha256))
+        {
+            try
+            {
+                using var stream = new FileStream(physicalSource, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+                var hashBytes = await SHA256.HashDataAsync(stream, cancellationToken);
+                var actualHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+                if (!string.Equals(actualHash, expectedSha256.ToLowerInvariant(), StringComparison.Ordinal))
+                    return new CommandResult<MoveResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Source file has changed since the expected SHA-256 was computed.")
+                    };
+            }
+            catch (OperationCanceledException)
+            {
+                return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.") };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to compute SHA-256 for pre-move verification. CommandId: {CommandId}", commandId);
+                return new CommandResult<MoveResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.ReadError, "Failed to read source file for SHA-256 verification.")
+                };
+            }
+        }
+
+        try
+        {
+            if (isDirectory)
+            {
+                Directory.Move(physicalSource, physicalDest);
+            }
+            else
+            {
+                File.Move(physicalSource, physicalDest, overwrite);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<MoveResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.") };
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error during move. CommandId: {CommandId}", commandId);
+            return new CommandResult<MoveResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.WriteError, "Failed to move the path due to an IO error.")
+            };
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied during move. CommandId: {CommandId}", commandId);
+            return new CommandResult<MoveResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "Access was denied when attempting to move the path.")
+            };
+        }
+
+        DateTime lastWrite;
+        try
+        {
+            lastWrite = isDirectory
+                ? new DirectoryInfo(physicalDest).LastWriteTimeUtc
+                : new FileInfo(physicalDest).LastWriteTimeUtc;
+        }
+        catch
+        {
+            lastWrite = DateTime.UtcNow;
+        }
+
+        return new CommandResult<MoveResult>
+        {
+            CommandId = commandId,
+            Success = true,
+            Data = new MoveResult
+            {
+                Path = physicalDest,
+                IsDirectory = isDirectory,
+                LastWriteTimeUtc = lastWrite
+            }
+        };
+    }
+
+    // ── fs_copy ──────────────────────────────────────────────────────────────
+
+    public async Task<CommandResult<CopyResult>> CopyAsync(
+        string sourcePath,
+        string destinationPath,
+        bool overwrite,
+        string? expectedSourceSha256,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return new CommandResult<CopyResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.")
+            };
+
+        var policyError = _pathPolicy.AuthorizeCopy(sourcePath, destinationPath, overwrite, out var physicalSource, out var physicalDest);
+        if (policyError is not null)
+            return new CommandResult<CopyResult> { CommandId = commandId, Success = false, Error = policyError };
+
+        var destDir = Path.GetDirectoryName(physicalDest)!;
+        var tempPath = Path.Combine(destDir, $"copy-temp-{Guid.NewGuid():N}.tmp");
+
+        string? preCopyHash = null;
+        long bytesCopied = 0;
+        string? copiedHash = null;
+
+        try
+        {
+            // Step 1: Open source and compute pre-copy hash + stream copy to temp
+            using (var srcStream = new FileStream(physicalSource, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+            {
+                // Compute source hash before copying
+                preCopyHash = Convert.ToHexString(await SHA256.HashDataAsync(srcStream, cancellationToken)).ToLowerInvariant();
+
+                // Validate expectedSourceSha256 if provided
+                if (!string.IsNullOrEmpty(expectedSourceSha256) &&
+                    !string.Equals(preCopyHash, expectedSourceSha256.ToLowerInvariant(), StringComparison.Ordinal))
+                    return new CommandResult<CopyResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Source file has changed since the expected SHA-256 was computed.")
+                    };
+
+                srcStream.Position = 0;
+
+                // Step 2: Copy to temp file while computing dest hash
+                using var destStream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+                using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await srcStream.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    await destStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    sha.AppendData(buffer, 0, read);
+                    bytesCopied += read;
+                }
+
+                await destStream.FlushAsync(cancellationToken);
+                destStream.SafeFileHandle.GetHashCode(); // ensure handle alive for Flush
+                var rawHash = sha.GetHashAndReset();
+                copiedHash = Convert.ToHexString(rawHash).ToLowerInvariant();
+            }
+
+            // Step 3: Revalidate source SHA-256 before final swap
+            using (var revalidStream = new FileStream(physicalSource, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true))
+            {
+                var revalidHash = Convert.ToHexString(await SHA256.HashDataAsync(revalidStream, cancellationToken)).ToLowerInvariant();
+                if (!string.Equals(revalidHash, preCopyHash, StringComparison.Ordinal))
+                    return new CommandResult<CopyResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.ConcurrencyConflict, "Source file changed during the copy operation.")
+                    };
+            }
+
+            // Step 4: Atomic swap – move temp to final destination
+            if (overwrite && File.Exists(physicalDest))
+            {
+                File.Move(tempPath, physicalDest, overwrite: true);
+            }
+            else
+            {
+                // If destination appeared concurrently and overwrite is false, fail cleanly
+                if (File.Exists(physicalDest))
+                    return new CommandResult<CopyResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.AccessDenied, "The destination file appeared concurrently.")
+                    };
+                File.Move(tempPath, physicalDest, overwrite: false);
+            }
+            tempPath = null; // ownership transferred – no cleanup needed
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<CopyResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandCancelled, "The command was cancelled.") };
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "IO error during copy. CommandId: {CommandId}", commandId);
+            return new CommandResult<CopyResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.WriteError, "Failed to copy the file due to an IO error.")
+            };
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied during copy. CommandId: {CommandId}", commandId);
+            return new CommandResult<CopyResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.AccessDenied, "Access was denied when attempting to copy the file.")
+            };
+        }
+        finally
+        {
+            // Clean up temp file if ownership was not transferred
+            if (tempPath is not null)
+            {
+                try { File.Delete(tempPath); }
+                catch { /* best-effort */ }
+            }
+        }
+
+        var destInfo = new FileInfo(physicalDest);
+        return new CommandResult<CopyResult>
+        {
+            CommandId = commandId,
+            Success = true,
+            Data = new CopyResult
+            {
+                Path = physicalDest,
+                BytesCopied = bytesCopied,
+                Sha256 = copiedHash!,
+                LastWriteTimeUtc = destInfo.LastWriteTimeUtc
+            }
+        };
+    }
 }

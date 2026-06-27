@@ -52,6 +52,8 @@ public sealed class CommandDeserializerTests
                 nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
                 nameof(CreateDirectoryCommand) => JsonSerializer.Deserialize<CreateDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(StatCommand) => JsonSerializer.Deserialize<StatCommand>(payload, JsonOptions.Default),
+                nameof(MoveCommand) => JsonSerializer.Deserialize<MoveCommand>(payload, JsonOptions.Default),
+                nameof(CopyCommand) => JsonSerializer.Deserialize<CopyCommand>(payload, JsonOptions.Default),
                 _ => null
             };
         }
@@ -177,6 +179,68 @@ public sealed class CommandDeserializerTests
         Assert.NotNull(command);
         var statCmd = Assert.IsType<StatCommand>(command);
         Assert.Equal("C:\\file.txt", statCmd.Path);
+    }
+
+    [Fact]
+    public void Deserialize_MoveCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"MoveCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\\\\a.txt\",\"destination\":\"C:\\\\dst\\\\b.txt\",\"overwrite\":true,\"expectedSha256\":\"abc123\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.NotNull(command);
+        var moveCmd = Assert.IsType<MoveCommand>(command);
+        Assert.Equal("C:\\src\\a.txt", moveCmd.Path);
+        Assert.Equal("C:\\dst\\b.txt", moveCmd.Destination);
+        Assert.True(moveCmd.Overwrite);
+        Assert.Equal("abc123", moveCmd.ExpectedSha256);
+    }
+
+    [Fact]
+    public void Deserialize_MoveCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"MoveCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\\\\a.txt\",\"destination\":\"C:\\\\dst\\\\b.txt\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var moveCmd = Assert.IsType<MoveCommand>(command);
+        Assert.False(moveCmd.Overwrite);
+        Assert.Null(moveCmd.ExpectedSha256);
+    }
+
+    [Fact]
+    public void Deserialize_CopyCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"CopyCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\\\\a.txt\",\"destination\":\"C:\\\\dst\\\\a.txt\",\"overwrite\":true,\"expectedSourceSha256\":\"deadbeef\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.NotNull(command);
+        var copyCmd = Assert.IsType<CopyCommand>(command);
+        Assert.Equal("C:\\src\\a.txt", copyCmd.Path);
+        Assert.Equal("C:\\dst\\a.txt", copyCmd.Destination);
+        Assert.True(copyCmd.Overwrite);
+        Assert.Equal("deadbeef", copyCmd.ExpectedSourceSha256);
+    }
+
+    [Fact]
+    public void Deserialize_CopyCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"CopyCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\\\\a.txt\",\"destination\":\"C:\\\\dst\\\\a.txt\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var copyCmd = Assert.IsType<CopyCommand>(command);
+        Assert.False(copyCmd.Overwrite);
+        Assert.Null(copyCmd.ExpectedSourceSha256);
     }
 
     [Fact]
