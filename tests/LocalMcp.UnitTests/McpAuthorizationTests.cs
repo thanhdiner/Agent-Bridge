@@ -148,6 +148,7 @@ public sealed class McpAuthorizationTests : IAsyncDisposable
     [Theory]
     [InlineData("files:read")]
     [InlineData("files:write files:read")]
+    [InlineData("dev:execute")]
     public async Task ValidReadScope_Token_NotRejectedByAuth(string scope)
     {
         await StartServerAsync();
@@ -303,6 +304,36 @@ public sealed class McpAuthorizationTests : IAsyncDisposable
         Assert.True(result.IsError);
         var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
         Assert.Contains("INVALID_REQUEST", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProjectCheckTool_WithReadScopeOnly_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("files:read");
+
+        var result = await tools.ProjectCheckAsync(
+            "test-device",
+            "C:/src/repo");
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.Contains("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProjectCheckTool_WithExecuteScope_Proceeds()
+    {
+        await StartServerAsync();
+        var tools = MakeToolsWithScope("dev:execute");
+
+        var result = await tools.ProjectCheckAsync(
+            "test-device",
+            "C:/src/repo");
+
+        Assert.True(result.IsError);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.DoesNotContain("FORBIDDEN", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

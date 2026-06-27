@@ -51,6 +51,7 @@ public sealed class CommandDeserializerTests
                 nameof(SearchContextCommand) => JsonSerializer.Deserialize<SearchContextCommand>(payload, JsonOptions.Default),
                 nameof(GitStatusCommand) => JsonSerializer.Deserialize<GitStatusCommand>(payload, JsonOptions.Default),
                 nameof(GitDiffCommand) => JsonSerializer.Deserialize<GitDiffCommand>(payload, JsonOptions.Default),
+                nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
                 nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(payload, JsonOptions.Default),
                 nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
@@ -260,6 +261,41 @@ public sealed class CommandDeserializerTests
         Assert.Empty(diffCommand.PathSpecs);
         Assert.Equal(3, diffCommand.ContextLines);
         Assert.Equal(1_048_576, diffCommand.MaxBytes);
+    }
+
+    [Fact]
+    public void Deserialize_ProjectCheckCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ProjectCheckCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\",\"projectType\":\"rust\",\"steps\":[\"build\",\"test\"],\"configuration\":\"Release\",\"timeoutSeconds\":120,\"maxOutputBytes\":4096}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var checkCommand = Assert.IsType<ProjectCheckCommand>(command);
+        Assert.Equal("C:/src/repo", checkCommand.Path);
+        Assert.Equal("rust", checkCommand.ProjectType);
+        Assert.Equal(new[] { "build", "test" }, checkCommand.Steps);
+        Assert.Equal("Release", checkCommand.Configuration);
+        Assert.Equal(120, checkCommand.TimeoutSeconds);
+        Assert.Equal(4096, checkCommand.MaxOutputBytes);
+    }
+
+    [Fact]
+    public void Deserialize_ProjectCheckCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ProjectCheckCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var checkCommand = Assert.IsType<ProjectCheckCommand>(command);
+        Assert.Equal("auto", checkCommand.ProjectType);
+        Assert.Equal(new[] { "build", "test" }, checkCommand.Steps);
+        Assert.Equal("Debug", checkCommand.Configuration);
+        Assert.Equal(300, checkCommand.TimeoutSeconds);
+        Assert.Equal(1_048_576, checkCommand.MaxOutputBytes);
     }
 
     [Fact]

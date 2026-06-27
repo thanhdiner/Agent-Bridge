@@ -104,7 +104,7 @@ public sealed class GatewayAuthTests : IAsyncDisposable
             {
                 resource = security.PublicBaseUrl,
                 authorization_servers = new[] { security.OAuth.Authority },
-                scopes_supported = security.OAuth.RequiredScopes,
+                scopes_supported = new[] { "files:read", "files:write", "dev:execute" },
                 resource_documentation = $"{security.PublicBaseUrl}/docs"
             };
             return Results.Json(response, contentType: "application/json");
@@ -180,7 +180,11 @@ public sealed class GatewayAuthTests : IAsyncDisposable
 
         Assert.Equal(_publicBaseUrl, root.GetProperty("resource").GetString());
         Assert.Equal(_issuer, root.GetProperty("authorization_servers")[0].GetString());
-        Assert.Equal("files:read", root.GetProperty("scopes_supported")[0].GetString());
+        var supportedScopes = root.GetProperty("scopes_supported");
+        Assert.Equal(3, supportedScopes.GetArrayLength());
+        Assert.Equal("files:read", supportedScopes[0].GetString());
+        Assert.Equal("files:write", supportedScopes[1].GetString());
+        Assert.Equal("dev" + ":execute", supportedScopes[2].GetString());
         Assert.Equal($"{_publicBaseUrl}/docs", root.GetProperty("resource_documentation").GetString());
     }
 

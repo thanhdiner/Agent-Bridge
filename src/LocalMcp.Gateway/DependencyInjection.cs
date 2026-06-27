@@ -1,4 +1,4 @@
-﻿using LocalMcp.Gateway.Connections;
+using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Commands;
 using LocalMcp.Gateway.Security;
 using Microsoft.Extensions.Configuration;
@@ -170,6 +170,20 @@ public static class DependencyInjection
                 else
                 {
                     policy.RequireAssertion(_ => true); // Allow anonymous
+                }
+            });
+
+            options.AddPolicy("DevExecutePolicy", policy =>
+            {
+                if (authEnabled)
+                {
+                    policy.RequireAuthenticatedUser();
+                    policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
+                    policy.Requirements.Add(new ScopeRequirement(new List<string> { "dev:execute" }));
+                }
+                else
+                {
+                    policy.RequireAssertion(_ => false); // Execution is never anonymous
                 }
             });
 

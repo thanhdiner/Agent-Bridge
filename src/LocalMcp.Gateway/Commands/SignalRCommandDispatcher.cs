@@ -79,14 +79,17 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
             };
         }
 
+        var commandTimeout = AgentCommandTimeouts.GetTimeout(command);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(30));
+        cts.CancelAfter(commandTimeout);
 
         using var registration = cts.Token.Register(() =>
         {
             var isTimeout = !cancellationToken.IsCancellationRequested;
             var code = isTimeout ? ErrorCodes.CommandTimeout : ErrorCodes.CommandCancelled;
-            var message = isTimeout ? "The command timed out after 30 seconds." : "The command was cancelled by the client.";
+            var message = isTimeout
+                ? $"The command timed out after {commandTimeout.TotalSeconds:0} seconds."
+                : "The command was cancelled by the client.";
 
             tcs.TrySetResult(new CommandResult<JsonElement>
             {

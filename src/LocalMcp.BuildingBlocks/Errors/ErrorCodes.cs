@@ -24,6 +24,8 @@ public static class ErrorCodes
     public const string GitNotAvailable = "GIT_NOT_AVAILABLE";
     public const string GitRepositoryNotFound = "GIT_REPOSITORY_NOT_FOUND";
     public const string GitCommandFailed = "GIT_COMMAND_FAILED";
+    public const string ProjectTypeNotDetected = "PROJECT_TYPE_NOT_DETECTED";
+    public const string ProjectManifestInvalid = "PROJECT_MANIFEST_INVALID";
 
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";
