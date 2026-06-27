@@ -49,6 +49,8 @@ public sealed class CommandDeserializerTests
                 nameof(ListDirectoryCommand) => JsonSerializer.Deserialize<ListDirectoryCommand>(payload, JsonOptions.Default),
                 nameof(SearchFilesCommand) => JsonSerializer.Deserialize<SearchFilesCommand>(payload, JsonOptions.Default),
                 nameof(SearchContextCommand) => JsonSerializer.Deserialize<SearchContextCommand>(payload, JsonOptions.Default),
+                nameof(GitStatusCommand) => JsonSerializer.Deserialize<GitStatusCommand>(payload, JsonOptions.Default),
+                nameof(GitDiffCommand) => JsonSerializer.Deserialize<GitDiffCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
                 nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(payload, JsonOptions.Default),
                 nameof(PatchFileCommand) => JsonSerializer.Deserialize<PatchFileCommand>(payload, JsonOptions.Default),
@@ -194,6 +196,70 @@ public sealed class CommandDeserializerTests
         Assert.Equal(2, searchCommand.ContextAfter);
         Assert.Equal(100, searchCommand.MaxResults);
         Assert.Equal(4, searchCommand.MaxDepth);
+    }
+
+    [Fact]
+    public void Deserialize_GitStatusCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitStatusCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\",\"includeUntracked\":false,\"maxEntries\":25}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var statusCommand = Assert.IsType<GitStatusCommand>(command);
+        Assert.Equal("C:/src/repo", statusCommand.Path);
+        Assert.False(statusCommand.IncludeUntracked);
+        Assert.Equal(25, statusCommand.MaxEntries);
+    }
+
+    [Fact]
+    public void Deserialize_GitStatusCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitStatusCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var statusCommand = Assert.IsType<GitStatusCommand>(command);
+        Assert.True(statusCommand.IncludeUntracked);
+        Assert.Equal(1000, statusCommand.MaxEntries);
+    }
+
+    [Fact]
+    public void Deserialize_GitDiffCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitDiffCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\",\"staged\":true,\"includeUntracked\":false,\"pathSpecs\":[\"src/**/*.cs\"],\"contextLines\":7,\"maxBytes\":2048}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var diffCommand = Assert.IsType<GitDiffCommand>(command);
+        Assert.Equal("C:/src/repo", diffCommand.Path);
+        Assert.True(diffCommand.Staged);
+        Assert.False(diffCommand.IncludeUntracked);
+        Assert.Equal(new[] { "src/**/*.cs" }, diffCommand.PathSpecs);
+        Assert.Equal(7, diffCommand.ContextLines);
+        Assert.Equal(2048, diffCommand.MaxBytes);
+    }
+
+    [Fact]
+    public void Deserialize_GitDiffCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitDiffCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var diffCommand = Assert.IsType<GitDiffCommand>(command);
+        Assert.False(diffCommand.Staged);
+        Assert.True(diffCommand.IncludeUntracked);
+        Assert.Empty(diffCommand.PathSpecs);
+        Assert.Equal(3, diffCommand.ContextLines);
+        Assert.Equal(1_048_576, diffCommand.MaxBytes);
     }
 
     [Fact]

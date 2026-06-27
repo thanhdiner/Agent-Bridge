@@ -270,6 +270,80 @@ public sealed class FileSystemTools
         return await DispatchAsync<SearchContextResult>(command, "fs_search_context", deviceId, GetCancellationToken());
     }
 
+    [McpServerTool(Name = "git_status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Returns bounded Git working-tree status for a repository on the target Windows agent. Repository paths and reported entries are filtered through the file-access policy. Requires Git on the agent and files:read scope.")]
+    public async Task<CallToolResult> GitStatusAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute directory path inside the Git working tree")] string path,
+        [Description("Whether untracked files should be included (default: true)")] bool includeUntracked = true,
+        [Description("Maximum status entries to return (default: 1000, hard limit: 5000)")] int maxEntries = 1000)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+        if (maxEntries < 1 || maxEntries > 5000)
+            return CreateErrorResult("INVALID_REQUEST", "maxEntries must be between 1 and 5000.");
+
+        var command = new GitStatusCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            IncludeUntracked = includeUntracked,
+            MaxEntries = maxEntries
+        };
+
+        return await DispatchAsync<GitStatusResult>(command, "git_status", deviceId, GetCancellationToken());
+    }
+
+    [McpServerTool(Name = "git_diff", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Returns a bounded, no-color Git diff for authorized repository files. External diff drivers, text conversion, pagers, prompts, fsmonitor, and submodule recursion are disabled. Optionally includes safe synthetic patches for untracked UTF-8 files. Requires Git on the agent and files:read scope.")]
+    public async Task<CallToolResult> GitDiffAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute directory path inside the Git working tree")] string path,
+        [Description("Whether to return the staged diff instead of the unstaged diff (default: false)")] bool staged = false,
+        [Description("Whether to append untracked UTF-8 files when staged is false (default: true)")] bool includeUntracked = true,
+        [Description("Optional Git pathspecs used to narrow the diff (maximum 100)")] List<string>? pathSpecs = null,
+        [Description("Unified diff context lines (default: 3, hard limit: 20)")] int contextLines = 3,
+        [Description("Maximum UTF-8 diff bytes returned (default: 1048576, hard limit: 4194304)")] int maxBytes = 1_048_576)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+        if (contextLines < 0 || contextLines > 20)
+            return CreateErrorResult("INVALID_REQUEST", "contextLines must be between 0 and 20.");
+        if (maxBytes < 1 || maxBytes > 4_194_304)
+            return CreateErrorResult("INVALID_REQUEST", "maxBytes must be between 1 and 4194304.");
+        if (pathSpecs is { Count: > 100 } ||
+            (pathSpecs?.Any(spec => string.IsNullOrWhiteSpace(spec) || spec.Length > 512) ?? false) ||
+            (pathSpecs?.Sum(spec => spec.Length) ?? 0) > 16_384)
+        {
+            return CreateErrorResult(
+                "INVALID_REQUEST",
+                "pathSpecs may contain at most 100 non-empty entries of at most 512 characters and 16384 characters in total.");
+        }
+
+        var command = new GitDiffCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            Staged = staged,
+            IncludeUntracked = includeUntracked,
+            PathSpecs = pathSpecs?.ToList() ?? [],
+            ContextLines = contextLines,
+            MaxBytes = maxBytes
+        };
+
+        return await DispatchAsync<GitDiffResult>(command, "git_diff", deviceId, GetCancellationToken());
+    }
+
     [McpServerTool(Name = "fs_write", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Creates a new UTF-8 text file or replaces the complete content of an existing text file on a target Windows agent device. Requires files:write scope. Safe workflow: (1) Call fs_read first; (2) Inspect content; (3) Pass returned sha256 as expectedSha256; (4) Call fs_write. Re-read on conflict.")]
     public async Task<CallToolResult> WriteFileAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,

@@ -32,6 +32,8 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_tree", true, false, true, false)]
     [InlineData("fs_search", true, false, true, false)]
     [InlineData("fs_search_context", true, false, true, false)]
+    [InlineData("git_status", true, false, true, false)]
+    [InlineData("git_diff", true, false, true, false)]
     [InlineData("fs_write", false, true, false, false)]
     [InlineData("fs_patch", false, true, false, false)]
     [InlineData("fs_mkdir", false, false, true, false)]
@@ -117,6 +119,8 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsTree_NoInternalParameters() => AssertNoInternalParams("fs_tree");
     [Fact] public void FsSearch_NoInternalParameters() => AssertNoInternalParams("fs_search");
     [Fact] public void FsSearchContext_NoInternalParameters() => AssertNoInternalParams("fs_search_context");
+    [Fact] public void GitStatus_NoInternalParameters() => AssertNoInternalParams("git_status");
+    [Fact] public void GitDiff_NoInternalParameters() => AssertNoInternalParams("git_diff");
     [Fact] public void FsWrite_NoInternalParameters() => AssertNoInternalParams("fs_write");
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
     [Fact] public void FsMkdir_NoInternalParameters() => AssertNoInternalParams("fs_mkdir");
@@ -196,6 +200,31 @@ public sealed class McpToolMetadataTests
         Assert.Contains("maxResults", names);
         Assert.Contains("maxDepth", names);
         Assert.Equal(11, names.Count);
+    }
+
+    [Fact]
+    public void GitStatus_HasExactSchema()
+    {
+        var names = GetParamNames("git_status").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("includeUntracked", names);
+        Assert.Contains("maxEntries", names);
+        Assert.Equal(4, names.Count);
+    }
+
+    [Fact]
+    public void GitDiff_HasExactSchema()
+    {
+        var names = GetParamNames("git_diff").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("staged", names);
+        Assert.Contains("includeUntracked", names);
+        Assert.Contains("pathSpecs", names);
+        Assert.Contains("contextLines", names);
+        Assert.Contains("maxBytes", names);
+        Assert.Equal(7, names.Count);
     }
 
     [Fact]

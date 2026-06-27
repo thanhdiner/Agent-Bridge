@@ -16,7 +16,7 @@ using LocalMcp.Agent.Windows.Security;
 
 namespace LocalMcp.Agent.Windows.FileSystem;
 
-public sealed class FileSystemExecutor : IFileSystemExecutor
+public sealed partial class FileSystemExecutor : IFileSystemExecutor
 {
     private static readonly Encoding StrictUtf8Encoding = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
