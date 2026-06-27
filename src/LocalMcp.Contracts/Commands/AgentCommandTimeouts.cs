@@ -6,6 +6,9 @@ public static class AgentCommandTimeouts
 
     public static TimeSpan GetTimeout(AgentCommand command)
     {
+        if (command is GitLogCommand or GitShowCommand)
+            return TimeSpan.FromSeconds(90);
+
         if (command is not ProjectCheckCommand projectCommand)
             return DefaultTimeout;
 

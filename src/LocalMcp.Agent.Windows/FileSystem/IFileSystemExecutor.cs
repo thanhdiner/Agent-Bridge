@@ -78,6 +78,31 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<GitLogResult>> GitLogAsync(
+        string path,
+        int maxCount,
+        int skip,
+        string? pathSpec,
+        string? author,
+        string? since,
+        string? until,
+        bool includeStats,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
+    Task<CommandResult<GitShowResult>> GitShowAsync(
+        string path,
+        string revision,
+        IReadOnlyList<string> pathSpecs,
+        bool includePatch,
+        bool includeStats,
+        int contextLines,
+        int maxBytes,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<ProjectVerifyResult>> ProjectCheckAsync(
         string path,
         string projectType,

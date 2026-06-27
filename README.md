@@ -31,7 +31,7 @@ graph TD
     Client -->|"Bearer token (files:read, files:write, or dev:execute)"| JwtMiddleware
     JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
     JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_search_context/git_status/git_diff/project_verify/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
+    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_search_context/git_status/git_diff/git_log/git_show/project_verify/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
     McpServer --> Dispatcher
     Registry -.->|Lookup Connection| Dispatcher
     Dispatcher -->|SignalR Command| Hub
@@ -62,6 +62,8 @@ graph TD
 | `fs_search_context` | Searches UTF-8 files using literal or regex matching and returns bounded surrounding lines plus each file's SHA-256. Supports include/exclude globs. |
 | `git_status` | Returns bounded Git working-tree status, branch/upstream metadata, ahead/behind counts, and policy-filtered changed paths. |
 | `git_diff` | Returns a bounded staged or unstaged unified diff for policy-authorized paths. It can append safe synthetic patches for untracked UTF-8 files. |
+| `git_log` | Returns up to 100 recent commits with author, ISO-date, literal-path, pagination, and optional short-stat filters. |
+| `git_show` | Returns one resolved commit's metadata, optional policy-filtered statistics, and a bounded unified patch. |
 | `fs_read` | Reads the text of a single file. Returns size, encoding, SHA-256, and content. |
 | `fs_batch_read` | Reads 1–20 UTF-8 text files in one request with independent per-path errors, stable input ordering, four-way concurrency, UTF-8-safe truncation, and configurable per-file plus total response byte limits. |
 | `fs_read_range` | Streams a UTF-8 text file and returns a bounded one-based line range, total line count, encoding, SHA-256, and truncation status without loading the whole file into memory. Defaults to 200 lines and allows at most 1000 lines per call. |
@@ -312,6 +314,7 @@ LocalMcp/
 │  │  │  ├─ ITransferExecutor.cs        # Bounded file/directory copy orchestration
 │  │  │  ├─ FileSystemExecutor.cs       # Atomic write, patch, read, list, search
 │  │  │  ├─ FileSystemExecutor.Git.cs   # Bounded, policy-filtered Git status and diff
+│  │  │  ├─ FileSystemExecutor.GitHistory.cs # Bounded Git log/show with revision and path hardening
 │  │  │  └─ FileSystemExecutor.ProjectCheck.cs # Fixed project verification adapters
 │  │  └─ Security/
 │  │     ├─ FileAccessOptions.cs
@@ -328,6 +331,8 @@ LocalMcp/
 │  │  │  ├─ SearchContextCommand.cs
 │  │  │  ├─ GitStatusCommand.cs
 │  │  │  ├─ GitDiffCommand.cs
+│  │  │  ├─ GitLogCommand.cs
+│  │  │  ├─ GitShowCommand.cs
 │  │  │  ├─ ProjectCheckCommand.cs
 │  │  │  ├─ AgentCommandTimeouts.cs
 │  │  │  ├─ WriteFileCommand.cs
@@ -351,6 +356,8 @@ LocalMcp/
 │  │     ├─ SearchContextResult.cs
 │  │     ├─ GitStatusResult.cs
 │  │     ├─ GitDiffResult.cs
+│  │     ├─ GitLogResult.cs
+│  │     ├─ GitShowResult.cs
 │  │     ├─ ProjectVerifyResult.cs
 │  │     ├─ WriteFileResult.cs
 │  │     ├─ PatchFileResult.cs
@@ -398,7 +405,7 @@ All tests use dynamic, isolated temporary directories and clean up after themsel
 | `ReadRangeTests` | Bounded line-range streaming, large-file reads, UTF-8/BOM validation, binary rejection, response limits, and denied paths |
 | `MoveCopyTests` | File move/copy concurrency plus bounded recursive directory copy, entry/byte limits, denied descendants, destination containment, and temporary-tree cleanup |
 | `CrossVolumeMoveTests` | Same-volume fast path, cross-volume copy-verify-delete fallback, overwrite rollback, source mutation detection, cancellation, and temporary-file cleanup |
-| `GitToolsTests` | Git filter-scope regression coverage, porcelain status parsing, and synthetic untracked-file patch formatting for the read-only Git inspection tools |
+| `GitToolsTests` | Git filter-scope regression coverage, porcelain status parsing, history metadata/short-stat parsing, numstat aggregation, and synthetic untracked-file patch formatting |
 | `ProjectCheckTests` | Project detection, package-manager selection, fixed command planning, and extended transport timeout coverage |
 | `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
 | `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |

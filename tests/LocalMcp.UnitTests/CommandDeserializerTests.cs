@@ -51,6 +51,8 @@ public sealed class CommandDeserializerTests
                 nameof(SearchContextCommand) => JsonSerializer.Deserialize<SearchContextCommand>(payload, JsonOptions.Default),
                 nameof(GitStatusCommand) => JsonSerializer.Deserialize<GitStatusCommand>(payload, JsonOptions.Default),
                 nameof(GitDiffCommand) => JsonSerializer.Deserialize<GitDiffCommand>(payload, JsonOptions.Default),
+                nameof(GitLogCommand) => JsonSerializer.Deserialize<GitLogCommand>(payload, JsonOptions.Default),
+                nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
                 nameof(WriteFileCommand) => JsonSerializer.Deserialize<WriteFileCommand>(payload, JsonOptions.Default),
@@ -261,6 +263,75 @@ public sealed class CommandDeserializerTests
         Assert.Empty(diffCommand.PathSpecs);
         Assert.Equal(3, diffCommand.ContextLines);
         Assert.Equal(1_048_576, diffCommand.MaxBytes);
+    }
+
+    [Fact]
+    public void Deserialize_GitLogCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitLogCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-27T00:00:00Z\",\"path\":\"C:/src/repo\",\"maxCount\":50,\"skip\":4,\"pathSpec\":\"src/App.cs\",\"author\":\"Ada\",\"since\":\"2026-01-01T00:00:00Z\",\"until\":\"2026-06-27T23:59:59Z\",\"includeStats\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var logCommand = Assert.IsType<GitLogCommand>(command);
+        Assert.Equal(50, logCommand.MaxCount);
+        Assert.Equal(4, logCommand.Skip);
+        Assert.Equal("src/App.cs", logCommand.PathSpec);
+        Assert.Equal("Ada", logCommand.Author);
+        Assert.True(logCommand.IncludeStats);
+    }
+
+    [Fact]
+    public void Deserialize_GitLogCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitLogCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-27T00:00:00Z\",\"path\":\"C:/src/repo\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var logCommand = Assert.IsType<GitLogCommand>(command);
+        Assert.Equal(20, logCommand.MaxCount);
+        Assert.Equal(0, logCommand.Skip);
+        Assert.Null(logCommand.PathSpec);
+        Assert.Null(logCommand.Author);
+        Assert.False(logCommand.IncludeStats);
+    }
+
+    [Fact]
+    public void Deserialize_GitShowCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitShowCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-27T00:00:00Z\",\"path\":\"C:/src/repo\",\"revision\":\"HEAD~1\",\"pathSpecs\":[\"src/**/*.cs\"],\"includePatch\":false,\"includeStats\":false,\"contextLines\":9,\"maxBytes\":4096}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var showCommand = Assert.IsType<GitShowCommand>(command);
+        Assert.Equal("HEAD~1", showCommand.Revision);
+        Assert.Equal(new[] { "src/**/*.cs" }, showCommand.PathSpecs);
+        Assert.False(showCommand.IncludePatch);
+        Assert.False(showCommand.IncludeStats);
+        Assert.Equal(9, showCommand.ContextLines);
+        Assert.Equal(4096, showCommand.MaxBytes);
+    }
+
+    [Fact]
+    public void Deserialize_GitShowCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitShowCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-27T00:00:00Z\",\"path\":\"C:/src/repo\",\"revision\":\"HEAD\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var showCommand = Assert.IsType<GitShowCommand>(command);
+        Assert.Empty(showCommand.PathSpecs);
+        Assert.True(showCommand.IncludePatch);
+        Assert.True(showCommand.IncludeStats);
+        Assert.Equal(3, showCommand.ContextLines);
+        Assert.Equal(1_048_576, showCommand.MaxBytes);
     }
 
     [Fact]

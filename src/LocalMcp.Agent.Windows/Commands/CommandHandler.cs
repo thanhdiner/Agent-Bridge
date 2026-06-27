@@ -76,6 +76,14 @@ public sealed class CommandHandler
         {
             return await HandleGitDiffAsync(gitDiffCommand, cancellationToken);
         }
+        else if (command is GitLogCommand gitLogCommand)
+        {
+            return await HandleGitLogAsync(gitLogCommand, cancellationToken);
+        }
+        else if (command is GitShowCommand gitShowCommand)
+        {
+            return await HandleGitShowAsync(gitShowCommand, cancellationToken);
+        }
         else if (command is ProjectCheckCommand projectCheckCommand)
         {
             return await HandleProjectCheckAsync(projectCheckCommand, cancellationToken);
@@ -444,6 +452,101 @@ public sealed class CommandHandler
             command.Staged,
             command.IncludeUntracked,
             command.PathSpecs ?? [],
+            command.ContextLines,
+            command.MaxBytes,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleGitLogAsync(
+        GitLogCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.GitLogAsync(
+            normalizedPath,
+            command.MaxCount,
+            command.Skip,
+            command.PathSpec,
+            command.Author,
+            command.Since,
+            command.Until,
+            command.IncludeStats,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleGitShowAsync(
+        GitShowCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.GitShowAsync(
+            normalizedPath,
+            command.Revision,
+            command.PathSpecs ?? [],
+            command.IncludePatch,
+            command.IncludeStats,
             command.ContextLines,
             command.MaxBytes,
             command.CommandId,

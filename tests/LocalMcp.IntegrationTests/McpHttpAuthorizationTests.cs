@@ -316,6 +316,40 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
         Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
     }
 
+    [Theory]
+    [InlineData("git_log")]
+    [InlineData("git_show")]
+    public async Task FilesReadScope_CallingGitHistoryTool_ReachesDispatch_AgentOffline(string toolName)
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        object arguments = toolName == "git_show"
+            ? new { deviceId = "missing-test-device", path = "C:/src/repo", revision = "HEAD" }
+            : new { deviceId = "missing-test-device", path = "C:/src/repo" };
+
+        var resp = await SendMcpRequestAsync(token, "tools/call", toolName, arguments);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("git_log")]
+    [InlineData("git_show")]
+    public async Task FilesWriteScope_CallingGitHistoryTool_ReturnsForbidden(string toolName)
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        object arguments = toolName == "git_show"
+            ? new { deviceId = "missing-test-device", path = "C:/src/repo", revision = "HEAD" }
+            : new { deviceId = "missing-test-device", path = "C:/src/repo" };
+
+        var resp = await SendMcpRequestAsync(token, "tools/call", toolName, arguments);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task DevExecuteScope_CallingProjectCheck_ReachesDispatch_AgentOffline()
     {
