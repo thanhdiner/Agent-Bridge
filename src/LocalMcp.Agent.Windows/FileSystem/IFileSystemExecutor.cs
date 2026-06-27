@@ -117,6 +117,8 @@ public interface IFileSystemExecutor
     Task<CommandResult<PowerShellExecuteResult>> PowerShellExecuteAsync(
         string workingDirectory,
         string script,
+        bool visible,
+        bool elevated,
         int timeoutSeconds,
         int maxOutputBytes,
         Guid commandId,

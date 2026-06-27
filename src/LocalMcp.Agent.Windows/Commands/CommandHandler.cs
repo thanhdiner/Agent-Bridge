@@ -93,7 +93,8 @@ public sealed class CommandHandler
             return await HandlePowerShellExecuteAsync(
                 powerShellExecuteCommand,
                 cancellationToken);
-        }        else if (command is TreeCommand treeCommand)
+        }
+        else if (command is TreeCommand treeCommand)
         {
             return await HandleTreeAsync(treeCommand, cancellationToken);
         }
@@ -658,6 +659,8 @@ public sealed class CommandHandler
         var result = await _fileSystemExecutor.PowerShellExecuteAsync(
             normalizedPath,
             command.Script,
+            command.Visible,
+            command.Elevated,
             command.TimeoutSeconds,
             command.MaxOutputBytes,
             command.CommandId,

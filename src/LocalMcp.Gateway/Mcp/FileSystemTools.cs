@@ -541,6 +541,8 @@ public sealed class FileSystemTools
             CreatedAt = DateTimeOffset.UtcNow,
             WorkingDirectory = workingDirectory,
             Script = script,
+            Visible = false,
+            Elevated = false,
             TimeoutSeconds = timeoutSeconds,
             MaxOutputBytes = maxOutputBytes
         };
@@ -551,6 +553,55 @@ public sealed class FileSystemTools
             deviceId,
             GetCancellationToken());
     }
+
+    [McpServerTool(Name = "powershell_exec_visible", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description("Runs a bounded PowerShell 7 script in a visible console window on a target Windows agent. The working directory must be inside both AllowedRoots and WritableRoots. Child commands use normal OS permissions and are not filesystem-sandboxed by LocalMcp roots. Set elevated=true to request UAC elevation; the user must approve the Windows prompt. PowerShell profiles and inherited secret-like environment variables are disabled. Console prompts and child installer windows may require manual user interaction. Requires dev:execute scope. Ask the user for confirmation before executing.")]
+    public async Task<CallToolResult> PowerShellExecuteVisibleAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute working directory inside both AllowedRoots and WritableRoots")] string workingDirectory,
+        [Description("The PowerShell 7 script to execute (maximum 65536 characters)")] string script,
+        [Description("Whether to request UAC elevation for the visible console (default: false)")] bool elevated = false,
+        [Description("Execution timeout in seconds (default: 120, hard limit: 900)")] int timeoutSeconds = 120,
+        [Description("Maximum combined UTF-8 output bytes returned (default: 1048576, hard limit: 4194304)")] int maxOutputBytes = 1_048_576)
+    {
+        if (!await AuthorizeScopeAsync("DevExecutePolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+            return CreateErrorResult("INVALID_REQUEST", "workingDirectory parameter is required.");
+        if (string.IsNullOrWhiteSpace(script) ||
+            script.Length > 65_536 ||
+            script.Contains('\0'))
+        {
+            return CreateErrorResult(
+                "INVALID_REQUEST",
+                "script must be non-empty, contain no NUL characters, and be at most 65536 characters.");
+        }
+        if (timeoutSeconds is < 1 or > 900)
+            return CreateErrorResult("INVALID_REQUEST", "timeoutSeconds must be between 1 and 900.");
+        if (maxOutputBytes is < 1024 or > 4_194_304)
+            return CreateErrorResult("INVALID_REQUEST", "maxOutputBytes must be between 1024 and 4194304.");
+
+        var command = new PowerShellExecuteCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            WorkingDirectory = workingDirectory,
+            Script = script,
+            Visible = true,
+            Elevated = elevated,
+            TimeoutSeconds = timeoutSeconds,
+            MaxOutputBytes = maxOutputBytes
+        };
+
+        return await DispatchAsync<PowerShellExecuteResult>(
+            command,
+            "powershell_exec_visible",
+            deviceId,
+            GetCancellationToken());
+    }
+
     [McpServerTool(Name = "fs_write", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Creates a new UTF-8 text file or replaces the complete content of an existing text file on a target Windows agent device. Requires files:write scope. Safe workflow: (1) Call fs_read first; (2) Inspect content; (3) Pass returned sha256 as expectedSha256; (4) Call fs_write. Re-read on conflict.")]
     public async Task<CallToolResult> WriteFileAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
