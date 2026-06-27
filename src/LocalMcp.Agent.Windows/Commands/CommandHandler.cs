@@ -1617,6 +1617,8 @@ public sealed partial class CommandHandler
         PowerShellStartCommand command,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_sessionRegistry is null || _sessionExecutor is null)
         {
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InternalError,
@@ -1679,6 +1681,13 @@ public sealed partial class CommandHandler
         if (session is null)
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest, registryError!));
 
+        // Check cancellationToken again before starting the background process
+        if (cancellationToken.IsCancellationRequested)
+        {
+            session.Dispose();
+            throw new OperationCanceledException(cancellationToken);
+        }
+
         // ── Launch async (returns immediately) ────────────────────────────
         _sessionExecutor.StartBackground(
             session,
@@ -1706,6 +1715,8 @@ public sealed partial class CommandHandler
         PowerShellStatusCommand command,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_sessionRegistry is null)
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InternalError,
                 "PowerShell session infrastructure is not available."));
@@ -1720,15 +1731,15 @@ public sealed partial class CommandHandler
             return Task.FromResult(SessionError(command.CommandId, "SESSION_NOT_FOUND",
                 $"Session {command.SessionId} was not found."));
 
-        if (command.OutputOffset < 0)
+        if (command.StdoutOffset < 0 || command.StderrOffset < 0)
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
-                "outputOffset must be >= 0."));
+                "stdoutOffset and stderrOffset must be >= 0."));
 
         if (command.MaxOutputBytes is < 1 or > 262_144)
             return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
                 "maxOutputBytes must be between 1 and 262144."));
 
-        var snapshot = session.ReadOutput(command.OutputOffset, command.MaxOutputBytes);
+        var snapshot = session.ReadOutput(command.StdoutOffset, command.StderrOffset, command.MaxOutputBytes);
         var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
 
         var result = new PowerShellSessionResult
@@ -1740,8 +1751,9 @@ public sealed partial class CommandHandler
             ExitCode = session.ExitCode,
             Stdout = utf8.GetString(snapshot.StdoutBytes),
             Stderr = utf8.GetString(snapshot.StderrBytes),
-            NextOutputOffset = snapshot.NextOffset,
-            Truncated = snapshot.StdoutTruncated || snapshot.StderrTruncated
+            NextStdoutOffset = snapshot.NextStdoutOffset,
+            NextStderrOffset = snapshot.NextStderrOffset,
+            Truncated = snapshot.Truncated
         };
 
         return Task.FromResult(new CommandResult<JsonElement>
@@ -1752,42 +1764,50 @@ public sealed partial class CommandHandler
         });
     }
 
-    private Task<CommandResult<JsonElement>> HandlePowerShellCancelAsync(
+    private async Task<CommandResult<JsonElement>> HandlePowerShellCancelAsync(
         PowerShellCancelCommand command,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_sessionRegistry is null)
-            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InternalError,
-                "PowerShell session infrastructure is not available."));
+            return SessionError(command.CommandId, ErrorCodes.InternalError,
+                "PowerShell session infrastructure is not available.");
 
         var session = _sessionRegistry.Get(command.SessionId);
         if (session is null)
-            return Task.FromResult(SessionError(command.CommandId, "SESSION_NOT_FOUND",
-                $"Session {command.SessionId} was not found."));
+            return SessionError(command.CommandId, "SESSION_NOT_FOUND",
+                $"Session {command.SessionId} was not found.");
 
         // Enforce device isolation
         if (!string.Equals(session.DeviceId, command.DeviceId, StringComparison.OrdinalIgnoreCase))
-            return Task.FromResult(SessionError(command.CommandId, "SESSION_NOT_FOUND",
-                $"Session {command.SessionId} was not found."));
+            return SessionError(command.CommandId, "SESSION_NOT_FOUND",
+                $"Session {command.SessionId} was not found.");
 
-        // Idempotent: if already terminal, just return current state
-        if (session.State != PowerShellSessionStateValue.Running)
+        // If running, cancel it
+        if (session.State == PowerShellSessionStateValue.Running)
         {
-            return Task.FromResult(BuildSessionResult(command.CommandId, session));
+            _sessionRegistry.Cancel(session);
+
+            // Bounded wait suitable for AgentCommandTimeouts (up to 5s)
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                await session.CompletionTask.WaitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout elapsed, just return the current state
+            }
         }
 
-        // Cancel the running session (kills process tree via CTS)
-        _sessionRegistry.Cancel(session);
-
-        // The state transition to Cancelled happens in the background executor
-        // after the process exits. We return the current state to the caller.
-        return Task.FromResult(BuildSessionResult(command.CommandId, session));
+        return BuildSessionResult(command.CommandId, session);
     }
 
     private CommandResult<JsonElement> BuildSessionResult(Guid commandId, PowerShellSessionState session)
     {
         var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
-        var snapshot = session.ReadOutput(0, 262_144);
+        var snapshot = session.ReadOutput(0, 0, 262_144);
         var result = new PowerShellSessionResult
         {
             SessionId = session.SessionId,
@@ -1797,8 +1817,9 @@ public sealed partial class CommandHandler
             ExitCode = session.ExitCode,
             Stdout = utf8.GetString(snapshot.StdoutBytes),
             Stderr = utf8.GetString(snapshot.StderrBytes),
-            NextOutputOffset = snapshot.NextOffset,
-            Truncated = snapshot.StdoutTruncated || snapshot.StderrTruncated
+            NextStdoutOffset = snapshot.NextStdoutOffset,
+            NextStderrOffset = snapshot.NextStderrOffset,
+            Truncated = snapshot.Truncated
         };
 
         return new CommandResult<JsonElement>

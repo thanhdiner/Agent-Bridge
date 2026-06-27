@@ -48,7 +48,7 @@ public sealed class PowerShellSessionTools
         [Description("The absolute working directory path on the agent (must be within AllowedRoots)")] string workingDirectory,
         [Description("The PowerShell 7 script to run asynchronously")] string script,
         [Description("Timeout in seconds before the agent kills the script (1–900, default: 120)")] int timeoutSeconds = 120,
-        [Description("Maximum bytes of output to retain per stream (1024–4194304, default: 1048576)")] int maxOutputBytes = 1_048_576)
+        [Description("Maximum total combined bytes of stdout and stderr to retain in memory (1024–4194304, default: 1048576)")] int maxOutputBytes = 1_048_576)
     {
         if (!await AuthorizeScopeAsync("DevExecutePolicy"))
             return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
@@ -87,12 +87,13 @@ public sealed class PowerShellSessionTools
     [McpServerTool(Name = "powershell_status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
      Description(
          "Polls the status and incremental output of a running or completed PowerShell session on a target " +
-         "Windows agent device. Pass nextOutputOffset from the previous response as outputOffset to page through output. " +
+         "Windows agent device. Pass nextStdoutOffset and nextStderrOffset from the previous response as stdoutOffset and stderrOffset to page through output. " +
          "Requires dev:execute scope.")]
     public async Task<CallToolResult> GetSessionStatusAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("The sessionId returned by powershell_start")] string sessionId,
-        [Description("Byte offset into the output buffer; use 0 on first call, then nextOutputOffset from each response")] long outputOffset = 0,
+        [Description("Byte offset into the stdout buffer; use 0 on first call, then nextStdoutOffset from each response")] long stdoutOffset = 0,
+        [Description("Byte offset into the stderr buffer; use 0 on first call, then nextStderrOffset from each response")] long stderrOffset = 0,
         [Description("Maximum bytes of output to return per call (1–262144, default: 65536)")] int maxOutputBytes = 65_536)
     {
         if (!await AuthorizeScopeAsync("DevExecutePolicy"))
@@ -104,8 +105,8 @@ public sealed class PowerShellSessionTools
         if (!Guid.TryParse(sessionId, out var parsedSessionId))
             return CreateErrorResult("INVALID_REQUEST", "sessionId must be a valid GUID.");
 
-        if (outputOffset < 0)
-            return CreateErrorResult("INVALID_REQUEST", "outputOffset must be >= 0.");
+        if (stdoutOffset < 0 || stderrOffset < 0)
+            return CreateErrorResult("INVALID_REQUEST", "stdoutOffset and stderrOffset must be >= 0.");
 
         if (maxOutputBytes is < 1 or > 262_144)
             return CreateErrorResult("INVALID_REQUEST", "maxOutputBytes must be between 1 and 262144.");
@@ -116,7 +117,8 @@ public sealed class PowerShellSessionTools
             DeviceId = deviceId,
             CreatedAt = DateTimeOffset.UtcNow,
             SessionId = parsedSessionId,
-            OutputOffset = outputOffset,
+            StdoutOffset = stdoutOffset,
+            StderrOffset = stderrOffset,
             MaxOutputBytes = maxOutputBytes
         };
 

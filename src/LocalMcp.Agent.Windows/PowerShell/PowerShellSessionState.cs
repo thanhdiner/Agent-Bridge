@@ -2,11 +2,7 @@ using System.Diagnostics;
 
 namespace LocalMcp.Agent.Windows.PowerShell;
 
-/// <summary>
-/// Possible lifecycle states for an async PowerShell session.
-/// Values are stored as int for atomic compare-exchange transitions.
-/// </summary>
-internal enum PowerShellSessionStateValue
+public enum PowerShellSessionStateValue
 {
     Running = 0,
     Completed = 1,
@@ -15,188 +11,262 @@ internal enum PowerShellSessionStateValue
     TimedOut = 4
 }
 
-/// <summary>
-/// Holds all mutable state for a single async PowerShell session.
-/// Thread-safety: state transitions use Interlocked.CompareExchange;
-/// output buffer access uses <see cref="_outputLock"/>.
-/// </summary>
-internal sealed class PowerShellSessionState
+internal sealed class PowerShellSessionSnapshot
 {
-    // ── Identity ──────────────────────────────────────────────────────────────
+    public PowerShellSessionStateValue State { get; }
+    public DateTimeOffset? CompletedAt { get; }
+    public int? ExitCode { get; }
 
+    public PowerShellSessionSnapshot(PowerShellSessionStateValue state, DateTimeOffset? completedAt, int? exitCode)
+    {
+        State = state;
+        CompletedAt = completedAt;
+        ExitCode = exitCode;
+    }
+}
+
+internal sealed record OutputSnapshot(
+    byte[] StdoutBytes,
+    byte[] StderrBytes,
+    long NextStdoutOffset,
+    long NextStderrOffset,
+    bool Truncated);
+
+internal sealed class PowerShellSessionState : IDisposable
+{
     public Guid SessionId { get; }
     public string DeviceId { get; }
     public DateTimeOffset StartedAt { get; }
 
-    // ── Lifecycle state (atomic) ──────────────────────────────────────────────
-
-    // Underlying int for Interlocked CAS. Read via State property.
-    private int _stateValue = (int)PowerShellSessionStateValue.Running;
-    private DateTimeOffset? _completedAt;
-    private int? _exitCode;
-
-    // ── Output buffers (guarded by _outputLock) ───────────────────────────────
+    private readonly object _stateLock = new();
+    private volatile PowerShellSessionSnapshot _snapshot = new(PowerShellSessionStateValue.Running, null, null);
 
     private readonly object _outputLock = new();
-    private readonly byte[] _stdoutBuffer;
-    private readonly byte[] _stderrBuffer;
-    private int _stdoutLength;
-    private int _stderrLength;
-    private bool _stdoutTruncated;
-    private bool _stderrTruncated;
-
-    // ── Cancellation / process reference ─────────────────────────────────────
+    private readonly List<byte> _stdout = new();
+    private readonly List<byte> _stderr = new();
+    private readonly int _maxOutputBytes;
+    private bool _truncated;
 
     public CancellationTokenSource Cts { get; } = new();
-    // Set immediately after process.Start(); used for process-tree kill.
-    public Process? Process { get; set; }
 
-    // ── Construction ─────────────────────────────────────────────────────────
+    private readonly object _processLock = new();
+    private Process? _process;
+    private bool _disposed;
+
+    public Task CompletionTask => _completionSource.Task;
+    private readonly TaskCompletionSource _completionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private DateTimeOffset? _expiry;
 
     public PowerShellSessionState(Guid sessionId, string deviceId, int maxOutputBytes)
     {
         SessionId = sessionId;
         DeviceId = deviceId;
         StartedAt = DateTimeOffset.UtcNow;
-
-        // Allocate bounded buffers immediately. Output is capped at maxOutputBytes
-        // total (half each by default, then bias unused half to the other side).
-        var half = maxOutputBytes / 2;
-        _stdoutBuffer = new byte[half];
-        _stderrBuffer = new byte[maxOutputBytes - half];
+        _maxOutputBytes = maxOutputBytes;
     }
 
-    // ── State transitions ─────────────────────────────────────────────────────
+    public PowerShellSessionStateValue State => _snapshot.State;
+    public DateTimeOffset? CompletedAt => _snapshot.CompletedAt;
+    public int? ExitCode => _snapshot.ExitCode;
 
-    public PowerShellSessionStateValue State =>
-        (PowerShellSessionStateValue)Volatile.Read(ref _stateValue);
+    public Process? Process
+    {
+        get
+        {
+            lock (_processLock) return _process;
+        }
+        set
+        {
+            lock (_processLock)
+            {
+                if (_disposed)
+                {
+                    value?.Dispose();
+                    return;
+                }
+                _process = value;
+            }
+        }
+    }
 
-    public DateTimeOffset? CompletedAt => _completedAt;
-    public int? ExitCode => _exitCode;
-
-    /// <summary>
-    /// Attempt an atomic transition from <see cref="PowerShellSessionStateValue.Running"/>
-    /// to <paramref name="newState"/>. Returns true if this call won the race.
-    /// A session that has already terminated cannot be transitioned again.
-    /// </summary>
     public bool TryTransition(PowerShellSessionStateValue newState, int? exitCode = null)
     {
-        var original = Interlocked.CompareExchange(
-            ref _stateValue,
-            (int)newState,
-            (int)PowerShellSessionStateValue.Running);
+        lock (_stateLock)
+        {
+            if (_snapshot.State != PowerShellSessionStateValue.Running)
+                return false;
 
-        if (original != (int)PowerShellSessionStateValue.Running)
-            return false; // already terminal
-
-        _exitCode = exitCode;
-        _completedAt = DateTimeOffset.UtcNow;
-        return true;
+            _snapshot = new PowerShellSessionSnapshot(newState, DateTimeOffset.UtcNow, exitCode);
+            _completionSource.TrySetResult();
+            return true;
+        }
     }
 
-    // ── Output accumulation ───────────────────────────────────────────────────
-
-    /// <summary>
-    /// Appends bytes to the stdout buffer, capping at the allocated size.
-    /// Thread-safe; called from the background reader task.
-    /// </summary>
     public void AppendStdout(byte[] data, int count)
     {
         lock (_outputLock)
         {
-            AppendToBuffer(_stdoutBuffer, ref _stdoutLength, ref _stdoutTruncated, data, count);
+            var currentTotal = _stdout.Count + _stderr.Count;
+            if (currentTotal >= _maxOutputBytes)
+            {
+                _truncated = true;
+                return;
+            }
+            var spaceLeft = _maxOutputBytes - currentTotal;
+            var toCopy = Math.Min(count, spaceLeft);
+            for (int i = 0; i < toCopy; i++)
+            {
+                _stdout.Add(data[i]);
+            }
+            if (toCopy < count)
+            {
+                _truncated = true;
+            }
         }
     }
 
-    /// <summary>
-    /// Appends bytes to the stderr buffer, capping at the allocated size.
-    /// Thread-safe; called from the background reader task.
-    /// </summary>
     public void AppendStderr(byte[] data, int count)
     {
         lock (_outputLock)
         {
-            AppendToBuffer(_stderrBuffer, ref _stderrLength, ref _stderrTruncated, data, count);
+            var currentTotal = _stdout.Count + _stderr.Count;
+            if (currentTotal >= _maxOutputBytes)
+            {
+                _truncated = true;
+                return;
+            }
+            var spaceLeft = _maxOutputBytes - currentTotal;
+            var toCopy = Math.Min(count, spaceLeft);
+            for (int i = 0; i < toCopy; i++)
+            {
+                _stderr.Add(data[i]);
+            }
+            if (toCopy < count)
+            {
+                _truncated = true;
+            }
         }
     }
 
-    private static void AppendToBuffer(
-        byte[] buffer,
-        ref int length,
-        ref bool truncated,
-        byte[] data,
-        int count)
-    {
-        var remaining = buffer.Length - length;
-        if (remaining <= 0)
-        {
-            truncated = true;
-            return;
-        }
-
-        var toCopy = Math.Min(count, remaining);
-        Buffer.BlockCopy(data, 0, buffer, length, toCopy);
-        length += toCopy;
-        if (toCopy < count)
-            truncated = true;
-    }
-
-    /// <summary>
-    /// Reads an incremental slice of stdout/stderr starting at <paramref name="byteOffset"/>,
-    /// returning at most <paramref name="maxBytes"/> bytes total across both streams.
-    /// Thread-safe snapshot; reads are non-destructive (offset-based).
-    /// </summary>
-    public OutputSnapshot ReadOutput(long byteOffset, int maxBytes)
+    public OutputSnapshot ReadOutput(long stdoutOffset, long stderrOffset, int maxBytes)
     {
         lock (_outputLock)
         {
-            // stdout slice
-            var stdoutAvail = Math.Max(0L, _stdoutLength - byteOffset);
-            var stdoutSliceLen = (int)Math.Min(stdoutAvail, maxBytes / 2);
-            var stdoutSlice = stdoutSliceLen > 0
-                ? new byte[stdoutSliceLen]
-                : [];
-            if (stdoutSliceLen > 0)
-                Buffer.BlockCopy(_stdoutBuffer, (int)byteOffset, stdoutSlice, 0, stdoutSliceLen);
+            byte[] stdoutBytes = _stdout.ToArray();
+            byte[] stderrBytes = _stderr.ToArray();
 
-            // stderr slice — uses same offset since they're independent buffers
-            var stderrAvail = Math.Max(0L, _stderrLength - byteOffset);
-            var stderrBudget = maxBytes - stdoutSliceLen;
-            var stderrSliceLen = (int)Math.Min(stderrAvail, stderrBudget);
-            var stderrSlice = stderrSliceLen > 0
-                ? new byte[stderrSliceLen]
-                : [];
-            if (stderrSliceLen > 0)
-                Buffer.BlockCopy(_stderrBuffer, (int)byteOffset, stderrSlice, 0, stderrSliceLen);
+            var stdoutAvail = Math.Max(0, stdoutBytes.Length - (int)stdoutOffset);
+            var stdoutBudget = Math.Min(stdoutAvail, maxBytes / 2);
+            var stdoutLen = GetSafeUtf8Length(stdoutBytes, (int)stdoutOffset, (int)stdoutBudget);
 
-            // nextOffset advances by the larger of the two slices
-            var advance = (long)Math.Max(stdoutSliceLen, stderrSliceLen);
-            var nextOffset = byteOffset + advance;
+            var stdoutSlice = new byte[stdoutLen];
+            if (stdoutLen > 0)
+                Buffer.BlockCopy(stdoutBytes, (int)stdoutOffset, stdoutSlice, 0, stdoutLen);
+
+            var stderrAvail = Math.Max(0, stderrBytes.Length - (int)stderrOffset);
+            var stderrBudget = Math.Min(stderrAvail, maxBytes - stdoutLen);
+            var stderrLen = GetSafeUtf8Length(stderrBytes, (int)stderrOffset, (int)stderrBudget);
+
+            var stderrSlice = new byte[stderrLen];
+            if (stderrLen > 0)
+                Buffer.BlockCopy(stderrBytes, (int)stderrOffset, stderrSlice, 0, stderrLen);
 
             return new OutputSnapshot(
                 StdoutBytes: stdoutSlice,
                 StderrBytes: stderrSlice,
-                NextOffset: nextOffset,
-                StdoutTruncated: _stdoutTruncated,
-                StderrTruncated: _stderrTruncated);
+                NextStdoutOffset: stdoutOffset + stdoutLen,
+                NextStderrOffset: stderrOffset + stderrLen,
+                Truncated: _truncated);
         }
     }
 
-    // ── TTL (for historical cleanup) ──────────────────────────────────────────
+    private static int GetSafeUtf8Length(byte[] buffer, int start, int requestedLength)
+    {
+        if (start >= buffer.Length)
+            return 0;
 
-    private DateTimeOffset? _expiry;
+        if (requestedLength <= 0)
+            requestedLength = 1;
 
-    /// <summary>Sets TTL expiry once the session reaches a terminal state.</summary>
-    public void SetExpiry(DateTimeOffset expiry) => _expiry = expiry;
+        byte startByte = buffer[start];
+        if (startByte >= 192)
+        {
+            int expected = 1;
+            if (startByte >= 240) expected = 4;
+            else if (startByte >= 224) expected = 3;
+            else if (startByte >= 192) expected = 2;
 
-    /// <summary>True when a historical TTL has been set and has elapsed.</summary>
-    public bool IsExpired(DateTimeOffset now) =>
-        _expiry.HasValue && now >= _expiry.Value;
+            if (start + expected <= buffer.Length && expected > requestedLength)
+            {
+                requestedLength = expected;
+            }
+        }
+
+        if (start + requestedLength >= buffer.Length)
+        {
+            return buffer.Length - start;
+        }
+
+        int end = start + requestedLength;
+        for (int i = end - 1; i >= start; i--)
+        {
+            byte b = buffer[i];
+            if (b < 128)
+            {
+                break;
+            }
+            if (b >= 192)
+            {
+                int expectedBytes = 1;
+                if (b >= 240) expectedBytes = 4;
+                else if (b >= 224) expectedBytes = 3;
+                else if (b >= 192) expectedBytes = 2;
+
+                int actualBytes = end - i;
+                if (actualBytes < expectedBytes)
+                {
+                    if (i == start)
+                    {
+                        if (start + expectedBytes <= buffer.Length)
+                        {
+                            return expectedBytes;
+                        }
+                    }
+                    return i - start;
+                }
+                break;
+            }
+        }
+        return requestedLength;
+    }
+
+    public void SetExpiry(DateTimeOffset expiry)
+    {
+        _expiry = expiry;
+    }
+
+    public bool IsExpired(DateTimeOffset now)
+    {
+        return _expiry.HasValue && now >= _expiry.Value;
+    }
+
+    public void Dispose()
+    {
+        lock (_processLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
+
+        try { Cts.Cancel(); } catch {}
+        try { Cts.Dispose(); } catch {}
+
+        lock (_processLock)
+        {
+            try { _process?.Dispose(); } catch {}
+            _process = null;
+        }
+        _completionSource.TrySetResult();
+    }
 }
-
-internal sealed record OutputSnapshot(
-    byte[] StdoutBytes,
-    byte[] StderrBytes,
-    long NextOffset,
-    bool StdoutTruncated,
-    bool StderrTruncated);
