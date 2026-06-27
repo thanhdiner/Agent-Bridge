@@ -2041,11 +2041,23 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
 
     // ── fs_copy ──────────────────────────────────────────────────────────────
 
+    public Task<CommandResult<CopyResult>> CopyAsync(
+        string sourcePath,
+        string destinationPath,
+        bool overwrite,
+        string? expectedSourceSha256,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        return CopyAsync(sourcePath, destinationPath, overwrite, expectedSourceSha256, long.MaxValue, commandId, cancellationToken);
+    }
+
     public async Task<CommandResult<CopyResult>> CopyAsync(
         string sourcePath,
         string destinationPath,
         bool overwrite,
         string? expectedSourceSha256,
+        long maxTotalBytes,
         Guid commandId,
         CancellationToken cancellationToken)
     {
@@ -2098,6 +2110,13 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
                     await destStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                     sha.AppendData(buffer, 0, read);
                     bytesCopied += read;
+                    if (bytesCopied > maxTotalBytes)
+                        return new CommandResult<CopyResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.FileTooLarge, "The source file exceeded maxTotalBytes during copy.")
+                        };
                 }
 
                 await destStream.FlushAsync(cancellationToken);
@@ -2180,6 +2199,9 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
             Data = new CopyResult
             {
                 Path = physicalDest,
+                IsDirectory = false,
+                FilesCopied = 1,
+                DirectoriesCreated = 0,
                 BytesCopied = bytesCopied,
                 Sha256 = copiedHash!,
                 LastWriteTimeUtc = destInfo.LastWriteTimeUtc

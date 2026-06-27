@@ -90,6 +90,21 @@ public sealed class MoveCopyTests : IDisposable
             Options.Create(_options),
             NullLogger<FileSystemExecutor>.Instance);
 
+    private DirectoryCopyExecutor MakeDirectoryCopyExecutor()
+    {
+        var policy = MakePolicy();
+        var fileExecutor = new FileSystemExecutor(
+            policy,
+            Options.Create(_options),
+            NullLogger<FileSystemExecutor>.Instance);
+
+        return new DirectoryCopyExecutor(
+            fileExecutor,
+            policy,
+            Options.Create(_options),
+            NullLogger<DirectoryCopyExecutor>.Instance);
+    }
+
     // ── AuthorizeMove – happy path ────────────────────────────────────────────
 
     [Fact]
@@ -266,16 +281,15 @@ public sealed class MoveCopyTests : IDisposable
     // ── AuthorizeCopy – rejection cases ──────────────────────────────────────
 
     [Fact]
-    public void AuthorizeCopy_SourceIsDirectory_ReturnsAccessDenied()
+    public void AuthorizeCopy_SourceIsDirectory_SucceedsWhenDestinationIsMissing()
     {
         var src = TempDir("dirSrc");
-        var dst = Path.Combine(_tempRoot, "dst.txt");
+        var dst = Path.Combine(_tempRoot, "dstDir");
         var policy = MakePolicy();
 
         var error = policy.AuthorizeCopy(src, dst, false, out _, out _);
 
-        Assert.NotNull(error);
-        Assert.Equal(ErrorCodes.AccessDenied, error!.Code);
+        Assert.Null(error);
     }
 
     [Fact]
@@ -468,5 +482,300 @@ public sealed class MoveCopyTests : IDisposable
 
         var tmpFiles = Directory.GetFiles(_tempRoot, "copy-temp-*.tmp");
         Assert.Empty(tmpFiles);
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_NestedTree_CopiesSuccessfully()
+    {
+        var source = TempDir("tree-source");
+        Directory.CreateDirectory(Path.Combine(source, "a", "b"));
+        File.WriteAllText(Path.Combine(source, "root.txt"), "root", NoBomUtf8);
+        File.WriteAllText(Path.Combine(source, "a", "child.txt"), "child", NoBomUtf8);
+        File.WriteAllText(Path.Combine(source, "a", "b", "leaf.txt"), "leaf", NoBomUtf8);
+        var destination = Path.Combine(_tempRoot, "tree-destination");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            overwrite: false,
+            expectedSourceSha256: null,
+            recursive: true,
+            maxEntries: 100,
+            maxTotalBytes: 1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.Data);
+        Assert.True(result.Data!.IsDirectory);
+        Assert.Equal(3, result.Data.FilesCopied);
+        Assert.Equal(3, result.Data.DirectoriesCreated);
+        Assert.Equal("leaf", File.ReadAllText(Path.Combine(destination, "a", "b", "leaf.txt")));
+        Assert.True(Directory.Exists(source));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_EmptyDirectory_CopiesSuccessfully()
+    {
+        var source = TempDir("empty-source");
+        var destination = Path.Combine(_tempRoot, "empty-destination");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.True(Directory.Exists(destination));
+        Assert.Equal(0, result.Data!.FilesCopied);
+        Assert.Equal(1, result.Data.DirectoriesCreated);
+        Assert.Equal(0, result.Data.BytesCopied);
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_WithoutRecursive_ReturnsInvalidRequest()
+    {
+        var source = TempDir("non-recursive-source");
+        var destination = Path.Combine(_tempRoot, "non-recursive-destination");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            false,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error!.Code);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_ExceedsMaxEntries_ReturnsResultLimitExceeded()
+    {
+        var source = TempDir("entry-limit-source");
+        File.WriteAllText(Path.Combine(source, "one.txt"), "1");
+        File.WriteAllText(Path.Combine(source, "two.txt"), "2");
+        var destination = Path.Combine(_tempRoot, "entry-limit-destination");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            1,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.ResultLimitExceeded, result.Error!.Code);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_ExceedsMaxTotalBytes_ReturnsFileTooLarge()
+    {
+        var source = TempDir("byte-limit-source");
+        File.WriteAllText(Path.Combine(source, "large.txt"), new string('x', 32), NoBomUtf8);
+        var destination = Path.Combine(_tempRoot, "byte-limit-destination");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            10,
+            8,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.FileTooLarge, result.Error!.Code);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_DestinationInsideSource_ReturnsAccessDenied()
+    {
+        var source = TempDir("inside-source");
+        File.WriteAllText(Path.Combine(source, "file.txt"), "data");
+        var destination = Path.Combine(source, "nested-copy");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.AccessDenied, result.Error!.Code);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_DestinationAlreadyExists_ReturnsAccessDenied()
+    {
+        var source = TempDir("existing-source");
+        var destination = TempDir("existing-destination");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.AccessDenied, result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_DeniedChildName_ReturnsAccessDeniedAndLeavesNoTempDirectory()
+    {
+        var source = TempDir("denied-child-source");
+        File.WriteAllText(Path.Combine(source, "secret.txt"), "secret");
+        var destination = Path.Combine(_tempRoot, "denied-child-destination");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.AccessDenied, result.Error!.Code);
+        Assert.False(Directory.Exists(destination));
+        Assert.Empty(Directory.GetDirectories(_tempRoot, ".copy-temp-*.tmp"));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_FileSource_ReturnsFileCounters()
+    {
+        var source = TempFile("file-source.txt", "payload");
+        var destination = Path.Combine(_tempRoot, "file-destination.txt");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            false,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.False(result.Data!.IsDirectory);
+        Assert.Equal(1, result.Data.FilesCopied);
+        Assert.Equal(0, result.Data.DirectoriesCreated);
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_FileSourceExceedsMaxTotalBytes_ReturnsFileTooLarge()
+    {
+        var source = TempFile("oversized-file-source.txt", new string('x', 64));
+        var destination = Path.Combine(_tempRoot, "oversized-file-destination.txt");
+
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            false,
+            10,
+            8,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.FileTooLarge, result.Error!.Code);
+        Assert.False(File.Exists(destination));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_MidCopyFailure_RemovesTemporaryTree()
+    {
+        var source = TempDir("failure-source");
+        File.WriteAllText(Path.Combine(source, "one.txt"), "one");
+        var destination = Path.Combine(_tempRoot, "failure-destination");
+        var executor = MakeDirectoryCopyExecutor();
+        executor.OnFileCopiedHook = _ => throw new IOException("Injected copy failure");
+
+        var result = await executor.ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.WriteError, result.Error!.Code);
+        Assert.False(Directory.Exists(destination));
+        Assert.Empty(Directory.GetDirectories(_tempRoot, ".copy-temp-*.tmp"));
+    }
+
+    [Fact]
+    public async Task DirectoryCopy_ReparsePointChild_ReturnsAccessDenied()
+    {
+        var source = TempDir("reparse-source");
+        var target = TempDir("reparse-target");
+        var link = Path.Combine(source, "linked-directory");
+
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            return;
+        }
+
+        var destination = Path.Combine(_tempRoot, "reparse-destination");
+        var result = await MakeDirectoryCopyExecutor().ExecuteAsync(
+            source,
+            destination,
+            false,
+            null,
+            true,
+            10,
+            1024,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.AccessDenied, result.Error!.Code);
+        Assert.False(Directory.Exists(destination));
     }
 }

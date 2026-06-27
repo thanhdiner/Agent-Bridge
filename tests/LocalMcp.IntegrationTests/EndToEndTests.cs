@@ -80,7 +80,16 @@ public sealed class EndToEndTests : IAsyncDisposable
 
         var pathPolicy = new PathPolicy(Options.Create(fileAccessOptions));
         var executor = new FileSystemExecutor(pathPolicy, Options.Create(fileAccessOptions), NullLogger<FileSystemExecutor>.Instance);
-        var handler = new CommandHandler(pathPolicy, executor, NullLogger<CommandHandler>.Instance);
+        var directoryCopyExecutor = new DirectoryCopyExecutor(
+            executor,
+            pathPolicy,
+            Options.Create(fileAccessOptions),
+            NullLogger<DirectoryCopyExecutor>.Instance);
+        var handler = new CommandHandler(
+            pathPolicy,
+            executor,
+            directoryCopyExecutor,
+            NullLogger<CommandHandler>.Instance);
 
         _agentConnection = new GatewayConnection(
             Options.Create(agentOptions),
@@ -328,6 +337,48 @@ public sealed class EndToEndTests : IAsyncDisposable
         Assert.True(File.Exists(srcFile));
         Assert.True(File.Exists(dstFile));
         Assert.Equal(text, await File.ReadAllTextAsync(dstFile));
+    }
+
+    [Fact]
+    public async Task FsCopy_EndToEndFlow_CopiesDirectorySuccessfully()
+    {
+        await InitializeAsync();
+
+        Assert.NotNull(_tempRoot);
+        Assert.NotNull(_gatewayApp);
+
+        var source = Path.Combine(_tempRoot, "copy-dir-source");
+        var destination = Path.Combine(_tempRoot, "copy-dir-destination");
+        Directory.CreateDirectory(Path.Combine(source, "nested"));
+        await File.WriteAllTextAsync(Path.Combine(source, "root.txt"), "root");
+        await File.WriteAllTextAsync(Path.Combine(source, "nested", "child.txt"), "child");
+
+        var tools = new FileSystemTools(
+            _gatewayApp.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>());
+
+        var response = await tools.CopyAsync(
+            _deviceId,
+            source,
+            destination,
+            overwrite: false,
+            expectedSourceSha256: null,
+            recursive: true,
+            maxEntries: 100,
+            maxTotalBytes: 1024);
+
+        Assert.False(response.IsError);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<CopyResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.True(data.IsDirectory);
+        Assert.Equal(2, data.FilesCopied);
+        Assert.Equal(2, data.DirectoriesCreated);
+        Assert.True(File.Exists(Path.Combine(destination, "nested", "child.txt")));
+        Assert.True(Directory.Exists(source));
     }
 
     [Fact]

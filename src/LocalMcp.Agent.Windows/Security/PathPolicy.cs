@@ -684,14 +684,18 @@ public sealed class PathPolicy : IPathPolicy
         var reparseDest = VerifyNoReparsePointsInOriginalPath(fullDest);
         if (reparseDest is not null) return reparseDest;
 
-        // Resolve source – must exist and must be a file
+        // Resolve source – must exist as either a file or directory.
         string physicalSource;
         try
         {
             if (Directory.Exists(fullSource))
-                return new CommandError(ErrorCodes.AccessDenied, "Copying directories is not supported.");
-
-            if (File.Exists(fullSource))
+            {
+                var originalAttrs = File.GetAttributes(fullSource);
+                if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
+                    return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed on the source path.");
+                physicalSource = ResolvePhysicalPath(fullSource);
+            }
+            else if (File.Exists(fullSource))
             {
                 var originalAttrs = File.GetAttributes(fullSource);
                 if (originalAttrs.HasFlag(FileAttributes.ReparsePoint))
@@ -733,7 +737,10 @@ public sealed class PathPolicy : IPathPolicy
             return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve physical destination path.");
         }
 
-        if (Directory.Exists(physicalDest))
+        if (Directory.Exists(physicalSource) && (File.Exists(physicalDest) || Directory.Exists(physicalDest)))
+            return new CommandError(ErrorCodes.AccessDenied, "The destination path already exists.");
+
+        if (!Directory.Exists(physicalSource) && Directory.Exists(physicalDest))
             return new CommandError(ErrorCodes.AccessDenied, "Destination is a directory.");
 
         if (File.Exists(physicalDest))
@@ -754,6 +761,10 @@ public sealed class PathPolicy : IPathPolicy
             return new CommandError(ErrorCodes.WriteNotAllowed, "The destination path lies outside the configured writable root directories.");
         if (GetMatchingAllowedRoot(physicalDest) is null || GetMatchingAllowedRoot(fullDest) is null)
             return new CommandError(ErrorCodes.PathOutsideAllowedRoot, "The destination path lies outside the configured allowed root directories.");
+
+        if (Directory.Exists(physicalSource) &&
+            (IsSubdirectoryOf(physicalDest, physicalSource) || IsSubdirectoryOf(fullDest, fullSource)))
+            return new CommandError(ErrorCodes.AccessDenied, "The destination directory cannot be the source directory or a descendant of it.");
 
         // Denied segments + filenames – source (read-only denied list)
         foreach (var seg in physicalSource.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))

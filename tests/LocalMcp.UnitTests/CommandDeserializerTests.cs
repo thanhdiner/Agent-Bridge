@@ -247,7 +247,7 @@ public sealed class CommandDeserializerTests
     public void Deserialize_CopyCommand_WithAllFields_Succeeds()
     {
         var id = Guid.NewGuid();
-        var json = $"{{\"commandType\":\"CopyCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\\\\a.txt\",\"destination\":\"C:\\\\dst\\\\a.txt\",\"overwrite\":true,\"expectedSourceSha256\":\"deadbeef\"}}";
+        var json = $"{{\"commandType\":\"CopyCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:\\\\src\\\\a.txt\",\"destination\":\"C:\\\\dst\\\\a.txt\",\"overwrite\":true,\"expectedSourceSha256\":\"deadbeef\",\"recursive\":true,\"maxEntries\":250,\"maxTotalBytes\":2048}}";
 
         var (command, errorCode) = TryDeserialize(json);
 
@@ -258,6 +258,9 @@ public sealed class CommandDeserializerTests
         Assert.Equal("C:\\dst\\a.txt", copyCmd.Destination);
         Assert.True(copyCmd.Overwrite);
         Assert.Equal("deadbeef", copyCmd.ExpectedSourceSha256);
+        Assert.True(copyCmd.Recursive);
+        Assert.Equal(250, copyCmd.MaxEntries);
+        Assert.Equal(2048L, copyCmd.MaxTotalBytes);
     }
 
     [Fact]
@@ -272,6 +275,9 @@ public sealed class CommandDeserializerTests
         var copyCmd = Assert.IsType<CopyCommand>(command);
         Assert.False(copyCmd.Overwrite);
         Assert.Null(copyCmd.ExpectedSourceSha256);
+        Assert.False(copyCmd.Recursive);
+        Assert.Equal(1000, copyCmd.MaxEntries);
+        Assert.Equal(104857600L, copyCmd.MaxTotalBytes);
     }
 
     [Fact]
