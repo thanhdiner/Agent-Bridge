@@ -31,6 +31,7 @@ public sealed class McpToolMetadataTests
     [InlineData("fs_list", true, false, true, false)]
     [InlineData("fs_tree", true, false, true, false)]
     [InlineData("fs_search", true, false, true, false)]
+    [InlineData("fs_search_context", true, false, true, false)]
     [InlineData("fs_write", false, true, false, false)]
     [InlineData("fs_patch", false, true, false, false)]
     [InlineData("fs_mkdir", false, false, true, false)]
@@ -115,6 +116,7 @@ public sealed class McpToolMetadataTests
     [Fact] public void FsList_NoInternalParameters() => AssertNoInternalParams("fs_list");
     [Fact] public void FsTree_NoInternalParameters() => AssertNoInternalParams("fs_tree");
     [Fact] public void FsSearch_NoInternalParameters() => AssertNoInternalParams("fs_search");
+    [Fact] public void FsSearchContext_NoInternalParameters() => AssertNoInternalParams("fs_search_context");
     [Fact] public void FsWrite_NoInternalParameters() => AssertNoInternalParams("fs_write");
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
     [Fact] public void FsMkdir_NoInternalParameters() => AssertNoInternalParams("fs_mkdir");
@@ -176,6 +178,24 @@ public sealed class McpToolMetadataTests
         Assert.Contains("maxResults", names);
         Assert.Contains("maxDepth", names);
         Assert.Equal(5, names.Count);
+    }
+
+    [Fact]
+    public void FsSearchContext_HasExactSchema()
+    {
+        var names = GetParamNames("fs_search_context").ToHashSet();
+        Assert.Contains("deviceId", names);
+        Assert.Contains("path", names);
+        Assert.Contains("query", names);
+        Assert.Contains("useRegex", names);
+        Assert.Contains("caseSensitive", names);
+        Assert.Contains("includeGlobs", names);
+        Assert.Contains("excludeGlobs", names);
+        Assert.Contains("contextBefore", names);
+        Assert.Contains("contextAfter", names);
+        Assert.Contains("maxResults", names);
+        Assert.Contains("maxDepth", names);
+        Assert.Equal(11, names.Count);
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -884,6 +885,437 @@ public sealed class FileSystemExecutor : IFileSystemExecutor
         {
             // Skip invalid text file
         }
+    }
+
+    public async Task<CommandResult<SearchContextResult>> SearchContextAsync(
+        string path,
+        string query,
+        bool useRegex,
+        bool caseSensitive,
+        IReadOnlyList<string> includeGlobs,
+        IReadOnlyList<string> excludeGlobs,
+        int contextBefore,
+        int contextAfter,
+        int maxResults,
+        int maxDepth,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Searching files with context in {Path} (query={Query}, regex={UseRegex}, caseSensitive={CaseSensitive}, maxResults={MaxResults}, maxDepth={MaxDepth})",
+            path,
+            query,
+            useRegex,
+            caseSensitive,
+            maxResults,
+            maxDepth);
+
+        if (string.IsNullOrEmpty(query))
+            return SearchContextFailure(commandId, ErrorCodes.SearchQueryRequired, "Search query is required.");
+
+        if (contextBefore < 0 || contextBefore > 10 || contextAfter < 0 || contextAfter > 10)
+            return SearchContextFailure(commandId, ErrorCodes.InvalidRequest, "contextBefore and contextAfter must be between 0 and 10.");
+
+        if (maxResults < 1 || maxResults > 500)
+            return SearchContextFailure(commandId, ErrorCodes.InvalidRequest, "maxResults must be between 1 and 500.");
+
+        if (maxDepth < 1 || maxDepth > 10)
+            return SearchContextFailure(commandId, ErrorCodes.InvalidRequest, "maxDepth must be between 1 and 10.");
+
+        Regex? queryRegex = null;
+        List<Regex> includePatterns;
+        List<Regex> excludePatterns;
+        try
+        {
+            if (useRegex)
+            {
+                var options = RegexOptions.CultureInvariant;
+                if (!caseSensitive)
+                    options |= RegexOptions.IgnoreCase;
+
+                queryRegex = new Regex(query, options, TimeSpan.FromMilliseconds(500));
+            }
+
+            includePatterns = CompileGlobPatterns(includeGlobs);
+            excludePatterns = CompileGlobPatterns(excludeGlobs);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid search pattern for command {CommandId}", commandId);
+            return SearchContextFailure(commandId, ErrorCodes.InvalidRequest, "The regular expression or glob pattern is invalid.");
+        }
+
+        try
+        {
+            var root = new DirectoryInfo(path);
+            if (!root.Exists)
+                return SearchContextFailure(commandId, ErrorCodes.DirectoryNotFound, "The target directory was not found.");
+
+            var state = new SearchContextState(maxResults);
+            await SearchContextRecursiveAsync(
+                root,
+                path,
+                query,
+                queryRegex,
+                caseSensitive,
+                includePatterns,
+                excludePatterns,
+                contextBefore,
+                contextAfter,
+                currentDepth: 1,
+                maxDepth,
+                state,
+                cancellationToken);
+
+            return new CommandResult<SearchContextResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new SearchContextResult
+                {
+                    Matches = state.Matches,
+                    Truncated = state.Truncated
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return SearchContextFailure(commandId, ErrorCodes.CommandCancelled, "The search operation was cancelled.");
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Regex search timed out for command {CommandId}", commandId);
+            return SearchContextFailure(commandId, ErrorCodes.InvalidRequest, "The regular expression took too long to evaluate.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to search files with context in {Path}", path);
+            return SearchContextFailure(commandId, ErrorCodes.InternalError, "An error occurred during contextual search.");
+        }
+    }
+
+    private async Task SearchContextRecursiveAsync(
+        DirectoryInfo currentDirectory,
+        string rootPath,
+        string query,
+        Regex? queryRegex,
+        bool caseSensitive,
+        IReadOnlyList<Regex> includePatterns,
+        IReadOnlyList<Regex> excludePatterns,
+        int contextBefore,
+        int contextAfter,
+        int currentDepth,
+        int maxDepth,
+        SearchContextState state,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (state.Truncated || currentDepth > maxDepth)
+            return;
+
+        if (currentDirectory.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            return;
+
+        var directoryError = _pathPolicy.Validate(currentDirectory.FullName, out _, isDirectory: true);
+        if (directoryError is not null)
+            return;
+
+        try
+        {
+            foreach (var fileInfo in currentDirectory.EnumerateFiles().OrderBy(file => file.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (state.Matches.Count >= state.MaxResults)
+                {
+                    state.Truncated = true;
+                    return;
+                }
+
+                if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                    continue;
+
+                var fileError = _pathPolicy.Validate(fileInfo.FullName, out var normalizedFile, isDirectory: false);
+                if (fileError is not null)
+                    continue;
+
+                var relativePath = NormalizeSearchPath(Path.GetRelativePath(rootPath, normalizedFile));
+                if (!MatchesSearchGlobs(relativePath, includePatterns, excludePatterns))
+                    continue;
+
+                await SearchContextFileAsync(
+                    normalizedFile,
+                    relativePath,
+                    query,
+                    queryRegex,
+                    caseSensitive,
+                    contextBefore,
+                    contextAfter,
+                    state,
+                    cancellationToken);
+
+                if (state.Truncated)
+                    return;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return;
+        }
+        catch (IOException)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var subDirectory in currentDirectory.EnumerateDirectories().OrderBy(directory => directory.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (state.Matches.Count >= state.MaxResults)
+                {
+                    state.Truncated = true;
+                    return;
+                }
+
+                if (subDirectory.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                    continue;
+
+                var relativeDirectory = NormalizeSearchPath(Path.GetRelativePath(rootPath, subDirectory.FullName));
+                if (IsSearchDirectoryExcluded(relativeDirectory, excludePatterns))
+                    continue;
+
+                await SearchContextRecursiveAsync(
+                    subDirectory,
+                    rootPath,
+                    query,
+                    queryRegex,
+                    caseSensitive,
+                    includePatterns,
+                    excludePatterns,
+                    contextBefore,
+                    contextAfter,
+                    currentDepth + 1,
+                    maxDepth,
+                    state,
+                    cancellationToken);
+
+                if (state.Truncated)
+                    return;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        catch (DirectoryNotFoundException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private async Task SearchContextFileAsync(
+        string fullPath,
+        string relativePath,
+        string query,
+        Regex? queryRegex,
+        bool caseSensitive,
+        int contextBefore,
+        int contextAfter,
+        SearchContextState state,
+        CancellationToken cancellationToken)
+    {
+        const long maxSearchFileBytes = 1_048_576;
+        var info = new FileInfo(fullPath);
+        if (!info.Exists || info.Length > maxSearchFileBytes)
+            return;
+
+        byte[] bytes;
+        try
+        {
+            bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+        catch (IOException)
+        {
+            return;
+        }
+
+        if (bytes.LongLength > maxSearchFileBytes || IsBinary(bytes))
+            return;
+
+        string content;
+        try
+        {
+            (content, _) = DecodeText(bytes);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        var sha256 = ComputeSha256(bytes);
+        var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var line = lines[index];
+            string? matchedText;
+
+            if (queryRegex is not null)
+            {
+                var match = queryRegex.Match(line);
+                matchedText = match.Success ? match.Value : null;
+            }
+            else
+            {
+                var matchIndex = line.IndexOf(query, comparison);
+                matchedText = matchIndex >= 0 ? line.Substring(matchIndex, query.Length) : null;
+            }
+
+            if (matchedText is null)
+                continue;
+
+            var beforeStart = Math.Max(0, index - contextBefore);
+            var beforeLines = new List<string>(index - beforeStart);
+            for (var beforeIndex = beforeStart; beforeIndex < index; beforeIndex++)
+                beforeLines.Add(ClampSearchContextLine(lines[beforeIndex]));
+
+            var afterEnd = Math.Min(lines.Length, index + contextAfter + 1);
+            var afterLines = new List<string>(afterEnd - index - 1);
+            for (var afterIndex = index + 1; afterIndex < afterEnd; afterIndex++)
+                afterLines.Add(ClampSearchContextLine(lines[afterIndex]));
+
+            state.Matches.Add(new SearchContextMatch
+            {
+                RelativePath = relativePath,
+                FullPath = fullPath,
+                LineNumber = index + 1,
+                MatchedText = ClampSearchContextLine(matchedText),
+                LineText = ClampSearchContextLine(line),
+                BeforeLines = beforeLines,
+                AfterLines = afterLines,
+                Sha256 = sha256
+            });
+
+            if (state.Matches.Count >= state.MaxResults)
+            {
+                state.Truncated = true;
+                return;
+            }
+        }
+    }
+
+    private static List<Regex> CompileGlobPatterns(IReadOnlyList<string> patterns)
+    {
+        var result = new List<Regex>(patterns.Count);
+        foreach (var pattern in patterns)
+        {
+            if (string.IsNullOrWhiteSpace(pattern))
+                throw new ArgumentException("Glob patterns cannot be empty.", nameof(patterns));
+
+            result.Add(CreateGlobRegex(pattern));
+        }
+
+        return result;
+    }
+
+    private static Regex CreateGlobRegex(string pattern)
+    {
+        var normalized = NormalizeSearchPath(pattern);
+        var builder = new StringBuilder("^");
+
+        for (var index = 0; index < normalized.Length; index++)
+        {
+            var character = normalized[index];
+            if (character == '*')
+            {
+                if (index + 1 < normalized.Length && normalized[index + 1] == '*')
+                {
+                    if (index + 2 < normalized.Length && normalized[index + 2] == '/')
+                    {
+                        builder.Append("(?:.*/)?");
+                        index += 2;
+                    }
+                    else
+                    {
+                        builder.Append(".*");
+                        index++;
+                    }
+                }
+                else
+                {
+                    builder.Append("[^/]*");
+                }
+            }
+            else if (character == '?')
+            {
+                builder.Append("[^/]");
+            }
+            else
+            {
+                builder.Append(Regex.Escape(character.ToString()));
+            }
+        }
+
+        builder.Append('$');
+        return new Regex(
+            builder.ToString(),
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
+            TimeSpan.FromMilliseconds(250));
+    }
+
+    private static bool MatchesSearchGlobs(
+        string relativePath,
+        IReadOnlyList<Regex> includePatterns,
+        IReadOnlyList<Regex> excludePatterns)
+    {
+        if (excludePatterns.Any(pattern => pattern.IsMatch(relativePath)))
+            return false;
+
+        return includePatterns.Count == 0 || includePatterns.Any(pattern => pattern.IsMatch(relativePath));
+    }
+
+    private static bool IsSearchDirectoryExcluded(string relativePath, IReadOnlyList<Regex> excludePatterns)
+    {
+        var withTrailingSlash = relativePath.TrimEnd('/') + "/";
+        return excludePatterns.Any(pattern => pattern.IsMatch(relativePath) || pattern.IsMatch(withTrailingSlash));
+    }
+
+    private static string NormalizeSearchPath(string path) => path.Replace('\\', '/');
+
+    private static string ClampSearchContextLine(string value)
+    {
+        const int maxCharacters = 500;
+        return value.Length <= maxCharacters ? value : value[..497] + "...";
+    }
+
+    private static CommandResult<SearchContextResult> SearchContextFailure(Guid commandId, string code, string message) => new()
+    {
+        CommandId = commandId,
+        Success = false,
+        Error = new CommandError(code, message)
+    };
+
+    private sealed class SearchContextState
+    {
+        public SearchContextState(int maxResults)
+        {
+            MaxResults = maxResults;
+        }
+
+        public int MaxResults { get; }
+        public List<SearchContextMatch> Matches { get; } = [];
+        public bool Truncated { get; set; }
     }
 
     public async Task<CommandResult<WriteFileResult>> WriteFileAsync(

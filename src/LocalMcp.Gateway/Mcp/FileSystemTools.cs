@@ -215,6 +215,61 @@ public sealed class FileSystemTools
         return await DispatchAsync<SearchFilesResult>(command, "fs_search", deviceId, cancellationToken);
     }
 
+    [McpServerTool(Name = "fs_search_context", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Searches UTF-8 text files and returns matching lines, bounded surrounding context, and each file's SHA-256 so results can be patched safely without a separate read. Supports literal or regex queries plus include/exclude globs. Requires files:read scope.")]
+    public async Task<CallToolResult> SearchContextAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The absolute path of the directory to search in")] string path,
+        [Description("The literal text or regular expression to search for")] string query,
+        [Description("Whether query should be interpreted as a regular expression (default: false)")] bool useRegex = false,
+        [Description("Whether matching should be case-sensitive (default: false)")] bool caseSensitive = false,
+        [Description("Optional file globs to include, such as **/*.cs. Empty includes all files")] List<string>? includeGlobs = null,
+        [Description("Optional file or directory globs to exclude, such as **/bin/**")] List<string>? excludeGlobs = null,
+        [Description("Number of lines to return before each match (default: 2, hard limit: 10)")] int contextBefore = 2,
+        [Description("Number of lines to return after each match (default: 2, hard limit: 10)")] int contextAfter = 2,
+        [Description("Maximum matches to return (default: 100, hard limit: 500)")] int maxResults = 100,
+        [Description("Maximum directory depth to search (default: 4, hard limit: 10)")] int maxDepth = 4)
+    {
+        if (!await AuthorizeScopeAsync("FilesReadPolicy"))
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+        if (string.IsNullOrEmpty(query))
+            return CreateErrorResult("SEARCH_QUERY_REQUIRED", "Search query is required.");
+        if (contextBefore < 0 || contextBefore > 10 || contextAfter < 0 || contextAfter > 10)
+            return CreateErrorResult("INVALID_REQUEST", "contextBefore and contextAfter must be between 0 and 10.");
+        if (maxResults < 1 || maxResults > 500)
+            return CreateErrorResult("INVALID_REQUEST", "maxResults must be between 1 and 500.");
+        if (maxDepth < 1 || maxDepth > 10)
+            return CreateErrorResult("INVALID_REQUEST", "maxDepth must be between 1 and 10.");
+        if (includeGlobs is { Count: > 20 } || excludeGlobs is { Count: > 20 })
+            return CreateErrorResult("INVALID_REQUEST", "includeGlobs and excludeGlobs may contain at most 20 patterns each.");
+        if ((includeGlobs?.Any(pattern => string.IsNullOrWhiteSpace(pattern) || pattern.Length > 256) ?? false) ||
+            (excludeGlobs?.Any(pattern => string.IsNullOrWhiteSpace(pattern) || pattern.Length > 256) ?? false))
+            return CreateErrorResult("INVALID_REQUEST", "Glob patterns must be non-empty and at most 256 characters.");
+
+        var command = new SearchContextCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            Query = query,
+            UseRegex = useRegex,
+            CaseSensitive = caseSensitive,
+            IncludeGlobs = includeGlobs?.ToList() ?? [],
+            ExcludeGlobs = excludeGlobs?.ToList() ?? [],
+            ContextBefore = contextBefore,
+            ContextAfter = contextAfter,
+            MaxResults = maxResults,
+            MaxDepth = maxDepth
+        };
+
+        return await DispatchAsync<SearchContextResult>(command, "fs_search_context", deviceId, GetCancellationToken());
+    }
+
     [McpServerTool(Name = "fs_write", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Creates a new UTF-8 text file or replaces the complete content of an existing text file on a target Windows agent device. Requires files:write scope. Safe workflow: (1) Call fs_read first; (2) Inspect content; (3) Pass returned sha256 as expectedSha256; (4) Call fs_write. Re-read on conflict.")]
     public async Task<CallToolResult> WriteFileAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
