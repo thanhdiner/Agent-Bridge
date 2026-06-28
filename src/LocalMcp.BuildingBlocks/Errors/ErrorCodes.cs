@@ -59,6 +59,10 @@ public static class ErrorCodes
     public const string UiGridCellNotAvailable = "UI_GRID_CELL_NOT_AVAILABLE";
     public const string UiGridReadFailed = "UI_GRID_READ_FAILED";
     public const string UiGridLimitExceeded = "UI_GRID_LIMIT_EXCEEDED";
+    public const string UiGridItemNotAvailable = "UI_GRID_ITEM_NOT_AVAILABLE";
+    public const string UiGridSelectionNotSupported = "UI_GRID_SELECTION_NOT_SUPPORTED";
+    public const string UiGridSelectionFailed = "UI_GRID_SELECTION_FAILED";
+    public const string UiGridSelectionVerificationFailed = "UI_GRID_SELECTION_VERIFICATION_FAILED";
     public const string UiTextNotSupported = "UI_TEXT_NOT_SUPPORTED";
     public const string UiTextRangeNotAvailable = "UI_TEXT_RANGE_NOT_AVAILABLE";
     public const string UiTextLimitExceeded = "UI_TEXT_LIMIT_EXCEEDED";
