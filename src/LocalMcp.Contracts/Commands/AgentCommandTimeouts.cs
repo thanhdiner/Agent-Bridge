@@ -27,6 +27,18 @@ public static class AgentCommandTimeouts
         if (command is PowerShellStatusCommand or PowerShellCancelCommand)
             return TimeSpan.FromSeconds(10);
 
+        if (command is AppOpenCommand appOpenCommand)
+        {
+            if (!appOpenCommand.WaitForWindow)
+                return TimeSpan.FromSeconds(20);
+
+            var requestedWaitMilliseconds = Math.Clamp(
+                appOpenCommand.TimeoutMs,
+                1,
+                300_000);
+            return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 15_000);
+        }
+
         if (command is AppLaunchCommand appLaunchCommand)
         {
             if (!appLaunchCommand.WaitForWindow)

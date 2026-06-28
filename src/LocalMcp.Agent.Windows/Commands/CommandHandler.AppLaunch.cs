@@ -15,6 +15,7 @@ public sealed partial class CommandHandler
 {
     private readonly IAppLauncher? _appLauncher;
     private readonly IAppResolver? _appResolver;
+    private readonly IAppOpener? _appOpener;
 
     internal CommandHandler(
         IPathPolicy pathPolicy,
@@ -25,6 +26,7 @@ public sealed partial class CommandHandler
         IUiAutomationExecutor uiAutomationExecutor,
         IAppLauncher appLauncher,
         IAppResolver appResolver,
+        IAppOpener appOpener,
         ILogger<CommandHandler> logger)
         : this(
             pathPolicy,
@@ -37,6 +39,7 @@ public sealed partial class CommandHandler
     {
         _appLauncher = appLauncher;
         _appResolver = appResolver;
+        _appOpener = appOpener;
     }
 
     private async Task<CommandResult<JsonElement>> HandleAppResolveAsync(
@@ -58,6 +61,53 @@ public sealed partial class CommandHandler
         var result = await _appResolver.ResolveAsync(
             command.AppId,
             command.Refresh,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleAppOpenAsync(
+        AppOpenCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_appOpener is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(
+                    ErrorCodes.AppLaunchFailed,
+                    "Application opening is not configured on this agent.")
+            };
+        }
+
+        var result = await _appOpener.OpenAsync(
+            command.AppId,
+            command.Arguments,
+            command.Refresh,
+            command.WaitForWindow,
+            command.WindowTitleContains,
+            command.TimeoutMs,
+            command.PollIntervalMs,
             command.CommandId,
             cancellationToken);
 
