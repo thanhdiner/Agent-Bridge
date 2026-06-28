@@ -4,6 +4,10 @@ public sealed record AppOpenResult
 {
     public required string AppId { get; init; }
     public required string NormalizedAppId { get; init; }
+    public required string ResolvedAppId { get; init; }
+    public bool AliasApplied { get; init; }
+    public required string Action { get; init; }
+    public bool FocusedExisting { get; init; }
     public required string ExecutablePath { get; init; }
     public string? Source { get; init; }
     public bool CacheHit { get; init; }

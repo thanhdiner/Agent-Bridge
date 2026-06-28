@@ -25,6 +25,7 @@ public sealed class AppOpenToolMetadataTests
                 "appId",
                 "arguments",
                 "refresh",
+                "focusIfRunning",
                 "waitForWindow",
                 "windowTitleContains",
                 "timeoutMs",

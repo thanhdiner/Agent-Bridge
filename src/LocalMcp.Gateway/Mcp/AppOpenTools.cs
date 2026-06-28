@@ -38,13 +38,14 @@ public sealed class AppOpenTools
         Destructive = false,
         Idempotent = false,
         OpenWorld = true),
-     Description("Resolves a short Windows application id and launches the trusted resolved GUI executable directly. Uses the resolver cache first, revalidates the executable before launch, and does not elevate. Requires dev:execute scope.")]
+     Description("Resolves a short Windows application id, focuses an existing matching window when possible, otherwise launches the trusted GUI executable directly. Supports built-in aliases such as youtube. Does not elevate. Requires dev:execute scope.")]
     public async Task<CallToolResult> OpenAppAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("Short application id or name, such as chrome, vscode, obsidian, or antigravity")] string appId,
         [Description("Optional argument array passed directly to the application (maximum 64 entries)")] List<string>? arguments = null,
         [Description("Bypass the cached entry and rediscover only this application id (default: false)")] bool refresh = false,
-        [Description("Whether to wait for an application window (default: true)")] bool waitForWindow = true,
+        [Description("Focus an existing matching application window instead of starting another process when no arguments are supplied (default: true)")] bool focusIfRunning = true,
+        [Description("Whether to wait for an application window after launch (default: true)")] bool waitForWindow = true,
         [Description("Optional case-insensitive substring required in the detected window title")] string? windowTitleContains = null,
         [Description("Maximum window wait in milliseconds (default: 15000, hard limit: 300000)")] int timeoutMs = 15_000,
         [Description("Delay between polls in milliseconds (default: 100, range: 25-5000)")] int pollIntervalMs = 100)
@@ -64,6 +65,7 @@ public sealed class AppOpenTools
             AppId = appId,
             Arguments = arguments ?? [],
             Refresh = refresh,
+            FocusIfRunning = focusIfRunning,
             WaitForWindow = waitForWindow,
             WindowTitleContains = windowTitleContains,
             TimeoutMs = timeoutMs,
