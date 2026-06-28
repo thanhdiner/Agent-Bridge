@@ -82,6 +82,20 @@ public sealed class UiAutomationExecutorTests
     }
 
     [Theory]
+    [InlineData("line 1\r\nline 2", "line 1\rline 2", true)]
+    [InlineData("line 1\nline 2", "line 1\r\nline 2", true)]
+    [InlineData("same", "same", true)]
+    [InlineData("value ", "value", false)]
+    [InlineData(null, "value", false)]
+    public void AreUiValuesEquivalent_NormalizesOnlyLineEndings(
+        string? actual,
+        string expected,
+        bool equivalent)
+    {
+        Assert.Equal(equivalent, UiAutomationExecutor.AreUiValuesEquivalent(actual, expected));
+    }
+
+    [Theory]
     [InlineData("ctrl+l", "CTRL+L", 1)]
     [InlineData("Shift+F12", "SHIFT+F12", 1)]
     [InlineData("Alt+Left", "ALT+LEFT", 1)]

@@ -277,15 +277,17 @@ public sealed partial class UiAutomationExecutor
             }
 
             var verified = false;
+            string? storedValue = null;
             if (!isPassword)
             {
                 verified = WaitForValue(match, targetValue, cancellationToken);
                 if (!verified)
                     return SetValueFailure(commandId, ErrorCodes.UiValueVerificationFailed, "The control accepted the write request but its value did not match during verification.");
+                storedValue = ReadExactWritableValue(match) ?? targetValue;
             }
 
             var valueTruncated = false;
-            var resultValue = isPassword ? null : LimitValue(targetValue, out valueTruncated);
+            var resultValue = isPassword ? null : LimitValue(storedValue!, out valueTruncated);
             return new CommandResult<UiSetValueResult>
             {
                 CommandId = commandId,
@@ -301,7 +303,7 @@ public sealed partial class UiAutomationExecutor
                     IsPassword = isPassword,
                     Appended = append,
                     Verified = verified,
-                    ValueLength = targetValue.Length,
+                    ValueLength = isPassword ? targetValue.Length : storedValue!.Length,
                     Value = resultValue,
                     ValueTruncated = !isPassword && valueTruncated,
                     OccurrenceIndex = occurrenceIndex
@@ -386,6 +388,20 @@ public sealed partial class UiAutomationExecutor
         return null;
     }
 
+    internal static bool AreUiValuesEquivalent(string? actual, string expected)
+    {
+        if (actual is null)
+            return false;
+
+        return string.Equals(
+            NormalizeUiLineEndings(actual),
+            NormalizeUiLineEndings(expected),
+            StringComparison.Ordinal);
+    }
+
+    private static string NormalizeUiLineEndings(string value) =>
+        value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
     [SupportedOSPlatform("windows")]
     private static bool WaitForValue(
         IUIAutomationElement element,
@@ -395,12 +411,12 @@ public sealed partial class UiAutomationExecutor
         for (var attempt = 0; attempt < ValueVerificationAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (string.Equals(ReadExactWritableValue(element), expected, StringComparison.Ordinal))
+            if (AreUiValuesEquivalent(ReadExactWritableValue(element), expected))
                 return true;
             Thread.Sleep(ValueVerificationDelayMilliseconds);
         }
 
-        return string.Equals(ReadExactWritableValue(element), expected, StringComparison.Ordinal);
+        return AreUiValuesEquivalent(ReadExactWritableValue(element), expected);
     }
 
     private static string LimitValue(string value, out bool truncated)
