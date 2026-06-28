@@ -56,6 +56,10 @@ public sealed class CommandDeserializerTests
                 nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(payload, JsonOptions.Default),
                 nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
                 nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(payload, JsonOptions.Default),
+                nameof(WindowFocusCommand) => JsonSerializer.Deserialize<WindowFocusCommand>(payload, JsonOptions.Default),
+                nameof(WindowCloseCommand) => JsonSerializer.Deserialize<WindowCloseCommand>(payload, JsonOptions.Default),
+                nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(payload, JsonOptions.Default),
+                nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
                 nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(payload, JsonOptions.Default),
@@ -294,6 +298,91 @@ public sealed class CommandDeserializerTests
         Assert.False(listCommand.IncludeInvisible);
         Assert.False(listCommand.IncludeUntitled);
         Assert.Equal(100, listCommand.MaxWindows);
+    }
+
+    [Fact]
+    public void Deserialize_WindowFocusCommand_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowFocusCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.Equal("0x1234", Assert.IsType<WindowFocusCommand>(command).WindowHandle);
+    }
+
+    [Fact]
+    public void Deserialize_WindowCloseCommand_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowCloseCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"4660\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.Equal("4660", Assert.IsType<WindowCloseCommand>(command).WindowHandle);
+    }
+
+    [Fact]
+    public void Deserialize_WindowMoveCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowMoveCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"x\":10,\"y\":20,\"width\":800,\"height\":600,\"restoreIfNeeded\":false}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var moveCommand = Assert.IsType<WindowMoveCommand>(command);
+        Assert.Equal("0x1234", moveCommand.WindowHandle);
+        Assert.Equal(10, moveCommand.X);
+        Assert.Equal(20, moveCommand.Y);
+        Assert.Equal(800, moveCommand.Width);
+        Assert.Equal(600, moveCommand.Height);
+        Assert.False(moveCommand.RestoreIfNeeded);
+    }
+
+    [Fact]
+    public void Deserialize_WindowMoveCommand_WithoutRestoreFlag_DefaultsTrue()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowMoveCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"x\":10,\"y\":20,\"width\":800,\"height\":600}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        Assert.True(Assert.IsType<WindowMoveCommand>(command).RestoreIfNeeded);
+    }
+
+    [Fact]
+    public void Deserialize_UiClickCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiClickCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"automationId\":\"saveButton\",\"name\":\"Save\",\"controlType\":\"Button\",\"occurrenceIndex\":2,\"focusWindow\":false}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var clickCommand = Assert.IsType<UiClickCommand>(command);
+        Assert.Equal("saveButton", clickCommand.AutomationId);
+        Assert.Equal("Save", clickCommand.Name);
+        Assert.Equal("Button", clickCommand.ControlType);
+        Assert.Equal(2, clickCommand.OccurrenceIndex);
+        Assert.False(clickCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiClickCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiClickCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"name\":\"Save\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var clickCommand = Assert.IsType<UiClickCommand>(command);
+        Assert.Equal(0, clickCommand.OccurrenceIndex);
+        Assert.True(clickCommand.FocusWindow);
     }
 
     [Fact]

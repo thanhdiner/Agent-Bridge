@@ -116,6 +116,22 @@ public sealed partial class CommandHandler
         {
             return await HandleWindowListAsync(windowListCommand, cancellationToken);
         }
+        else if (command is WindowFocusCommand windowFocusCommand)
+        {
+            return await HandleWindowFocusAsync(windowFocusCommand, cancellationToken);
+        }
+        else if (command is WindowCloseCommand windowCloseCommand)
+        {
+            return await HandleWindowCloseAsync(windowCloseCommand, cancellationToken);
+        }
+        else if (command is WindowMoveCommand windowMoveCommand)
+        {
+            return await HandleWindowMoveAsync(windowMoveCommand, cancellationToken);
+        }
+        else if (command is UiClickCommand uiClickCommand)
+        {
+            return await HandleUiClickAsync(uiClickCommand, cancellationToken);
+        }
         else if (command is UiTreeCommand uiTreeCommand)
         {
             return await HandleUiTreeAsync(uiTreeCommand, cancellationToken);
