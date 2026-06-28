@@ -41,6 +41,28 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<UiGetValueResult>> GetValueAsync(
+        string windowHandle,
+        string? automationId,
+        string? name,
+        string? controlType,
+        int occurrenceIndex,
+        bool focusWindow,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
+    Task<CommandResult<UiSetValueResult>> SetValueAsync(
+        string windowHandle,
+        string value,
+        string? automationId,
+        string? name,
+        string? controlType,
+        int occurrenceIndex,
+        bool focusWindow,
+        bool append,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<UiTreeResult>> GetTreeAsync(
         string windowHandle,
         int maxDepth,
