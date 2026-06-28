@@ -32,11 +32,12 @@ internal sealed record OutputSnapshot(
     long NextStderrOffset,
     bool Truncated);
 
-internal sealed class PowerShellSessionState : IDisposable
+internal class PowerShellSessionState : IDisposable
 {
     public Guid SessionId { get; }
     public string DeviceId { get; }
     public DateTimeOffset StartedAt { get; }
+    public long CreationSequence { get; set; }
 
     private readonly object _stateLock = new();
     private volatile PowerShellSessionSnapshot _snapshot = new(PowerShellSessionStateValue.Running, null, null);
@@ -106,15 +107,19 @@ internal sealed class PowerShellSessionState : IDisposable
         {
             if (_snapshot.State == PowerShellSessionStateValue.Running)
             {
+                // 1. Finalize stdout/stderr pending state first (by discarding incomplete bytes)
+                FlushPendingBytes();
+
+                // 2. Publish terminal state snapshot
                 _snapshot = new PowerShellSessionSnapshot(newState, DateTimeOffset.UtcNow, exitCode);
-                _completionSource.TrySetResult();
                 transitioned = true;
             }
         }
 
         if (transitioned)
         {
-            FlushPendingBytes();
+            // 3. Complete CompletionTask last
+            _completionSource.TrySetResult();
         }
         return transitioned;
     }
@@ -139,21 +144,50 @@ internal sealed class PowerShellSessionState : IDisposable
                 Buffer.BlockCopy(data, 0, combined, 0, count);
             }
 
-            int completeLength = GetCompleteUtf8Length(combined, combined.Length);
+            var remaining = new ReadOnlySpan<byte>(combined);
+            var cleanBytes = new List<byte>();
+            int pendingStart = -1;
 
-            if (completeLength > 0)
+            while (remaining.Length > 0)
             {
+                var status = System.Text.Rune.DecodeFromUtf8(remaining, out _, out int bytesConsumed);
+                if (status == System.Buffers.OperationStatus.Done)
+                {
+                    for (int i = 0; i < bytesConsumed; i++)
+                    {
+                        cleanBytes.Add(remaining[i]);
+                    }
+                    remaining = remaining.Slice(bytesConsumed);
+                }
+                else if (status == System.Buffers.OperationStatus.NeedMoreData)
+                {
+                    pendingStart = combined.Length - remaining.Length;
+                    break;
+                }
+                else // OperationStatus.InvalidData
+                {
+                    remaining = remaining.Slice(bytesConsumed); // Discard invalid bytes
+                }
+            }
+
+            if (cleanBytes.Count > 0)
+            {
+                var completeLength = cleanBytes.Count;
                 var currentTotal = _stdoutLength + _stderrLength;
                 var spaceLeft = _maxOutputBytes - currentTotal;
 
                 if (completeLength > spaceLeft)
                 {
                     _truncated = true;
-                    var allowedBytes = GetSafeUtf8Length(combined, completeLength, 0, spaceLeft);
+                    var cleanSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cleanBytes);
+                    var allowedBytes = GetSafeUtf8Length(cleanSpan, spaceLeft);
                     if (allowedBytes > 0)
                     {
                         EnsureStdoutCapacity(_stdoutLength + allowedBytes);
-                        Buffer.BlockCopy(combined, 0, _stdoutBuffer!, _stdoutLength, allowedBytes);
+                        for (int i = 0; i < allowedBytes; i++)
+                        {
+                            _stdoutBuffer![_stdoutLength + i] = cleanBytes[i];
+                        }
                         _stdoutLength += allowedBytes;
                     }
                     _stdoutPending = Array.Empty<byte>();
@@ -161,15 +195,18 @@ internal sealed class PowerShellSessionState : IDisposable
                 }
 
                 EnsureStdoutCapacity(_stdoutLength + completeLength);
-                Buffer.BlockCopy(combined, 0, _stdoutBuffer!, _stdoutLength, completeLength);
+                for (int i = 0; i < completeLength; i++)
+                {
+                    _stdoutBuffer![_stdoutLength + i] = cleanBytes[i];
+                }
                 _stdoutLength += completeLength;
             }
 
-            if (completeLength < combined.Length)
+            if (pendingStart >= 0)
             {
-                int pendingLen = combined.Length - completeLength;
+                int pendingLen = combined.Length - pendingStart;
                 _stdoutPending = new byte[pendingLen];
-                Buffer.BlockCopy(combined, completeLength, _stdoutPending, 0, pendingLen);
+                Buffer.BlockCopy(combined, pendingStart, _stdoutPending, 0, pendingLen);
             }
             else
             {
@@ -198,21 +235,50 @@ internal sealed class PowerShellSessionState : IDisposable
                 Buffer.BlockCopy(data, 0, combined, 0, count);
             }
 
-            int completeLength = GetCompleteUtf8Length(combined, combined.Length);
+            var remaining = new ReadOnlySpan<byte>(combined);
+            var cleanBytes = new List<byte>();
+            int pendingStart = -1;
 
-            if (completeLength > 0)
+            while (remaining.Length > 0)
             {
+                var status = System.Text.Rune.DecodeFromUtf8(remaining, out _, out int bytesConsumed);
+                if (status == System.Buffers.OperationStatus.Done)
+                {
+                    for (int i = 0; i < bytesConsumed; i++)
+                    {
+                        cleanBytes.Add(remaining[i]);
+                    }
+                    remaining = remaining.Slice(bytesConsumed);
+                }
+                else if (status == System.Buffers.OperationStatus.NeedMoreData)
+                {
+                    pendingStart = combined.Length - remaining.Length;
+                    break;
+                }
+                else // OperationStatus.InvalidData
+                {
+                    remaining = remaining.Slice(bytesConsumed); // Discard invalid bytes
+                }
+            }
+
+            if (cleanBytes.Count > 0)
+            {
+                var completeLength = cleanBytes.Count;
                 var currentTotal = _stdoutLength + _stderrLength;
                 var spaceLeft = _maxOutputBytes - currentTotal;
 
                 if (completeLength > spaceLeft)
                 {
                     _truncated = true;
-                    var allowedBytes = GetSafeUtf8Length(combined, completeLength, 0, spaceLeft);
+                    var cleanSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cleanBytes);
+                    var allowedBytes = GetSafeUtf8Length(cleanSpan, spaceLeft);
                     if (allowedBytes > 0)
                     {
                         EnsureStderrCapacity(_stderrLength + allowedBytes);
-                        Buffer.BlockCopy(combined, 0, _stderrBuffer!, _stderrLength, allowedBytes);
+                        for (int i = 0; i < allowedBytes; i++)
+                        {
+                            _stderrBuffer![_stderrLength + i] = cleanBytes[i];
+                        }
                         _stderrLength += allowedBytes;
                     }
                     _stderrPending = Array.Empty<byte>();
@@ -220,15 +286,18 @@ internal sealed class PowerShellSessionState : IDisposable
                 }
 
                 EnsureStderrCapacity(_stderrLength + completeLength);
-                Buffer.BlockCopy(combined, 0, _stderrBuffer!, _stderrLength, completeLength);
+                for (int i = 0; i < completeLength; i++)
+                {
+                    _stderrBuffer![_stderrLength + i] = cleanBytes[i];
+                }
                 _stderrLength += completeLength;
             }
 
-            if (completeLength < combined.Length)
+            if (pendingStart >= 0)
             {
-                int pendingLen = combined.Length - completeLength;
+                int pendingLen = combined.Length - pendingStart;
                 _stderrPending = new byte[pendingLen];
-                Buffer.BlockCopy(combined, completeLength, _stderrPending, 0, pendingLen);
+                Buffer.BlockCopy(combined, pendingStart, _stderrPending, 0, pendingLen);
             }
             else
             {
@@ -364,69 +433,42 @@ internal sealed class PowerShellSessionState : IDisposable
     {
         lock (_outputLock)
         {
-            if (_truncated)
-                return;
-
-            if (_stdoutPending.Length > 0)
-            {
-                var spaceLeft = _maxOutputBytes - (_stdoutLength + _stderrLength);
-                var toCopy = Math.Min(_stdoutPending.Length, spaceLeft);
-                if (toCopy > 0)
-                {
-                    EnsureStdoutCapacity(_stdoutLength + toCopy);
-                    Buffer.BlockCopy(_stdoutPending, 0, _stdoutBuffer!, _stdoutLength, toCopy);
-                    _stdoutLength += toCopy;
-                }
-                if (toCopy < _stdoutPending.Length)
-                {
-                    _truncated = true;
-                }
-                _stdoutPending = Array.Empty<byte>();
-            }
-
-            if (_stderrPending.Length > 0)
-            {
-                var spaceLeft = _maxOutputBytes - (_stdoutLength + _stderrLength);
-                var toCopy = Math.Min(_stderrPending.Length, spaceLeft);
-                if (toCopy > 0)
-                {
-                    EnsureStderrCapacity(_stderrLength + toCopy);
-                    Buffer.BlockCopy(_stderrPending, 0, _stderrBuffer!, _stderrLength, toCopy);
-                    _stderrLength += toCopy;
-                }
-                if (toCopy < _stderrPending.Length)
-                {
-                    _truncated = true;
-                }
-                _stderrPending = Array.Empty<byte>();
-            }
+            // Discard incomplete pending bytes at terminal transition
+            _stdoutPending = Array.Empty<byte>();
+            _stderrPending = Array.Empty<byte>();
         }
     }
 
-    private static int GetCompleteUtf8Length(byte[] buffer, int length)
+    private static int GetSafeUtf8Length(ReadOnlySpan<byte> buffer, int requestedLength)
     {
-        for (int i = length - 1; i >= 0 && i >= length - 4; i--)
-        {
-            byte b = buffer[i];
-            if (b < 128)
-            {
-                break;
-            }
-            if (b >= 192)
-            {
-                int expected = 1;
-                if (b >= 240) expected = 4;
-                else if (b >= 224) expected = 3;
-                else if (b >= 192) expected = 2;
+        if (buffer.Length <= requestedLength)
+            return buffer.Length;
 
-                if (length - i < expected)
-                {
-                    return i;
-                }
+        var remaining = buffer.Slice(0, requestedLength);
+        int totalConsumed = 0;
+        while (remaining.Length > 0)
+        {
+            var status = System.Text.Rune.DecodeFromUtf8(remaining, out _, out int bytesConsumed);
+            if (status == System.Buffers.OperationStatus.Done)
+            {
+                totalConsumed += bytesConsumed;
+                remaining = remaining.Slice(bytesConsumed);
+            }
+            else
+            {
                 break;
             }
         }
-        return length;
+        return totalConsumed;
+    }
+
+    private static int GetSafeUtf8Length(byte[]? buffer, int length, int start, int requestedLength)
+    {
+        if (buffer == null || start >= length)
+            return 0;
+
+        var span = new ReadOnlySpan<byte>(buffer, start, length - start);
+        return GetSafeUtf8Length(span, requestedLength);
     }
 
     private static int NormalizeOffsetToUtf8Boundary(byte[]? buffer, int length, int offset)
@@ -434,15 +476,12 @@ internal sealed class PowerShellSessionState : IDisposable
         if (buffer == null || offset <= 0 || offset >= length)
             return offset;
 
+        var span = new ReadOnlySpan<byte>(buffer, 0, length);
         int current = offset;
         while (current >= 0 && current > offset - 4)
         {
-            byte b = buffer[current];
-            if (b < 128)
-            {
-                return offset;
-            }
-            if (b >= 192)
+            byte b = span[current];
+            if (b < 0x80 || b >= 0xC0)
             {
                 return current;
             }
@@ -451,43 +490,7 @@ internal sealed class PowerShellSessionState : IDisposable
         return offset;
     }
 
-    private static int GetSafeUtf8Length(byte[]? buffer, int length, int start, int requestedLength)
-    {
-        if (buffer == null || start >= length)
-            return 0;
-
-        if (start + requestedLength >= length)
-        {
-            return length - start;
-        }
-
-        int end = start + requestedLength;
-        for (int i = end - 1; i >= start; i--)
-        {
-            byte b = buffer[i];
-            if (b < 128)
-            {
-                break;
-            }
-            if (b >= 192)
-            {
-                int expectedBytes = 1;
-                if (b >= 240) expectedBytes = 4;
-                else if (b >= 224) expectedBytes = 3;
-                else if (b >= 192) expectedBytes = 2;
-
-                int actualBytes = end - i;
-                if (actualBytes < expectedBytes)
-                {
-                    return i - start;
-                }
-                break;
-            }
-        }
-        return requestedLength;
-    }
-
-    public void SignalCancel()
+    public virtual void SignalCancel()
     {
         try { Cts.Cancel(); } catch {}
     }

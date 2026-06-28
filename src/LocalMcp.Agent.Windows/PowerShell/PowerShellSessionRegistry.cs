@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace LocalMcp.Agent.Windows.PowerShell;
 
-internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator, IDisposable
+internal class PowerShellSessionRegistry : IPowerShellSessionCoordinator, IDisposable
 {
     internal const int MaxConcurrentSessions = 16;
     internal const int MaxHistoricalSessions = 100;
@@ -13,6 +13,7 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
     private readonly object _registryLock = new();
     private readonly ILogger<PowerShellSessionRegistry> _logger;
     private bool _disposed;
+    private long _creationSequenceCounter;
 
     internal int Count
     {
@@ -67,11 +68,17 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
                 }
             }
 
-            var session = new PowerShellSessionState(Guid.NewGuid(), deviceId, maxOutputBytes);
+            var session = CreateSessionState(deviceId, maxOutputBytes);
+            session.CreationSequence = System.Threading.Interlocked.Increment(ref _creationSequenceCounter);
             _sessions[session.SessionId] = session;
             error = null;
             return session;
         }
+    }
+
+    internal virtual PowerShellSessionState CreateSessionState(string deviceId, int maxOutputBytes)
+    {
+        return new PowerShellSessionState(Guid.NewGuid(), deviceId, maxOutputBytes);
     }
 
     public PowerShellSessionState? Get(Guid sessionId)
@@ -236,7 +243,7 @@ internal sealed class PowerShellSessionRegistry : IPowerShellSessionCoordinator,
     {
         var terminated = _sessions.Values
             .Where(s => s.State != PowerShellSessionStateValue.Running)
-            .OrderBy(s => s.StartedAt)
+            .OrderBy(s => s.CreationSequence)
             .FirstOrDefault();
 
         if (terminated is not null)

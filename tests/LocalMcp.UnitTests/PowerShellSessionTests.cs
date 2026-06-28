@@ -76,6 +76,220 @@ public sealed class PowerShellSessionTests
         }
     }
 
+    [Fact]
+    public void ResolveToolExecutable_NormalExecutable_Accepted()
+    {
+        FileSystemExecutor.FileAttributesOverrideForTest = path =>
+            path.EndsWith("dummy.exe") ? FileAttributes.Normal : null;
+        FileSystemExecutor.ReparseTagOverrideForTest = null;
+
+        try
+        {
+            var originalPath = Environment.GetEnvironmentVariable("PATH");
+            var dummyDir = AppDomain.CurrentDomain.BaseDirectory;
+            var workingDir = Path.Combine(dummyDir, "test_working_dir");
+            Environment.SetEnvironmentVariable("PATH", dummyDir);
+
+            try
+            {
+                var resolved = FileSystemExecutor.ResolveToolExecutable("dummy.exe", workingDir);
+                Assert.NotNull(resolved);
+                Assert.EndsWith("dummy.exe", resolved);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", originalPath);
+            }
+        }
+        finally
+        {
+            FileSystemExecutor.FileAttributesOverrideForTest = null;
+        }
+    }
+
+    [Fact]
+    public void ResolveToolExecutable_AppExecutionAlias_Accepted()
+    {
+        FileSystemExecutor.FileAttributesOverrideForTest = path =>
+            path.EndsWith("dummy.exe") ? FileAttributes.ReparsePoint : null;
+        FileSystemExecutor.ReparseTagOverrideForTest = path =>
+            path.EndsWith("dummy.exe") ? 0x8000001Bu : null;
+
+        try
+        {
+            var originalPath = Environment.GetEnvironmentVariable("PATH");
+            var dummyDir = AppDomain.CurrentDomain.BaseDirectory;
+            var workingDir = Path.Combine(dummyDir, "test_working_dir");
+            Environment.SetEnvironmentVariable("PATH", dummyDir);
+
+            try
+            {
+                var resolved = FileSystemExecutor.ResolveToolExecutable("dummy.exe", workingDir);
+                Assert.NotNull(resolved);
+                Assert.EndsWith("dummy.exe", resolved);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", originalPath);
+            }
+        }
+        finally
+        {
+            FileSystemExecutor.FileAttributesOverrideForTest = null;
+            FileSystemExecutor.ReparseTagOverrideForTest = null;
+        }
+    }
+
+    [Fact]
+    public void ResolveToolExecutable_ArbitrarySymlink_Rejected()
+    {
+        FileSystemExecutor.FileAttributesOverrideForTest = path =>
+            path.EndsWith("dummy.exe") ? FileAttributes.ReparsePoint : null;
+        FileSystemExecutor.ReparseTagOverrideForTest = path =>
+            path.EndsWith("dummy.exe") ? 0xA000000Cu : null; // Arbitrary symlink tag
+
+        try
+        {
+            var originalPath = Environment.GetEnvironmentVariable("PATH");
+            var dummyDir = AppDomain.CurrentDomain.BaseDirectory;
+            var workingDir = Path.Combine(dummyDir, "test_working_dir");
+            Environment.SetEnvironmentVariable("PATH", dummyDir);
+
+            try
+            {
+                var resolved = FileSystemExecutor.ResolveToolExecutable("dummy.exe", workingDir);
+                Assert.Null(resolved);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", originalPath);
+            }
+        }
+        finally
+        {
+            FileSystemExecutor.FileAttributesOverrideForTest = null;
+            FileSystemExecutor.ReparseTagOverrideForTest = null;
+        }
+    }
+
+    [Fact]
+    public void ResolveToolExecutable_DirectoryReparsePoint_Rejected()
+    {
+        FileSystemExecutor.FileAttributesOverrideForTest = path =>
+            path.EndsWith("dummy.exe") ? (FileAttributes.ReparsePoint | FileAttributes.Directory) : null;
+        FileSystemExecutor.ReparseTagOverrideForTest = path =>
+            path.EndsWith("dummy.exe") ? 0x8000001Bu : null; // App execution alias but it's a directory
+
+        try
+        {
+            var originalPath = Environment.GetEnvironmentVariable("PATH");
+            var dummyDir = AppDomain.CurrentDomain.BaseDirectory;
+            var workingDir = Path.Combine(dummyDir, "test_working_dir");
+            Environment.SetEnvironmentVariable("PATH", dummyDir);
+
+            try
+            {
+                var resolved = FileSystemExecutor.ResolveToolExecutable("dummy.exe", workingDir);
+                Assert.Null(resolved);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", originalPath);
+            }
+        }
+        finally
+        {
+            FileSystemExecutor.FileAttributesOverrideForTest = null;
+            FileSystemExecutor.ReparseTagOverrideForTest = null;
+        }
+    }
+
+    [Fact]
+    public void SessionState_Utf8Streaming_DoesNotCorruptHalfEmoji()
+    {
+        // 🌟 is encoded in UTF-8 as 4 bytes: 0xF0, 0x9F, 0x8C, 0x9F
+        var part1 = new byte[] { 0xF0, 0x9F };
+        var part2 = new byte[] { 0x8C, 0x9F };
+
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        state.AppendStdout(part1, part1.Length);
+
+        // Read output: should be empty because 🌟 is incomplete
+        var snap1 = state.ReadOutput(0, 0, 100);
+        Assert.Empty(snap1.StdoutBytes);
+
+        // Append rest of the emoji
+        state.AppendStdout(part2, part2.Length);
+
+        // Read output: should contain the full 4-byte 🌟 emoji
+        var snap2 = state.ReadOutput(0, 0, 100);
+        Assert.Equal(4, snap2.StdoutBytes.Length);
+        Assert.Equal(0xF0, snap2.StdoutBytes[0]);
+        Assert.Equal(0x9F, snap2.StdoutBytes[1]);
+        Assert.Equal(0x8C, snap2.StdoutBytes[2]);
+        Assert.Equal(0x9F, snap2.StdoutBytes[3]);
+    }
+
+    [Fact]
+    public async Task SessionState_PublicationOrdering_ValidStateAfterOutputs()
+    {
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        var part1 = new byte[] { 0xF0, 0x9F }; // Incomplete emoji
+        state.AppendStdout(part1, part1.Length);
+
+        // Transition should finalize and complete the task
+        bool transitioned = state.TryTransition(PowerShellSessionStateValue.Completed, 0);
+        Assert.True(transitioned);
+
+        // Verify task is completed
+        await state.CompletionTask;
+
+        // Verify pending bytes were discarded on transition, so we don't output corrupt half emoji
+        var snap = state.ReadOutput(0, 0, 100);
+        Assert.Empty(snap.StdoutBytes);
+    }
+
+    [Fact]
+    public void SessionState_OrphanByte_Discarded()
+    {
+        // 0x80 is an invalid continuation byte on its own
+        var invalidBytes = new byte[] { 0x80, 0x41 }; // 0x80 (invalid), 0x41 ('A')
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        state.AppendStdout(invalidBytes, invalidBytes.Length);
+
+        var snap = state.ReadOutput(0, 0, 100);
+        // Should discard the invalid 0x80 and only output 'A' (0x41)
+        Assert.Single(snap.StdoutBytes);
+        Assert.Equal(0x41, snap.StdoutBytes[0]);
+    }
+
+    [Fact]
+    public void SessionState_MalformedUtf8_Filtered()
+    {
+        // 0xC0 0xAF is overlong encoding for '/' (malformed UTF-8)
+        var malformed = new byte[] { 0xC0, 0xAF, 0x42 }; // 0xC0 0xAF (malformed), 0x42 ('B')
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        state.AppendStdout(malformed, malformed.Length);
+
+        var snap = state.ReadOutput(0, 0, 100);
+        // Should filter/discard the malformed sequence and only output 'B' (0x42)
+        Assert.Single(snap.StdoutBytes);
+        Assert.Equal(0x42, snap.StdoutBytes[0]);
+    }
+
+    [Fact]
+    public async Task SessionState_PollAfterCompletionTask_ReturnsFinalSnapshot()
+    {
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        state.TryTransition(PowerShellSessionStateValue.Completed, 0);
+
+        await state.CompletionTask;
+
+        var snapshot = state.GetSnapshot();
+        Assert.Equal(PowerShellSessionStateValue.Completed, snapshot.State);
+        Assert.Equal(0, snapshot.ExitCode);
+    }
+
     // ──────────────────────────────────────────────
     // 1. Thread-safety & Concurrency / Eviction Race
     // ──────────────────────────────────────────────
@@ -120,7 +334,6 @@ public sealed class PowerShellSessionTests
             session!.TryTransition(PowerShellSessionStateValue.Completed, 0);
             registry.OnSessionTerminated(session);
             originalSessions.Add(session);
-            await Task.Delay(5); // Ensure distinct and ordered StartedAt timestamps
         }
 
         Assert.Equal(100, registry.Count);
@@ -1198,5 +1411,75 @@ public sealed class PowerShellSessionTests
         {
             _onStart();
         }
+    }
+
+    private class NonCancellableSessionState : PowerShellSessionState
+    {
+        public NonCancellableSessionState(Guid sessionId, string deviceId, int maxOutputBytes)
+            : base(sessionId, deviceId, maxOutputBytes)
+        {
+        }
+
+        public override void SignalCancel()
+        {
+            SignalCancelCalled = true;
+        }
+
+        public bool SignalCancelCalled { get; private set; }
+    }
+
+    private class TestNonCancellableRegistry : PowerShellSessionRegistry
+    {
+        public TestNonCancellableRegistry(ILogger<PowerShellSessionRegistry> logger) : base(logger)
+        {
+        }
+
+        internal override PowerShellSessionState CreateSessionState(string deviceId, int maxOutputBytes)
+        {
+            return new NonCancellableSessionState(Guid.NewGuid(), deviceId, maxOutputBytes);
+        }
+    }
+
+    [Fact]
+    public void RegistryShutdown_FallbackForceKillBranch_Verified()
+    {
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<PowerShellSessionRegistry>.Instance;
+        var registry = new TestNonCancellableRegistry(logger);
+        
+        string? error;
+        var session = registry.TryCreate("dev-1", 1024, out error);
+        Assert.NotNull(session);
+        var nonCancellableSession = (NonCancellableSessionState)session!;
+
+        // Start a real process tree that ignores cancellation
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "pwsh.exe",
+            Arguments = "-NoProfile -Command \"Start-Process cmd -ArgumentList '/c timeout /t 60 /nobreak' -NoNewWindow; Start-Sleep -Seconds 60\"",
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        var proc = Process.Start(startInfo);
+        Assert.NotNull(proc);
+        session.Process = proc;
+
+        // Measure time
+        var sw = Stopwatch.StartNew();
+        
+        // This will cancel all, wait 5s, fail graceful, force kill
+        registry.CancelAll();
+        
+        sw.Stop();
+
+        // Verify force kill was initiated
+        Assert.True(nonCancellableSession.SignalCancelCalled);
+        
+        // Verify process tree was terminated
+        Assert.True(proc.HasExited);
+        
+        // Verify time elapsed was at least 4.9 seconds (due to 5s graceful wait)
+        Assert.True(sw.Elapsed.TotalSeconds >= 4.9, $"Should wait at least 4.9s, actually waited {sw.Elapsed.TotalSeconds}s");
+        
+        registry.Dispose();
     }
 }
