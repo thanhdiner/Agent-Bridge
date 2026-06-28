@@ -168,6 +168,10 @@ public sealed partial class CommandHandler
         {
             return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.UiGridReadDispatch.HandleAsync(_uiAutomationExecutor, uiGridReadCommand, cancellationToken));
         }
+        else if (command is UiTextReadCommand uiTextReadCommand)
+        {
+            return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.UiTextReadDispatch.HandleAsync(_uiAutomationExecutor, uiTextReadCommand, cancellationToken));
+        }
         else if (command is UiGetValueCommand uiGetValueCommand)
         {
             return await HandleUiGetValueAsync(uiGetValueCommand, cancellationToken);
