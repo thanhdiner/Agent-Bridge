@@ -64,6 +64,7 @@ public sealed class CommandDeserializerTests
                 nameof(WindowCloseCommand) => JsonSerializer.Deserialize<WindowCloseCommand>(payload, JsonOptions.Default),
                 nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(payload, JsonOptions.Default),
                 nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
+                nameof(UiGetStateCommand) => JsonSerializer.Deserialize<UiGetStateCommand>(payload, JsonOptions.Default),
                 nameof(UiGetValueCommand) => JsonSerializer.Deserialize<UiGetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiSetValueCommand) => JsonSerializer.Deserialize<UiSetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiPressKeyCommand) => JsonSerializer.Deserialize<UiPressKeyCommand>(payload, JsonOptions.Default),
@@ -539,6 +540,37 @@ public sealed class CommandDeserializerTests
         var clickCommand = Assert.IsType<UiClickCommand>(command);
         Assert.Equal(0, clickCommand.OccurrenceIndex);
         Assert.True(clickCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiGetStateCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiGetStateCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"windowHandle\":\"0x1234\",\"automationId\":\"rememberMe\",\"name\":\"Remember me\",\"controlType\":\"CheckBox\",\"occurrenceIndex\":2,\"focusWindow\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var stateCommand = Assert.IsType<UiGetStateCommand>(command);
+        Assert.Equal("rememberMe", stateCommand.AutomationId);
+        Assert.Equal("Remember me", stateCommand.Name);
+        Assert.Equal("CheckBox", stateCommand.ControlType);
+        Assert.Equal(2, stateCommand.OccurrenceIndex);
+        Assert.True(stateCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiGetStateCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiGetStateCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"windowHandle\":\"0x1234\",\"name\":\"Remember me\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var stateCommand = Assert.IsType<UiGetStateCommand>(command);
+        Assert.Equal(0, stateCommand.OccurrenceIndex);
+        Assert.False(stateCommand.FocusWindow);
     }
 
     [Fact]

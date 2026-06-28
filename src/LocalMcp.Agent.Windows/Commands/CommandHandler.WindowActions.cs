@@ -73,6 +73,25 @@ public sealed partial class CommandHandler
         return WindowActionToJson(result);
     }
 
+    private async Task<CommandResult<JsonElement>> HandleUiGetStateAsync(
+        UiGetStateCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "UI state reading is not configured on this agent.");
+
+        var result = await _uiAutomationExecutor.GetStateAsync(
+            command.WindowHandle,
+            command.AutomationId,
+            command.Name,
+            command.ControlType,
+            command.OccurrenceIndex,
+            command.FocusWindow,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
+
     private async Task<CommandResult<JsonElement>> HandleUiGetValueAsync(
         UiGetValueCommand command,
         CancellationToken cancellationToken)
