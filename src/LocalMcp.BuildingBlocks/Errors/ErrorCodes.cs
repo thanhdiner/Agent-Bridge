@@ -28,8 +28,13 @@ public static class ErrorCodes
     public const string ProjectManifestInvalid = "PROJECT_MANIFEST_INVALID";
     public const string WindowNotFound = "WINDOW_NOT_FOUND";
     public const string WindowEnumerationFailed = "WINDOW_ENUMERATION_FAILED";
+    public const string WindowFocusFailed = "WINDOW_FOCUS_FAILED";
+    public const string WindowCloseFailed = "WINDOW_CLOSE_FAILED";
+    public const string WindowMoveFailed = "WINDOW_MOVE_FAILED";
     public const string UiAutomationUnavailable = "UI_AUTOMATION_UNAVAILABLE";
     public const string UiAutomationFailed = "UI_AUTOMATION_FAILED";
+    public const string UiElementNotFound = "UI_ELEMENT_NOT_FOUND";
+    public const string UiClickFailed = "UI_CLICK_FAILED";
 
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";
