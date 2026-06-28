@@ -35,6 +35,11 @@ public static class ErrorCodes
     public const string UiAutomationFailed = "UI_AUTOMATION_FAILED";
     public const string UiElementNotFound = "UI_ELEMENT_NOT_FOUND";
     public const string UiClickFailed = "UI_CLICK_FAILED";
+    public const string UiValueNotSupported = "UI_VALUE_NOT_SUPPORTED";
+    public const string UiValueReadFailed = "UI_VALUE_READ_FAILED";
+    public const string UiValueWriteFailed = "UI_VALUE_WRITE_FAILED";
+    public const string UiValueReadOnly = "UI_VALUE_READ_ONLY";
+    public const string UiValueVerificationFailed = "UI_VALUE_VERIFICATION_FAILED";
 
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";

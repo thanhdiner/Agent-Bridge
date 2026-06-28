@@ -73,6 +73,46 @@ public sealed partial class CommandHandler
         return WindowActionToJson(result);
     }
 
+    private async Task<CommandResult<JsonElement>> HandleUiGetValueAsync(
+        UiGetValueCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "UI value reading is not configured on this agent.");
+
+        var result = await _uiAutomationExecutor.GetValueAsync(
+            command.WindowHandle,
+            command.AutomationId,
+            command.Name,
+            command.ControlType,
+            command.OccurrenceIndex,
+            command.FocusWindow,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleUiSetValueAsync(
+        UiSetValueCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "UI value writing is not configured on this agent.");
+
+        var result = await _uiAutomationExecutor.SetValueAsync(
+            command.WindowHandle,
+            command.Value,
+            command.AutomationId,
+            command.Name,
+            command.ControlType,
+            command.OccurrenceIndex,
+            command.FocusWindow,
+            command.Append,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
+
     private static CommandResult<JsonElement> WindowActionToJson<T>(CommandResult<T> result)
     {
         if (!result.Success || result.Data is null)

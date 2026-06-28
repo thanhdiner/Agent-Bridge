@@ -132,6 +132,14 @@ public sealed partial class CommandHandler
         {
             return await HandleUiClickAsync(uiClickCommand, cancellationToken);
         }
+        else if (command is UiGetValueCommand uiGetValueCommand)
+        {
+            return await HandleUiGetValueAsync(uiGetValueCommand, cancellationToken);
+        }
+        else if (command is UiSetValueCommand uiSetValueCommand)
+        {
+            return await HandleUiSetValueAsync(uiSetValueCommand, cancellationToken);
+        }
         else if (command is UiTreeCommand uiTreeCommand)
         {
             return await HandleUiTreeAsync(uiTreeCommand, cancellationToken);

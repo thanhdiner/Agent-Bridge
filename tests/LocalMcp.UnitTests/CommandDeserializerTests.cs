@@ -60,6 +60,8 @@ public sealed class CommandDeserializerTests
                 nameof(WindowCloseCommand) => JsonSerializer.Deserialize<WindowCloseCommand>(payload, JsonOptions.Default),
                 nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(payload, JsonOptions.Default),
                 nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
+                nameof(UiGetValueCommand) => JsonSerializer.Deserialize<UiGetValueCommand>(payload, JsonOptions.Default),
+                nameof(UiSetValueCommand) => JsonSerializer.Deserialize<UiSetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(payload, JsonOptions.Default),
@@ -383,6 +385,72 @@ public sealed class CommandDeserializerTests
         var clickCommand = Assert.IsType<UiClickCommand>(command);
         Assert.Equal(0, clickCommand.OccurrenceIndex);
         Assert.True(clickCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiGetValueCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiGetValueCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"automationId\":\"searchBox\",\"name\":\"Search\",\"controlType\":\"Edit\",\"occurrenceIndex\":2,\"focusWindow\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var getCommand = Assert.IsType<UiGetValueCommand>(command);
+        Assert.Equal("searchBox", getCommand.AutomationId);
+        Assert.Equal("Search", getCommand.Name);
+        Assert.Equal("Edit", getCommand.ControlType);
+        Assert.Equal(2, getCommand.OccurrenceIndex);
+        Assert.True(getCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiGetValueCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiGetValueCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"name\":\"Search\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var getCommand = Assert.IsType<UiGetValueCommand>(command);
+        Assert.Equal(0, getCommand.OccurrenceIndex);
+        Assert.False(getCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiSetValueCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiSetValueCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"value\":\"hello\",\"automationId\":\"searchBox\",\"name\":\"Search\",\"controlType\":\"Edit\",\"occurrenceIndex\":2,\"focusWindow\":false,\"append\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var setCommand = Assert.IsType<UiSetValueCommand>(command);
+        Assert.Equal("hello", setCommand.Value);
+        Assert.Equal("searchBox", setCommand.AutomationId);
+        Assert.Equal("Search", setCommand.Name);
+        Assert.Equal("Edit", setCommand.ControlType);
+        Assert.Equal(2, setCommand.OccurrenceIndex);
+        Assert.False(setCommand.FocusWindow);
+        Assert.True(setCommand.Append);
+    }
+
+    [Fact]
+    public void Deserialize_UiSetValueCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiSetValueCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"value\":\"\",\"name\":\"Search\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var setCommand = Assert.IsType<UiSetValueCommand>(command);
+        Assert.Equal(string.Empty, setCommand.Value);
+        Assert.Equal(0, setCommand.OccurrenceIndex);
+        Assert.True(setCommand.FocusWindow);
+        Assert.False(setCommand.Append);
     }
 
     [Fact]
