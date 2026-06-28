@@ -22,7 +22,8 @@ public sealed partial class UiAutomationExecutor
         (UIA_PatternIds.UIA_WindowPatternId, "window"),
         (UIA_PatternIds.UIA_TransformPatternId, "transform"),
         (UIA_PatternIds.UIA_ScrollPatternId, "scroll"),
-        (UIA_PatternIds.UIA_ScrollItemPatternId, "scroll-item")
+        (UIA_PatternIds.UIA_ScrollItemPatternId, "scroll-item"),
+        (UIA_PatternIds.UIA_ExpandCollapsePatternId, "expand-collapse")
     ];
 
     public async Task<CommandResult<UiFindResult>> FindAsync(

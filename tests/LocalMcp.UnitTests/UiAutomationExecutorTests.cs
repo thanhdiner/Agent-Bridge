@@ -1,3 +1,4 @@
+using System.Reflection;
 using Interop.UIAutomationClient;
 using LocalMcp.Agent.Windows.UiAutomation;
 using LocalMcp.BuildingBlocks.Errors;
@@ -39,6 +40,21 @@ public sealed class UiAutomationExecutorTests
         Assert.Equal("Document", UiAutomationExecutor.GetControlTypeName(UIA_ControlTypeIds.UIA_DocumentControlTypeId));
         Assert.Equal("Unknown", UiAutomationExecutor.GetControlTypeName(0));
         Assert.Equal("Unknown(59999)", UiAutomationExecutor.GetControlTypeName(59999));
+    }
+
+    [Fact]
+    public void UiFindPatterns_IncludesExpandCollapse()
+    {
+        var field = typeof(UiAutomationExecutor).GetField(
+            "UiFindPatterns",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(field);
+        var patterns = Assert.IsType<(int PatternId, string Name)[]>(field.GetValue(null));
+        Assert.Contains(
+            patterns,
+            pattern => pattern.PatternId == UIA_PatternIds.UIA_ExpandCollapsePatternId
+                && pattern.Name == "expand-collapse");
     }
 
     [Fact]
@@ -368,6 +384,48 @@ public sealed class UiAutomationExecutorTests
         Assert.Equal(root.ControlType, match.ControlType);
         Assert.Equal(0, match.OccurrenceIndex);
         Assert.Equal(0, match.Depth);
+    }
+
+    [Fact]
+    public async Task FindAsync_OnInteractiveDesktop_ReportsExpandCollapsePatternWhenPresent()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var executor = new UiAutomationExecutor(NullLogger<UiAutomationExecutor>.Instance);
+        var listResult = await executor.ListWindowsAsync(
+            includeInvisible: false,
+            includeUntitled: false,
+            maxWindows: 100,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.True(listResult.Success, listResult.Error?.Message);
+        Assert.NotNull(listResult.Data);
+
+        foreach (var window in listResult.Data.Windows)
+        {
+            var findResult = await executor.FindAsync(
+                window.WindowHandle,
+                automationId: null,
+                nameContains: "Options",
+                controlType: "ComboBox",
+                maxDepth: 20,
+                maxResults: 20,
+                Guid.NewGuid(),
+                CancellationToken.None);
+
+            if (!findResult.Success || findResult.Data is null)
+                continue;
+
+            var match = findResult.Data.Matches.FirstOrDefault(item =>
+                string.Equals(item.Name, "Options", StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+                continue;
+
+            Assert.Contains("expand-collapse", match.Patterns);
+            return;
+        }
     }
 
     [Fact]

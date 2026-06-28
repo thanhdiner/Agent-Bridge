@@ -152,6 +152,10 @@ public sealed partial class CommandHandler
         {
             return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.UiSelectDispatch.HandleAsync(_uiAutomationExecutor, uiSelectCommand, cancellationToken));
         }
+        else if (command is UiExpandCollapseCommand uiExpandCollapseCommand)
+        {
+            return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.UiExpandCollapseDispatch.HandleAsync(_uiAutomationExecutor, uiExpandCollapseCommand, cancellationToken));
+        }
         else if (command is UiGetValueCommand uiGetValueCommand)
         {
             return await HandleUiGetValueAsync(uiGetValueCommand, cancellationToken);
