@@ -27,6 +27,15 @@ public static class AgentCommandTimeouts
         if (command is PowerShellStatusCommand or PowerShellCancelCommand)
             return TimeSpan.FromSeconds(10);
 
+        if (command is UiWaitCommand uiWaitCommand)
+        {
+            var requestedWaitMilliseconds = Math.Clamp(
+                uiWaitCommand.TimeoutMs,
+                1,
+                300_000);
+            return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 10_000);
+        }
+
         if (command is not ProjectCheckCommand projectCommand)
             return DefaultTimeout;
 

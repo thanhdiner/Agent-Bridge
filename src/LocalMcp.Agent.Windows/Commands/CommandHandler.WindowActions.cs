@@ -113,6 +113,28 @@ public sealed partial class CommandHandler
         return WindowActionToJson(result);
     }
 
+    private async Task<CommandResult<JsonElement>> HandleUiWaitAsync(
+        UiWaitCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "UI waiting is not configured on this agent.");
+
+        var result = await _uiAutomationExecutor.WaitAsync(
+            command.WindowHandle,
+            command.AutomationId,
+            command.Name,
+            command.ControlType,
+            command.OccurrenceIndex,
+            command.Condition,
+            command.ExpectedValue,
+            command.TimeoutMs,
+            command.PollIntervalMs,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
+
     private static CommandResult<JsonElement> WindowActionToJson<T>(CommandResult<T> result)
     {
         if (!result.Success || result.Data is null)

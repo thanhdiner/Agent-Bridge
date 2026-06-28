@@ -40,6 +40,7 @@ public static class ErrorCodes
     public const string UiValueWriteFailed = "UI_VALUE_WRITE_FAILED";
     public const string UiValueReadOnly = "UI_VALUE_READ_ONLY";
     public const string UiValueVerificationFailed = "UI_VALUE_VERIFICATION_FAILED";
+    public const string UiWaitTimeout = "UI_WAIT_TIMEOUT";
 
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";
