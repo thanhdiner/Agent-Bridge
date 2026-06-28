@@ -392,6 +392,37 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task DevExecuteScope_CallingWindowList_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("dev:execute");
+        var resp = await SendMcpRequestAsync(token, "tools/call", "window_list", new
+        {
+            deviceId = "missing-test-device",
+            includeInvisible = false,
+            includeUntitled = false,
+            maxWindows = 100
+        });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingWindowList_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(token, "tools/call", "window_list", new
+        {
+            deviceId = "missing-test-device"
+        });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task DevExecuteScope_CallingUiTree_ReachesDispatch_AgentOffline()
     {
         await StartServerAsync();

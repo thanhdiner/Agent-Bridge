@@ -76,4 +76,67 @@ public sealed class UiAutomationExecutorTests
         Assert.False(result.Success);
         Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(501)]
+    public async Task ListWindowsAsync_InvalidLimit_ReturnsInvalidRequest(int maxWindows)
+    {
+        var executor = new UiAutomationExecutor(NullLogger<UiAutomationExecutor>.Instance);
+
+        var result = await executor.ListWindowsAsync(
+            includeInvisible: false,
+            includeUntitled: false,
+            maxWindows,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
+    }
+
+    [Fact]
+    public async Task ListWindowsAsync_OnInteractiveDesktop_ChainsToUiTree()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var executor = new UiAutomationExecutor(NullLogger<UiAutomationExecutor>.Instance);
+        var listResult = await executor.ListWindowsAsync(
+            includeInvisible: false,
+            includeUntitled: false,
+            maxWindows: 100,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.True(listResult.Success, listResult.Error?.Message);
+        Assert.NotNull(listResult.Data);
+        if (listResult.Data.Count == 0)
+            return;
+
+        Assert.All(listResult.Data.Windows, window =>
+        {
+            Assert.True(window.IsVisible);
+            Assert.False(window.IsCloaked);
+            Assert.False(string.IsNullOrWhiteSpace(window.Title));
+            Assert.StartsWith("0x", window.WindowHandle, StringComparison.OrdinalIgnoreCase);
+            Assert.True(ulong.TryParse(window.WindowHandleDecimal, out _));
+        });
+
+        var target = listResult.Data.Windows.FirstOrDefault(window => window.IsForeground)
+            ?? listResult.Data.Windows[0];
+        var treeResult = await executor.GetTreeAsync(
+            target.WindowHandle,
+            maxDepth: 3,
+            maxNodes: 500,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.True(treeResult.Success, treeResult.Error?.Message);
+        Assert.NotNull(treeResult.Data);
+        Assert.Equal(target.WindowHandle, treeResult.Data.WindowHandle, ignoreCase: true);
+        Assert.Equal(target.ProcessId, treeResult.Data.ProcessId);
+
+        Console.WriteLine($"WINDOW_LIST_SMOKE count={listResult.Data.Count} handle={target.WindowHandle} title={target.Title} process={target.ProcessName} nodes={treeResult.Data.NodeCount}");
+    }
 }

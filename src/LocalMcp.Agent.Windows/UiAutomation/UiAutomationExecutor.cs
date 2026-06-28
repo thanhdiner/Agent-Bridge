@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace LocalMcp.Agent.Windows.UiAutomation;
 
-public sealed class UiAutomationExecutor : IUiAutomationExecutor
+public sealed partial class UiAutomationExecutor : IUiAutomationExecutor
 {
     private const int MaxValueCharacters = 4096;
     private readonly ILogger<UiAutomationExecutor> _logger;

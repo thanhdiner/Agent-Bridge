@@ -33,6 +33,62 @@ public sealed class UiAutomationTools
     }
 
     [McpServerTool(
+        Name = "window_list",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false),
+     Description("Lists bounded top-level Windows windows and returns title, process name, PID, native handle, class name, bounds, visibility, enabled, minimized, maximized, foreground, and cloaked states. Foreground window is returned first. Requires dev:execute scope.")]
+    public async Task<CallToolResult> ListWindowsAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Whether to include invisible or cloaked top-level windows (default: false)")] bool includeInvisible = false,
+        [Description("Whether to include windows with an empty title (default: false)")] bool includeUntitled = false,
+        [Description("Maximum windows returned (default: 100, hard limit: 500)")] int maxWindows = 100)
+    {
+        if (!await AuthorizeScopeAsync())
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (maxWindows is < 1 or > 500)
+            return CreateErrorResult("INVALID_REQUEST", "maxWindows must be between 1 and 500.");
+
+        var command = new WindowListCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            IncludeInvisible = includeInvisible,
+            IncludeUntitled = includeUntitled,
+            MaxWindows = maxWindows
+        };
+
+        try
+        {
+            var result = await _dispatcher.SendAsync<WindowListResult>(command, GetCancellationToken());
+            if (result.Success && result.Data is not null)
+            {
+                return new CallToolResult
+                {
+                    Content = [new TextContentBlock
+                    {
+                        Text = JsonSerializer.Serialize(result.Data, JsonOptions.Default)
+                    }],
+                    IsError = false
+                };
+            }
+
+            return CreateErrorResult(
+                result.Error?.Code ?? "INTERNAL_ERROR",
+                result.Error?.Message ?? "An unexpected error occurred during command execution.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error executing window_list for device {DeviceId}", deviceId);
+            return CreateErrorResult("INTERNAL_ERROR", "An unexpected error occurred on the gateway.");
+        }
+    }
+
+    [McpServerTool(
         Name = "ui_tree",
         ReadOnly = true,
         Destructive = false,
