@@ -104,6 +104,7 @@ public sealed partial class CommandHandler
             command.AppId,
             command.Arguments,
             command.Refresh,
+            command.FocusIfRunning,
             command.WaitForWindow,
             command.WindowTitleContains,
             command.TimeoutMs,

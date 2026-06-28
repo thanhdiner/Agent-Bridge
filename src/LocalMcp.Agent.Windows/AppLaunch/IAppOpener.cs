@@ -8,6 +8,7 @@ public interface IAppOpener
         string appId,
         IReadOnlyList<string> arguments,
         bool refresh,
+        bool focusIfRunning,
         bool waitForWindow,
         string? windowTitleContains,
         int timeoutMs,
