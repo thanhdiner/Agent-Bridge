@@ -36,6 +36,15 @@ public static class AgentCommandTimeouts
             return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 10_000);
         }
 
+        if (command is WindowWaitCommand windowWaitCommand)
+        {
+            var requestedWaitMilliseconds = Math.Clamp(
+                windowWaitCommand.TimeoutMs,
+                1,
+                300_000);
+            return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 10_000);
+        }
+
         if (command is not ProjectCheckCommand projectCommand)
             return DefaultTimeout;
 

@@ -76,6 +76,58 @@ public sealed partial class CommandHandler
         };
     }
 
+    private async Task<CommandResult<JsonElement>> HandleWindowWaitAsync(
+        WindowWaitCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(
+                    ErrorCodes.UiAutomationUnavailable,
+                    "Window waiting is not configured on this agent.")
+            };
+        }
+
+        var result = await _uiAutomationExecutor.WaitForWindowAsync(
+            command.WindowHandle,
+            command.ProcessId,
+            command.ProcessName,
+            command.ClassName,
+            command.Title,
+            command.TitleContains,
+            command.OccurrenceIndex,
+            command.Condition,
+            command.ExpectedTitle,
+            command.IncludeInvisible,
+            command.TimeoutMs,
+            command.PollIntervalMs,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
     private async Task<CommandResult<JsonElement>> HandleUiTreeAsync(
         UiTreeCommand command,
         CancellationToken cancellationToken)

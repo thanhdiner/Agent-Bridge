@@ -116,6 +116,10 @@ public sealed partial class CommandHandler
         {
             return await HandleWindowListAsync(windowListCommand, cancellationToken);
         }
+        else if (command is WindowWaitCommand windowWaitCommand)
+        {
+            return await HandleWindowWaitAsync(windowWaitCommand, cancellationToken);
+        }
         else if (command is WindowFocusCommand windowFocusCommand)
         {
             return await HandleWindowFocusAsync(windowFocusCommand, cancellationToken);

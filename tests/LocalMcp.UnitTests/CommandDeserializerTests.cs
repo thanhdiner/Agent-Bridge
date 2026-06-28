@@ -56,6 +56,7 @@ public sealed class CommandDeserializerTests
                 nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(payload, JsonOptions.Default),
                 nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
                 nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(payload, JsonOptions.Default),
+                nameof(WindowWaitCommand) => JsonSerializer.Deserialize<WindowWaitCommand>(payload, JsonOptions.Default),
                 nameof(WindowFocusCommand) => JsonSerializer.Deserialize<WindowFocusCommand>(payload, JsonOptions.Default),
                 nameof(WindowCloseCommand) => JsonSerializer.Deserialize<WindowCloseCommand>(payload, JsonOptions.Default),
                 nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(payload, JsonOptions.Default),
@@ -301,6 +302,49 @@ public sealed class CommandDeserializerTests
         Assert.False(listCommand.IncludeInvisible);
         Assert.False(listCommand.IncludeUntitled);
         Assert.Equal(100, listCommand.MaxWindows);
+    }
+
+    [Fact]
+    public void Deserialize_WindowWaitCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowWaitCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"processId\":42,\"processName\":\"notepad.exe\",\"className\":\"Notepad\",\"title\":\"Draft\",\"titleContains\":\"Dra\",\"occurrenceIndex\":2,\"condition\":\"title-contains\",\"expectedTitle\":\"Ready\",\"includeInvisible\":true,\"timeoutMs\":25000,\"pollIntervalMs\":125}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var waitCommand = Assert.IsType<WindowWaitCommand>(command);
+        Assert.Equal("0x1234", waitCommand.WindowHandle);
+        Assert.Equal(42, waitCommand.ProcessId);
+        Assert.Equal("notepad.exe", waitCommand.ProcessName);
+        Assert.Equal("Notepad", waitCommand.ClassName);
+        Assert.Equal("Draft", waitCommand.Title);
+        Assert.Equal("Dra", waitCommand.TitleContains);
+        Assert.Equal(2, waitCommand.OccurrenceIndex);
+        Assert.Equal(WindowWaitConditions.TitleContains, waitCommand.Condition);
+        Assert.Equal("Ready", waitCommand.ExpectedTitle);
+        Assert.True(waitCommand.IncludeInvisible);
+        Assert.Equal(25_000, waitCommand.TimeoutMs);
+        Assert.Equal(125, waitCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_WindowWaitCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowWaitCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"processName\":\"notepad\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var waitCommand = Assert.IsType<WindowWaitCommand>(command);
+        Assert.Equal("notepad", waitCommand.ProcessName);
+        Assert.Equal(0, waitCommand.OccurrenceIndex);
+        Assert.Equal(WindowWaitConditions.Exists, waitCommand.Condition);
+        Assert.Null(waitCommand.ExpectedTitle);
+        Assert.False(waitCommand.IncludeInvisible);
+        Assert.Equal(10_000, waitCommand.TimeoutMs);
+        Assert.Equal(200, waitCommand.PollIntervalMs);
     }
 
     [Fact]

@@ -11,6 +11,22 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<WindowWaitResult>> WaitForWindowAsync(
+        string? windowHandle,
+        int? processId,
+        string? processName,
+        string? className,
+        string? title,
+        string? titleContains,
+        int occurrenceIndex,
+        string condition,
+        string? expectedTitle,
+        bool includeInvisible,
+        int timeoutMs,
+        int pollIntervalMs,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<WindowFocusResult>> FocusWindowAsync(
         string windowHandle,
         Guid commandId,
