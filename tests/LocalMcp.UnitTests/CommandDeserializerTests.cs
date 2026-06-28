@@ -65,6 +65,7 @@ public sealed class CommandDeserializerTests
                 nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(payload, JsonOptions.Default),
                 nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
                 nameof(UiGetStateCommand) => JsonSerializer.Deserialize<UiGetStateCommand>(payload, JsonOptions.Default),
+                nameof(UiFocusCommand) => JsonSerializer.Deserialize<UiFocusCommand>(payload, JsonOptions.Default),
                 nameof(UiGetValueCommand) => JsonSerializer.Deserialize<UiGetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiSetValueCommand) => JsonSerializer.Deserialize<UiSetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiPressKeyCommand) => JsonSerializer.Deserialize<UiPressKeyCommand>(payload, JsonOptions.Default),
@@ -573,6 +574,28 @@ public sealed class CommandDeserializerTests
         Assert.False(stateCommand.FocusWindow);
     }
 
+    [Fact]
+    public void Deserialize_UiFocusCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiFocusCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"windowHandle\":\"0x1234\",\"automationId\":\"searchBox\",\"name\":\"Search\",\"controlType\":\"Edit\",\"occurrenceIndex\":2}}";
+        var (command, errorCode) = TryDeserialize(json);
+        Assert.Null(errorCode);
+        var focusCommand = Assert.IsType<UiFocusCommand>(command);
+        Assert.Equal("searchBox", focusCommand.AutomationId);
+        Assert.Equal("Search", focusCommand.Name);
+        Assert.Equal("Edit", focusCommand.ControlType);
+        Assert.Equal(2, focusCommand.OccurrenceIndex);
+    }
+    [Fact]
+    public void Deserialize_UiFocusCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiFocusCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"windowHandle\":\"0x1234\",\"name\":\"Search\"}}";
+        var (command, errorCode) = TryDeserialize(json);
+        Assert.Null(errorCode);
+        Assert.Equal(0, Assert.IsType<UiFocusCommand>(command).OccurrenceIndex);
+    }
     [Fact]
     public void Deserialize_UiGetValueCommand_WithAllFields_Succeeds()
     {

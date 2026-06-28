@@ -92,6 +92,22 @@ public sealed partial class CommandHandler
         return WindowActionToJson(result);
     }
 
+    private async Task<CommandResult<JsonElement>> HandleUiFocusAsync(
+        UiFocusCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "UI control focus is not configured on this agent.");
+        var result = await _uiAutomationExecutor.FocusControlAsync(
+            command.WindowHandle,
+            command.AutomationId,
+            command.Name,
+            command.ControlType,
+            command.OccurrenceIndex,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
     private async Task<CommandResult<JsonElement>> HandleUiGetValueAsync(
         UiGetValueCommand command,
         CancellationToken cancellationToken)

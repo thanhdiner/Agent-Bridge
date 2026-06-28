@@ -73,6 +73,9 @@ public static class ErrorCodes
     public const string UiValueReadOnly = "UI_VALUE_READ_ONLY";
     public const string UiValueVerificationFailed = "UI_VALUE_VERIFICATION_FAILED";
     public const string UiStateReadFailed = "UI_STATE_READ_FAILED";
+    public const string UiFocusNotSupported = "UI_FOCUS_NOT_SUPPORTED";
+    public const string UiFocusFailed = "UI_FOCUS_FAILED";
+    public const string UiFocusVerificationFailed = "UI_FOCUS_VERIFICATION_FAILED";
     public const string UiWaitTimeout = "UI_WAIT_TIMEOUT";
     public const string UiKeyboardInputFailed = "UI_KEYBOARD_INPUT_FAILED";
     public const string UiForegroundMismatch = "UI_FOREGROUND_MISMATCH";
