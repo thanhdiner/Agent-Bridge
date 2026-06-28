@@ -39,6 +39,15 @@ public static class AgentCommandTimeouts
             return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 15_000);
         }
 
+        if (command is AppCloseCommand appCloseCommand)
+        {
+            var requestedWaitMilliseconds = Math.Clamp(
+                appCloseCommand.TimeoutMs,
+                1,
+                300_000);
+            return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 10_000);
+        }
+
         if (command is AppLaunchCommand appLaunchCommand)
         {
             if (!appLaunchCommand.WaitForWindow)

@@ -16,6 +16,7 @@ public sealed partial class CommandHandler
     private readonly IAppLauncher? _appLauncher;
     private readonly IAppResolver? _appResolver;
     private readonly IAppOpener? _appOpener;
+    private readonly IAppCloser? _appCloser;
 
     internal CommandHandler(
         IPathPolicy pathPolicy,
@@ -27,6 +28,7 @@ public sealed partial class CommandHandler
         IAppLauncher appLauncher,
         IAppResolver appResolver,
         IAppOpener appOpener,
+        IAppCloser appCloser,
         ILogger<CommandHandler> logger)
         : this(
             pathPolicy,
@@ -40,6 +42,7 @@ public sealed partial class CommandHandler
         _appLauncher = appLauncher;
         _appResolver = appResolver;
         _appOpener = appOpener;
+        _appCloser = appCloser;
     }
 
     private async Task<CommandResult<JsonElement>> HandleAppResolveAsync(
@@ -109,6 +112,52 @@ public sealed partial class CommandHandler
             command.WindowTitleContains,
             command.TimeoutMs,
             command.PollIntervalMs,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleAppCloseAsync(
+        AppCloseCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_appCloser is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(
+                    ErrorCodes.AppCloseFailed,
+                    "Application closing is not configured on this agent.")
+            };
+        }
+
+        var result = await _appCloser.CloseAsync(
+            command.ProcessId,
+            command.ProcessName,
+            command.AllMatches,
+            command.Force,
+            command.EntireProcessTree,
+            command.TimeoutMs,
             command.CommandId,
             cancellationToken);
 

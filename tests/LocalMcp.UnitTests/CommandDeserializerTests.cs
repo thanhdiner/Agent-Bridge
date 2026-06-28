@@ -57,6 +57,7 @@ public sealed class CommandDeserializerTests
                 nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
                 nameof(AppResolveCommand) => JsonSerializer.Deserialize<AppResolveCommand>(payload, JsonOptions.Default),
                 nameof(AppOpenCommand) => JsonSerializer.Deserialize<AppOpenCommand>(payload, JsonOptions.Default),
+                nameof(AppCloseCommand) => JsonSerializer.Deserialize<AppCloseCommand>(payload, JsonOptions.Default),
                 nameof(AppLaunchCommand) => JsonSerializer.Deserialize<AppLaunchCommand>(payload, JsonOptions.Default),
                 nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(payload, JsonOptions.Default),
                 nameof(WindowWaitCommand) => JsonSerializer.Deserialize<WindowWaitCommand>(payload, JsonOptions.Default),
@@ -376,6 +377,42 @@ public sealed class CommandDeserializerTests
         Assert.Null(openCommand.WindowTitleContains);
         Assert.Equal(15_000, openCommand.TimeoutMs);
         Assert.Equal(100, openCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_AppCloseCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppCloseCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"processId\":42,\"processName\":\"notepad.exe\",\"allMatches\":true,\"force\":true,\"entireProcessTree\":true,\"timeoutMs\":25000}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var closeCommand = Assert.IsType<AppCloseCommand>(command);
+        Assert.Equal(42, closeCommand.ProcessId);
+        Assert.Equal("notepad.exe", closeCommand.ProcessName);
+        Assert.True(closeCommand.AllMatches);
+        Assert.True(closeCommand.Force);
+        Assert.True(closeCommand.EntireProcessTree);
+        Assert.Equal(25_000, closeCommand.TimeoutMs);
+    }
+
+    [Fact]
+    public void Deserialize_AppCloseCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppCloseCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"processName\":\"notepad\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var closeCommand = Assert.IsType<AppCloseCommand>(command);
+        Assert.Null(closeCommand.ProcessId);
+        Assert.Equal("notepad", closeCommand.ProcessName);
+        Assert.False(closeCommand.AllMatches);
+        Assert.False(closeCommand.Force);
+        Assert.False(closeCommand.EntireProcessTree);
+        Assert.Equal(5_000, closeCommand.TimeoutMs);
     }
 
     [Fact]
