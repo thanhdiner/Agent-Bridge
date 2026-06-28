@@ -30,10 +30,13 @@ internal sealed record OutputSnapshot(
     byte[] StderrBytes,
     long NextStdoutOffset,
     long NextStderrOffset,
-    bool Truncated);
+    bool Truncated,
+    bool InvalidUtf8 = false);
 
 internal class PowerShellSessionState : IDisposable
 {
+    private bool _invalidUtf8Detected;
+
     public Guid SessionId { get; }
     public string DeviceId { get; }
     public DateTimeOffset StartedAt { get; }
@@ -166,6 +169,7 @@ internal class PowerShellSessionState : IDisposable
                 }
                 else // OperationStatus.InvalidData
                 {
+                    _invalidUtf8Detected = true;
                     remaining = remaining.Slice(bytesConsumed); // Discard invalid bytes
                 }
             }
@@ -257,6 +261,7 @@ internal class PowerShellSessionState : IDisposable
                 }
                 else // OperationStatus.InvalidData
                 {
+                    _invalidUtf8Detected = true;
                     remaining = remaining.Slice(bytesConsumed); // Discard invalid bytes
                 }
             }
@@ -337,7 +342,8 @@ internal class PowerShellSessionState : IDisposable
                 StderrBytes: stderrSlice,
                 NextStdoutOffset: stdOffset + stdoutLen,
                 NextStderrOffset: errOffset + stderrLen,
-                Truncated: _truncated);
+                Truncated: _truncated,
+                InvalidUtf8: _invalidUtf8Detected);
         }
     }
 
@@ -433,6 +439,10 @@ internal class PowerShellSessionState : IDisposable
     {
         lock (_outputLock)
         {
+            if (_stdoutPending.Length > 0 || _stderrPending.Length > 0)
+            {
+                _invalidUtf8Detected = true;
+            }
             // Discard incomplete pending bytes at terminal transition
             _stdoutPending = Array.Empty<byte>();
             _stderrPending = Array.Empty<byte>();
@@ -511,6 +521,11 @@ internal class PowerShellSessionState : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
+        }
+
+        if (State == PowerShellSessionStateValue.Running)
+        {
+            TryTransition(PowerShellSessionStateValue.Cancelled);
         }
 
         try { Cts.Cancel(); } catch {}

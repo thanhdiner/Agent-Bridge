@@ -247,6 +247,7 @@ public sealed class PowerShellSessionTests
         // Verify pending bytes were discarded on transition, so we don't output corrupt half emoji
         var snap = state.ReadOutput(0, 0, 100);
         Assert.Empty(snap.StdoutBytes);
+        Assert.True(snap.InvalidUtf8);
     }
 
     [Fact]
@@ -261,6 +262,7 @@ public sealed class PowerShellSessionTests
         // Should discard the invalid 0x80 and only output 'A' (0x41)
         Assert.Single(snap.StdoutBytes);
         Assert.Equal(0x41, snap.StdoutBytes[0]);
+        Assert.True(snap.InvalidUtf8);
     }
 
     [Fact]
@@ -275,6 +277,7 @@ public sealed class PowerShellSessionTests
         // Should filter/discard the malformed sequence and only output 'B' (0x42)
         Assert.Single(snap.StdoutBytes);
         Assert.Equal(0x42, snap.StdoutBytes[0]);
+        Assert.True(snap.InvalidUtf8);
     }
 
     [Fact]
@@ -1440,46 +1443,94 @@ public sealed class PowerShellSessionTests
         }
     }
 
-    [Fact]
-    public void RegistryShutdown_FallbackForceKillBranch_Verified()
+    [PwshFact]
+    public async Task RegistryShutdown_FallbackForceKillBranch_Verified()
     {
+        var pwshPath = GetPwshPath();
+        Assert.NotNull(pwshPath);
+
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<PowerShellSessionRegistry>.Instance;
         var registry = new TestNonCancellableRegistry(logger);
         
-        string? error;
-        var session = registry.TryCreate("dev-1", 1024, out error);
-        Assert.NotNull(session);
-        var nonCancellableSession = (NonCancellableSessionState)session!;
-
-        // Start a real process tree that ignores cancellation
-        var startInfo = new ProcessStartInfo
+        try
         {
-            FileName = "pwsh.exe",
-            Arguments = "-NoProfile -Command \"Start-Process cmd -ArgumentList '/c timeout /t 60 /nobreak' -NoNewWindow; Start-Sleep -Seconds 60\"",
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        var proc = Process.Start(startInfo);
-        Assert.NotNull(proc);
-        session.Process = proc;
+            var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
+            var session = registry.TryCreate("dev-1", 4096, out _);
+            Assert.NotNull(session);
+            var nonCancellableSession = (NonCancellableSessionState)session!;
 
-        // Measure time
-        var sw = Stopwatch.StartNew();
-        
-        // This will cancel all, wait 5s, fail graceful, force kill
-        registry.CancelAll();
-        
-        sw.Stop();
+            // Start a process tree: pwsh starts cmd, which starts timeout, and sleeps
+            executor.StartBackground(
+                session!,
+                pwshPath!,
+                AppDomain.CurrentDomain.BaseDirectory,
+                "$p = Start-Process cmd.exe -ArgumentList '/c timeout 100' -PassThru -NoNewWindow; Write-Output \"PARENT_PID=$pid\"; Write-Output \"CHILD_PID=$($p.Id)\"; Start-Sleep -Seconds 100",
+                timeoutSeconds: 120);
 
-        // Verify force kill was initiated
-        Assert.True(nonCancellableSession.SignalCancelCalled);
-        
-        // Verify process tree was terminated
-        Assert.True(proc.HasExited);
-        
-        // Verify time elapsed was at least 4.9 seconds (due to 5s graceful wait)
-        Assert.True(sw.Elapsed.TotalSeconds >= 4.9, $"Should wait at least 4.9s, actually waited {sw.Elapsed.TotalSeconds}s");
-        
-        registry.Dispose();
+            int parentPid = 0;
+            int childPid = 0;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            while ((parentPid == 0 || childPid == 0) && !cts.IsCancellationRequested)
+            {
+                var snap = session.ReadOutput(0, 0, 4096);
+                var text = System.Text.Encoding.UTF8.GetString(snap.StdoutBytes);
+                var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith("PARENT_PID="))
+                    {
+                        parentPid = int.Parse(line.Substring("PARENT_PID=".Length));
+                    }
+                    if (line.StartsWith("CHILD_PID="))
+                    {
+                        childPid = int.Parse(line.Substring("CHILD_PID=".Length));
+                    }
+                }
+                await Task.Delay(100);
+            }
+
+            Assert.True(parentPid > 0, "Failed to get parent PID");
+            Assert.True(childPid > 0, "Failed to get child PID");
+
+            var parentProcess = session.Process;
+            Assert.NotNull(parentProcess);
+            Assert.Equal(parentPid, parentProcess.Id);
+            Assert.False(parentProcess.HasExited);
+
+            // Measure first CancelAll call
+            var sw = Stopwatch.StartNew();
+            registry.CancelAll();
+            sw.Stop();
+
+            // Assert first CancelAll time took >= 4.9s and < 7s
+            var firstElapsed = sw.Elapsed.TotalSeconds;
+            Assert.True(firstElapsed >= 4.9, $"Should wait at least 4.9s for graceful timeout, actually: {firstElapsed}s");
+            Assert.True(firstElapsed < 7.0, $"Should not exceed 7s, actually: {firstElapsed}s");
+
+            // Verify force kill was initiated
+            Assert.True(nonCancellableSession.SignalCancelCalled);
+
+            // Verify session transition to Cancelled
+            Assert.Equal(PowerShellSessionStateValue.Cancelled, session.State);
+
+            // Verify CompletionTask is completed
+            Assert.True(session.CompletionTask.IsCompleted);
+
+            // Verify parent and child processes has exited (PID lookup throws)
+            Assert.Throws<ArgumentException>(() => Process.GetProcessById(parentPid));
+            Assert.Throws<ArgumentException>(() => Process.GetProcessById(childPid));
+
+            // Measure second CancelAll call
+            var sw2 = Stopwatch.StartNew();
+            registry.CancelAll();
+            sw2.Stop();
+
+            // Assert second CancelAll completes almost instantly (idempotent, < 0.5s)
+            Assert.True(sw2.Elapsed.TotalSeconds < 0.5, $"Second CancelAll should be fast, took: {sw2.Elapsed.TotalSeconds}s");
+        }
+        finally
+        {
+            registry.Dispose();
+        }
     }
 }

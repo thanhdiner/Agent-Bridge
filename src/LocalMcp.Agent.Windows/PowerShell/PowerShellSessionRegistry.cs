@@ -147,48 +147,49 @@ internal class PowerShellSessionRegistry : IPowerShellSessionCoordinator, IDispo
                 // Force kill entire process tree for any session that hasn't finished
                 foreach (var session in runningSessions)
                 {
-                    var proc = session.Process;
-                    if (proc != null)
+                    if (session.State == PowerShellSessionStateValue.Running)
                     {
-                        try
+                        var proc = session.Process;
+                        if (proc != null)
                         {
-                            if (!proc.HasExited)
+                            try
                             {
-                                _logger.LogInformation("Force killing process tree for session {SessionId}.", session.SessionId);
-                                proc.Kill(entireProcessTree: true);
+                                if (!proc.HasExited)
+                                {
+                                    _logger.LogInformation("Force killing process tree for session {SessionId}.", session.SessionId);
+                                    proc.Kill(entireProcessTree: true);
+
+                                    // Wait up to 2 seconds for the process to exit
+                                    bool exited = proc.WaitForExit(TimeSpan.FromSeconds(2));
+                                    if (exited)
+                                    {
+                                        if (session.State == PowerShellSessionStateValue.Running)
+                                        {
+                                            session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        _logger.LogCritical("CRITICAL: Process tree for session {SessionId} (PID {Pid}) failed to exit after forced kill.", session.SessionId, proc.Id);
+                                    }
+                                }
+                                else
+                                {
+                                    if (session.State == PowerShellSessionStateValue.Running)
+                                    {
+                                        session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to force kill process tree for session {SessionId}.", session.SessionId);
                             }
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            _logger.LogWarning(ex, "Failed to force kill process tree for session {SessionId}.", session.SessionId);
+                            session.TryTransition(PowerShellSessionStateValue.Cancelled);
                         }
-                    }
-                }
-
-                // Final bounded wait for killed processes to exit
-                try
-                {
-                    Task.WhenAll(runningSessions.Select(s => s.CompletionTask)).Wait(TimeSpan.FromSeconds(2));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Timeout during final wait for forced kill processes.");
-                }
-
-                // Check and log critical if still running
-                foreach (var session in runningSessions)
-                {
-                    var proc = session.Process;
-                    if (proc != null)
-                    {
-                        try
-                        {
-                            if (!proc.HasExited)
-                            {
-                                _logger.LogCritical("CRITICAL: Process tree for session {SessionId} (PID {Pid}) failed to exit after forced kill.", session.SessionId, proc.Id);
-                            }
-                        }
-                        catch {}
                     }
                 }
             }

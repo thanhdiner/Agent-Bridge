@@ -1757,7 +1757,8 @@ public sealed partial class CommandHandler
             Stderr = utf8.GetString(snapshot.StderrBytes),
             NextStdoutOffset = snapshot.NextStdoutOffset,
             NextStderrOffset = snapshot.NextStderrOffset,
-            Truncated = snapshot.Truncated
+            Truncated = snapshot.Truncated,
+            InvalidUtf8 = snapshot.InvalidUtf8
         };
 
         return Task.FromResult(new CommandResult<JsonElement>
@@ -1831,7 +1832,8 @@ public sealed partial class CommandHandler
             Stderr = utf8.GetString(snapshot.StderrBytes),
             NextStdoutOffset = snapshot.NextStdoutOffset,
             NextStderrOffset = snapshot.NextStderrOffset,
-            Truncated = snapshot.Truncated
+            Truncated = snapshot.Truncated,
+            InvalidUtf8 = snapshot.InvalidUtf8
         };
 
         return new CommandResult<JsonElement>

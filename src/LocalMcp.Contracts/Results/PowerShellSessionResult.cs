@@ -35,4 +35,7 @@ public sealed record PowerShellSessionResult
 
     /// <summary>True when accumulated output exceeded MaxOutputBytes and was capped.</summary>
     public bool Truncated { get; init; }
+
+    /// <summary>True when invalid UTF-8 sequences were detected and discarded during execution or at terminal transition.</summary>
+    public bool InvalidUtf8 { get; init; }
 }
