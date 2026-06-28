@@ -41,6 +41,9 @@ public static class ErrorCodes
     public const string UiAutomationFailed = "UI_AUTOMATION_FAILED";
     public const string UiElementNotFound = "UI_ELEMENT_NOT_FOUND";
     public const string UiClickFailed = "UI_CLICK_FAILED";
+    public const string UiSelectionNotSupported = "UI_SELECTION_NOT_SUPPORTED";
+    public const string UiSelectionFailed = "UI_SELECTION_FAILED";
+    public const string UiSelectionVerificationFailed = "UI_SELECTION_VERIFICATION_FAILED";
     public const string UiValueNotSupported = "UI_VALUE_NOT_SUPPORTED";
     public const string UiValueReadFailed = "UI_VALUE_READ_FAILED";
     public const string UiValueWriteFailed = "UI_VALUE_WRITE_FAILED";
