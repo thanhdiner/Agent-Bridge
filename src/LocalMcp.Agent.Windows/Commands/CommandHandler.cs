@@ -180,6 +180,10 @@ public sealed partial class CommandHandler
         {
             return await HandleUiGetStateAsync(uiGetStateCommand, cancellationToken);
         }
+        else if (command is UiFocusCommand uiFocusCommand)
+        {
+            return await HandleUiFocusAsync(uiFocusCommand, cancellationToken);
+        }
         else if (command is UiGetValueCommand uiGetValueCommand)
         {
             return await HandleUiGetValueAsync(uiGetValueCommand, cancellationToken);
