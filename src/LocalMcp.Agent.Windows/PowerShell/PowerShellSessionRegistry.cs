@@ -1,0 +1,307 @@
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
+
+namespace LocalMcp.Agent.Windows.PowerShell;
+
+internal class PowerShellSessionRegistry : IPowerShellSessionCoordinator, IDisposable
+{
+    internal const int MaxConcurrentSessions = 16;
+    internal const int MaxHistoricalSessions = 100;
+    internal static readonly TimeSpan HistoryTtl = TimeSpan.FromMinutes(30);
+
+    private readonly ConcurrentDictionary<Guid, PowerShellSessionState> _sessions = new();
+    private readonly object _registryLock = new();
+    private readonly ILogger<PowerShellSessionRegistry> _logger;
+    private bool _disposed;
+    private long _creationSequenceCounter;
+
+    internal int Count
+    {
+        get
+        {
+            lock (_registryLock) return _sessions.Count;
+        }
+    }
+
+    internal IReadOnlyCollection<PowerShellSessionState> Sessions
+    {
+        get
+        {
+            lock (_registryLock) return _sessions.Values.ToArray();
+        }
+    }
+
+    public PowerShellSessionRegistry(ILogger<PowerShellSessionRegistry> logger)
+    {
+        _logger = logger;
+    }
+
+    public PowerShellSessionState? TryCreate(
+        string deviceId,
+        int maxOutputBytes,
+        out string? error)
+    {
+        lock (_registryLock)
+        {
+            if (_disposed)
+            {
+                error = "Registry is disposed.";
+                return null;
+            }
+
+            CleanupExpiredLocked();
+
+            var running = _sessions.Values.Count(s => s.State == PowerShellSessionStateValue.Running);
+            if (running >= MaxConcurrentSessions)
+            {
+                error = $"The agent has reached the maximum of {MaxConcurrentSessions} concurrent PowerShell sessions. Cancel or wait for existing sessions to complete.";
+                return null;
+            }
+
+            if (_sessions.Count >= MaxHistoricalSessions)
+            {
+                EvictOldestTerminatedLocked();
+                if (_sessions.Count >= MaxHistoricalSessions)
+                {
+                    error = $"The agent has reached the maximum of {MaxHistoricalSessions} total sessions. Wait for sessions to expire.";
+                    return null;
+                }
+            }
+
+            var session = CreateSessionState(deviceId, maxOutputBytes);
+            session.CreationSequence = System.Threading.Interlocked.Increment(ref _creationSequenceCounter);
+            _sessions[session.SessionId] = session;
+            error = null;
+            return session;
+        }
+    }
+
+    internal virtual PowerShellSessionState CreateSessionState(string deviceId, int maxOutputBytes)
+    {
+        return new PowerShellSessionState(Guid.NewGuid(), deviceId, maxOutputBytes);
+    }
+
+    public PowerShellSessionState? Get(Guid sessionId)
+    {
+        lock (_registryLock)
+        {
+            if (_disposed) return null;
+
+            if (_sessions.TryGetValue(sessionId, out var session))
+            {
+                if (session.IsExpired(DateTimeOffset.UtcNow))
+                {
+                    _sessions.TryRemove(sessionId, out _);
+                    session.Dispose();
+                    return null;
+                }
+                return session;
+            }
+            return null;
+        }
+    }
+
+    public bool Remove(Guid sessionId)
+    {
+        lock (_registryLock)
+        {
+            if (_sessions.TryRemove(sessionId, out var session))
+            {
+                session.Dispose();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public void CancelAll()
+    {
+        List<PowerShellSessionState> runningSessions;
+        lock (_registryLock)
+        {
+            _logger.LogInformation("Cancelling all active PowerShell sessions on shutdown.");
+            runningSessions = _sessions.Values.Where(s => s.State == PowerShellSessionStateValue.Running).ToList();
+            foreach (var session in runningSessions)
+            {
+                TryCancelSession(session);
+            }
+        }
+
+        // Bounded wait up to 5s for running sessions to cleanly stop
+        if (runningSessions.Count > 0)
+        {
+            bool cleanExit = false;
+            try
+            {
+                cleanExit = Task.WhenAll(runningSessions.Select(s => s.CompletionTask)).Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Timeout or error waiting for running sessions to stop during shutdown.");
+            }
+
+            if (!cleanExit)
+            {
+                _logger.LogWarning("Some sessions did not exit cleanly during shutdown. Force killing remaining processes.");
+
+                // Force kill entire process tree for any session that hasn't finished
+                foreach (var session in runningSessions)
+                {
+                    if (session.State == PowerShellSessionStateValue.Running)
+                    {
+                        session.OutputIncomplete = true;
+                        var proc = session.Process;
+                        if (proc != null)
+                        {
+                            try
+                            {
+                                if (!proc.HasExited)
+                                {
+                                    _logger.LogInformation("Force killing process tree for session {SessionId}.", session.SessionId);
+                                    proc.Kill(entireProcessTree: true);
+
+                                    // Wait up to 2 seconds for the process to exit
+                                    bool exited = proc.WaitForExit(TimeSpan.FromSeconds(2));
+                                    if (exited)
+                                    {
+                                        // Give the executor's drain tasks a short bounded time (e.g. 200ms) to drain and auto-transition
+                                        try
+                                        {
+                                            session.CompletionTask.Wait(TimeSpan.FromMilliseconds(200));
+                                        }
+                                        catch {}
+
+                                        if (!session.CompletionTask.IsCompleted)
+                                        {
+                                            session.OutputIncomplete = true;
+                                            session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        session.OutputIncomplete = true;
+                                        if (!session.CompletionTask.IsCompleted)
+                                        {
+                                            session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                                        }
+                                        _logger.LogCritical("CRITICAL: Process tree for session {SessionId} (PID {Pid}) failed to exit after forced kill.", session.SessionId, proc.Id);
+                                    }
+                                }
+                                else
+                                {
+                                    // Process already exited, but completion task might be draining
+                                    try
+                                    {
+                                        session.CompletionTask.Wait(TimeSpan.FromMilliseconds(200));
+                                    }
+                                    catch {}
+
+                                    if (!session.CompletionTask.IsCompleted)
+                                    {
+                                        session.OutputIncomplete = true;
+                                        session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to force kill process tree for session {SessionId}.", session.SessionId);
+                            }
+                        }
+                        else
+                        {
+                            if (!session.CompletionTask.IsCompleted)
+                            {
+                                session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public void Cancel(PowerShellSessionState session)
+    {
+        lock (_registryLock)
+        {
+            if (session.State == PowerShellSessionStateValue.Running)
+            {
+                TryCancelSession(session);
+            }
+        }
+    }
+
+    private static void TryCancelSession(PowerShellSessionState session)
+    {
+        session.SignalCancel();
+    }
+
+    public void OnSessionTerminated(PowerShellSessionState session)
+    {
+        lock (_registryLock)
+        {
+            if (_disposed) return;
+            session.SetExpiry(DateTimeOffset.UtcNow.Add(HistoryTtl));
+            _logger.LogDebug(
+                "Session {SessionId} terminated with state {State}; expires at {Expiry}",
+                session.SessionId,
+                session.State,
+                DateTimeOffset.UtcNow.Add(HistoryTtl));
+        }
+    }
+
+    private void CleanupExpiredLocked()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var (id, session) in _sessions)
+        {
+            if (session.IsExpired(now))
+            {
+                _sessions.TryRemove(id, out _);
+                session.Dispose();
+                _logger.LogDebug("Removed expired session {SessionId}", id);
+            }
+        }
+    }
+
+    private void EvictOldestTerminatedLocked()
+    {
+        var terminated = _sessions.Values
+            .Where(s => s.State != PowerShellSessionStateValue.Running)
+            .OrderBy(s => s.CreationSequence)
+            .FirstOrDefault();
+
+        if (terminated is not null)
+        {
+            _sessions.TryRemove(terminated.SessionId, out _);
+            terminated.Dispose();
+        }
+    }
+
+    public void Dispose()
+    {
+        bool performCleanup = false;
+        lock (_registryLock)
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                performCleanup = true;
+            }
+        }
+
+        if (performCleanup)
+        {
+            CancelAll();
+            lock (_registryLock)
+            {
+                foreach (var session in _sessions.Values)
+                {
+                    session.Dispose();
+                }
+                _sessions.Clear();
+            }
+        }
+    }
+}

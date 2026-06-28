@@ -9,6 +9,70 @@ namespace LocalMcp.Agent.Windows.FileSystem;
 
 public sealed partial class FileSystemExecutor
 {
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr FindFirstFile(string lpFileName, out WIN32_FIND_DATA lpFindFileData);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool FindClose(IntPtr hFindFile);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private struct WIN32_FIND_DATA
+    {
+        public uint dwFileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME ftCreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME ftLastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME ftLastWriteTime;
+        public uint nFileSizeHigh;
+        public uint nFileSizeLow;
+        public uint dwReserved0;
+        public uint dwReserved1;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string cFileName;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 14)]
+        public string cAlternateFileName;
+    }
+
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+
+    internal static Func<string, FileAttributes?>? FileAttributesOverrideForTest { get; set; }
+    internal static Func<string, uint?>? ReparseTagOverrideForTest { get; set; }
+
+    private static bool IsWindowsAppExecutionAlias(string path)
+    {
+        if (ReparseTagOverrideForTest != null)
+        {
+            var tag = ReparseTagOverrideForTest(path);
+            if (tag != null)
+            {
+                const uint IO_REPARSE_TAG_APPEXECLINK = 0x8000001B;
+                return tag.Value == IO_REPARSE_TAG_APPEXECLINK;
+            }
+        }
+
+        if (!OperatingSystem.IsWindows())
+            return false;
+
+        var hFind = FindFirstFile(path, out var findData);
+        if (hFind == INVALID_HANDLE_VALUE)
+            return false;
+
+        try
+        {
+            const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x400;
+            const uint IO_REPARSE_TAG_APPEXECLINK = 0x8000001B;
+
+            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+            {
+                return findData.dwReserved0 == IO_REPARSE_TAG_APPEXECLINK;
+            }
+            return false;
+        }
+        finally
+        {
+            FindClose(hFind);
+        }
+    }
+
     private const int MaxProjectManifestBytes = 1_048_576;
 
     private static readonly Encoding ProjectOutputEncoding = new UTF8Encoding(
@@ -1106,7 +1170,7 @@ public sealed partial class FileSystemExecutor
         return null;
     }
 
-    private static string? ResolveToolExecutable(
+    internal static string? ResolveToolExecutable(
         string executable,
         string workingDirectory)
     {
@@ -1154,9 +1218,37 @@ public sealed partial class FileSystemExecutor
                 if (IsPathWithinRoot(workingDirectory, candidate))
                     continue;
 
-                var info = new FileInfo(candidate);
-                if (info.Exists && !info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                    return candidate;
+                FileAttributes? attrs = null;
+                bool exists = false;
+                if (FileAttributesOverrideForTest != null)
+                {
+                    attrs = FileAttributesOverrideForTest(candidate);
+                    exists = attrs != null;
+                }
+                else
+                {
+                    var info = new FileInfo(candidate);
+                    if (info.Exists)
+                    {
+                        attrs = info.Attributes;
+                        exists = true;
+                    }
+                }
+
+                if (exists && attrs.HasValue)
+                {
+                    if (attrs.Value.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        if (!attrs.Value.HasFlag(FileAttributes.Directory) && IsWindowsAppExecutionAlias(candidate))
+                        {
+                            return candidate;
+                        }
+                    }
+                    else
+                    {
+                        return candidate;
+                    }
+                }
             }
             catch (Exception ex) when (
                 ex is ArgumentException or

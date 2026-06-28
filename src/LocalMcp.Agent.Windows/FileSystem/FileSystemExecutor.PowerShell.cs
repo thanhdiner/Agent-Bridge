@@ -822,7 +822,7 @@ public sealed partial class FileSystemExecutor
             truncated);
     }
 
-    private static bool IsCurrentProcessElevated()
+    internal static bool IsCurrentProcessElevated()
     {
         if (!OperatingSystem.IsWindows())
             return true;

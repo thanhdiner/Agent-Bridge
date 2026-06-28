@@ -4,19 +4,23 @@ using LocalMcp.Contracts.Commands;
 using LocalMcp.Contracts.Results;
 using LocalMcp.Agent.Windows.Security;
 using LocalMcp.Agent.Windows.FileSystem;
+using LocalMcp.Agent.Windows.PowerShell;
 using LocalMcp.BuildingBlocks.Errors;
 using Microsoft.Extensions.Logging;
 
 namespace LocalMcp.Agent.Windows.Commands;
 
-public sealed class CommandHandler
+public sealed partial class CommandHandler
 {
     private readonly IPathPolicy _pathPolicy;
     private readonly IFileSystemExecutor _fileSystemExecutor;
     private readonly IDirectoryCopyExecutor _directoryCopyExecutor;
+    private readonly PowerShellSessionRegistry? _sessionRegistry;
+    private readonly PowerShellSessionExecutor? _sessionExecutor;
     private readonly ILogger<CommandHandler> _logger;
 
     internal Func<string, Task>? OnBeforeMultiFileEditHook { get; set; }
+    internal Action<PowerShellSessionState?>? OnSessionCreatedForTest { get; set; }
 
     public CommandHandler(
         IPathPolicy pathPolicy,
@@ -39,6 +43,22 @@ public sealed class CommandHandler
         _pathPolicy = pathPolicy;
         _fileSystemExecutor = fileSystemExecutor;
         _directoryCopyExecutor = directoryCopyExecutor;
+        _logger = logger;
+    }
+
+    internal CommandHandler(
+        IPathPolicy pathPolicy,
+        IFileSystemExecutor fileSystemExecutor,
+        IDirectoryCopyExecutor directoryCopyExecutor,
+        PowerShellSessionRegistry sessionRegistry,
+        PowerShellSessionExecutor sessionExecutor,
+        ILogger<CommandHandler> logger)
+    {
+        _pathPolicy = pathPolicy;
+        _fileSystemExecutor = fileSystemExecutor;
+        _directoryCopyExecutor = directoryCopyExecutor;
+        _sessionRegistry = sessionRegistry;
+        _sessionExecutor = sessionExecutor;
         _logger = logger;
     }
 
@@ -93,6 +113,18 @@ public sealed class CommandHandler
             return await HandlePowerShellExecuteAsync(
                 powerShellExecuteCommand,
                 cancellationToken);
+        }
+        else if (command is PowerShellStartCommand psStartCommand)
+        {
+            return await HandlePowerShellStartAsync(psStartCommand, cancellationToken);
+        }
+        else if (command is PowerShellStatusCommand psStatusCommand)
+        {
+            return await HandlePowerShellStatusAsync(psStatusCommand, cancellationToken);
+        }
+        else if (command is PowerShellCancelCommand psCancelCommand)
+        {
+            return await HandlePowerShellCancelAsync(psCancelCommand, cancellationToken);
         }
         else if (command is TreeCommand treeCommand)
         {
@@ -1568,3 +1600,259 @@ public sealed class CommandHandler
         };
     }
 }
+
+// ── PowerShell session handlers ────────────────────────────────────────────────
+
+public sealed partial class CommandHandler
+{
+    private static readonly string[] SessionStateStrings =
+    [
+        "running",    // PowerShellSessionStateValue.Running   = 0
+        "completed",  // PowerShellSessionStateValue.Completed = 1
+        "failed",     // PowerShellSessionStateValue.Failed    = 2
+        "cancelled",  // PowerShellSessionStateValue.Cancelled = 3
+        "timedOut"    // PowerShellSessionStateValue.TimedOut  = 4
+    ];
+
+    private Task<CommandResult<JsonElement>> HandlePowerShellStartAsync(
+        PowerShellStartCommand command,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_sessionRegistry is null || _sessionExecutor is null)
+        {
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InternalError,
+                "PowerShell session infrastructure is not available."));
+        }
+
+        // ── Path policy ────────────────────────────────────────────────────
+        var error = _pathPolicy.AuthorizeCreateDirectory(
+            command.WorkingDirectory,
+            out var normalizedPath,
+            recursive: false);
+        if (error is not null)
+            return Task.FromResult(SessionError(command.CommandId, error.Code, error.Message));
+
+        if (!Directory.Exists(normalizedPath))
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.DirectoryNotFound,
+                "The PowerShell working directory was not found."));
+
+        // ── Guardrails (same as powershell_exec) ──────────────────────────
+        if (string.IsNullOrWhiteSpace(command.Script) ||
+            command.Script.Length > 65_536 ||
+            command.Script.Contains('\0'))
+        {
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "script must be non-empty, contain no NUL characters, and be at most 65536 characters."));
+        }
+
+        if (command.TimeoutSeconds is < 1 or > 900)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "timeoutSeconds must be between 1 and 900."));
+
+        if (command.MaxOutputBytes is < 1024 or > 4_194_304)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "maxOutputBytes must be between 1024 and 4194304."));
+
+        if (command.Elevated && !command.Visible)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "elevated=true is only supported for visible PowerShell execution."));
+
+        // Hidden sessions cannot accept interactive input — elevated not supported
+        if (command.Elevated)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "elevated is not supported for async PowerShell sessions."));
+
+        if (FileSystem.FileSystemExecutor.IsCurrentProcessElevated())
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.AccessDenied,
+                "PowerShell execution is disabled while the Windows agent is running elevated."));
+
+        var executable = FileSystem.FileSystemExecutor.ResolveToolExecutable("pwsh.exe", normalizedPath);
+        if (executable is null)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "PowerShell 7 (pwsh.exe) is not available on the Windows agent."));
+
+        // ── Session registry ───────────────────────────────────────────────
+        var session = _sessionRegistry.TryCreate(
+            command.DeviceId,
+            command.MaxOutputBytes,
+            out var registryError);
+
+        if (session is null)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest, registryError!));
+
+        OnSessionCreatedForTest?.Invoke(session);
+
+        // Check cancellationToken again before starting the background process
+        if (cancellationToken.IsCancellationRequested)
+        {
+            _sessionRegistry.Remove(session.SessionId);
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        // ── Launch async (returns immediately) ────────────────────────────
+        _sessionExecutor.StartBackground(
+            session,
+            executable,
+            normalizedPath,
+            command.Script,
+            command.TimeoutSeconds);
+
+        var result = new PowerShellStartResult
+        {
+            SessionId = session.SessionId,
+            State = "running",
+            StartedAt = session.StartedAt
+        };
+
+        return Task.FromResult(new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(result, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        });
+    }
+
+    private Task<CommandResult<JsonElement>> HandlePowerShellStatusAsync(
+        PowerShellStatusCommand command,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_sessionRegistry is null)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InternalError,
+                "PowerShell session infrastructure is not available."));
+
+        var session = _sessionRegistry.Get(command.SessionId);
+        if (session is null)
+            return Task.FromResult(SessionError(command.CommandId, "SESSION_NOT_FOUND",
+                $"Session {command.SessionId} was not found."));
+
+        // Enforce device isolation: caller must own this session
+        if (!string.Equals(session.DeviceId, command.DeviceId, StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(SessionError(command.CommandId, "SESSION_NOT_FOUND",
+                $"Session {command.SessionId} was not found."));
+
+        if (command.StdoutOffset < 0 || command.StderrOffset < 0)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "stdoutOffset and stderrOffset must be >= 0."));
+
+        if (command.MaxOutputBytes is < 4 or > 262_144)
+            return Task.FromResult(SessionError(command.CommandId, ErrorCodes.InvalidRequest,
+                "maxOutputBytes must be between 4 and 262144."));
+
+        var snapshot = session.ReadOutput(command.StdoutOffset, command.StderrOffset, command.MaxOutputBytes);
+        var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+        var stateSnapshot = session.GetSnapshot();
+
+        var result = new PowerShellSessionResult
+        {
+            SessionId = session.SessionId,
+            State = SessionStateStrings[(int)stateSnapshot.State],
+            StartedAt = session.StartedAt,
+            CompletedAt = stateSnapshot.CompletedAt,
+            ExitCode = stateSnapshot.ExitCode,
+            Stdout = utf8.GetString(snapshot.StdoutBytes),
+            Stderr = utf8.GetString(snapshot.StderrBytes),
+            NextStdoutOffset = snapshot.NextStdoutOffset,
+            NextStderrOffset = snapshot.NextStderrOffset,
+            Truncated = snapshot.Truncated,
+            InvalidUtf8 = snapshot.InvalidUtf8,
+            OutputIncomplete = snapshot.OutputIncomplete
+        };
+
+        return Task.FromResult(new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(result, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        });
+    }
+
+    private async Task<CommandResult<JsonElement>> HandlePowerShellCancelAsync(
+        PowerShellCancelCommand command,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_sessionRegistry is null)
+            return SessionError(command.CommandId, ErrorCodes.InternalError,
+                "PowerShell session infrastructure is not available.");
+
+        var session = _sessionRegistry.Get(command.SessionId);
+        if (session is null)
+            return SessionError(command.CommandId, "SESSION_NOT_FOUND",
+                $"Session {command.SessionId} was not found.");
+
+        // Enforce device isolation
+        if (!string.Equals(session.DeviceId, command.DeviceId, StringComparison.OrdinalIgnoreCase))
+            return SessionError(command.CommandId, "SESSION_NOT_FOUND",
+                $"Session {command.SessionId} was not found.");
+
+        var initialSnapshot = session.GetSnapshot();
+        if (initialSnapshot.State == PowerShellSessionStateValue.Running)
+        {
+            _sessionRegistry.Cancel(session);
+
+            // Bounded wait suitable for AgentCommandTimeouts (up to 5s)
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                await session.CompletionTask.WaitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout elapsed
+            }
+        }
+
+        var finalSnapshot = session.GetSnapshot();
+        if (finalSnapshot.State == PowerShellSessionStateValue.Running)
+        {
+            return SessionError(command.CommandId, "CANCEL_TIMEOUT",
+                "The PowerShell session cancellation timed out.");
+        }
+
+        return BuildSessionResult(command.CommandId, session);
+    }
+
+    private CommandResult<JsonElement> BuildSessionResult(Guid commandId, PowerShellSessionState session)
+    {
+        var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+        var snapshot = session.ReadOutput(0, 0, 262_144);
+        var stateSnapshot = session.GetSnapshot();
+        var result = new PowerShellSessionResult
+        {
+            SessionId = session.SessionId,
+            State = SessionStateStrings[(int)stateSnapshot.State],
+            StartedAt = session.StartedAt,
+            CompletedAt = stateSnapshot.CompletedAt,
+            ExitCode = stateSnapshot.ExitCode,
+            Stdout = utf8.GetString(snapshot.StdoutBytes),
+            Stderr = utf8.GetString(snapshot.StderrBytes),
+            NextStdoutOffset = snapshot.NextStdoutOffset,
+            NextStderrOffset = snapshot.NextStderrOffset,
+            Truncated = snapshot.Truncated,
+            InvalidUtf8 = snapshot.InvalidUtf8,
+            OutputIncomplete = snapshot.OutputIncomplete
+        };
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = commandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(result, LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private static CommandResult<JsonElement> SessionError(Guid commandId, string code, string message) =>
+        new()
+        {
+            CommandId = commandId,
+            Success = false,
+            Error = new LocalMcp.Contracts.Results.CommandError(code, message),
+            Data = JsonSerializer.SerializeToElement<object?>(null)
+        };
+}
+
