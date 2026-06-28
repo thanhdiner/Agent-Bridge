@@ -67,6 +67,16 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<UiGetStateResult>> GetStateAsync(
+        string windowHandle,
+        string? automationId,
+        string? name,
+        string? controlType,
+        int occurrenceIndex,
+        bool focusWindow,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<UiSetValueResult>> SetValueAsync(
         string windowHandle,
         string value,
