@@ -113,6 +113,46 @@ public sealed partial class CommandHandler
         return WindowActionToJson(result);
     }
 
+    private async Task<CommandResult<JsonElement>> HandleUiPressKeyAsync(
+        UiPressKeyCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "Keyboard input is not configured on this agent.");
+
+        var result = await _uiAutomationExecutor.PressKeyAsync(
+            command.WindowHandle,
+            command.Keys,
+            command.AutomationId,
+            command.Name,
+            command.ControlType,
+            command.OccurrenceIndex,
+            command.FocusWindow,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleUiTypeTextAsync(
+        UiTypeTextCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "Text input is not configured on this agent.");
+
+        var result = await _uiAutomationExecutor.TypeTextAsync(
+            command.WindowHandle,
+            command.Text,
+            command.AutomationId,
+            command.Name,
+            command.ControlType,
+            command.OccurrenceIndex,
+            command.FocusWindow,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
+
     private async Task<CommandResult<JsonElement>> HandleUiWaitAsync(
         UiWaitCommand command,
         CancellationToken cancellationToken)

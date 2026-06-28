@@ -82,6 +82,134 @@ public sealed class UiAutomationExecutorTests
     }
 
     [Theory]
+    [InlineData("ctrl+l", "CTRL+L", 1)]
+    [InlineData("Shift+F12", "SHIFT+F12", 1)]
+    [InlineData("Alt+Left", "ALT+LEFT", 1)]
+    [InlineData("Enter", "ENTER", 0)]
+    public void TryParseKeyChord_AllowedValues_AreNormalized(
+        string value,
+        string expected,
+        int modifierCount)
+    {
+        var success = UiAutomationExecutor.TryParseKeyChord(
+            value,
+            out var chord,
+            out var error);
+
+        Assert.True(success, error);
+        Assert.Equal(expected, chord.Normalized);
+        Assert.Equal(modifierCount, chord.Modifiers.Length);
+        Assert.NotEqual(0, chord.Key);
+    }
+
+    [Theory]
+    [InlineData("Win+R")]
+    [InlineData("Alt+F4")]
+    [InlineData("Ctrl+Alt+Delete")]
+    [InlineData("Alt+Tab")]
+    [InlineData("Ctrl+Shift")]
+    [InlineData("Ctrl+F+S")]
+    [InlineData("VolumeUp")]
+    public void TryParseKeyChord_BlockedOrUnsupportedValues_Fail(string value)
+    {
+        var success = UiAutomationExecutor.TryParseKeyChord(
+            value,
+            out _,
+            out var error);
+
+        Assert.False(success);
+        Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Theory]
+    [InlineData(null, null, null, 0, true, false)]
+    [InlineData(null, null, "Edit", 0, false, false)]
+    [InlineData(null, null, null, 1, false, false)]
+    [InlineData(null, "Editor", "Document", 0, true, true)]
+    [InlineData("editor", null, "Document", 2, true, true)]
+    public void ValidateKeyboardSelector_EnforcesSelectorRules(
+        string? automationId,
+        string? name,
+        string? controlType,
+        int occurrenceIndex,
+        bool requireSelector,
+        bool expected)
+    {
+        var success = UiAutomationExecutor.ValidateKeyboardSelector(
+            automationId,
+            name,
+            controlType,
+            occurrenceIndex,
+            requireSelector,
+            out var error);
+
+        Assert.Equal(expected, success);
+        Assert.Equal(expected, string.IsNullOrEmpty(error));
+    }
+
+    [Fact]
+    public async Task PressKeyAsync_BlockedChord_ReturnsInvalidRequest()
+    {
+        var executor = new UiAutomationExecutor(NullLogger<UiAutomationExecutor>.Instance);
+
+        var result = await executor.PressKeyAsync(
+            "0x1234",
+            "Alt+F4",
+            automationId: null,
+            name: null,
+            controlType: null,
+            occurrenceIndex: 0,
+            focusWindow: true,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\0")]
+    public async Task TypeTextAsync_InvalidText_ReturnsInvalidRequest(string text)
+    {
+        var executor = new UiAutomationExecutor(NullLogger<UiAutomationExecutor>.Instance);
+
+        var result = await executor.TypeTextAsync(
+            "0x1234",
+            text,
+            automationId: null,
+            name: "Editor",
+            controlType: "Document",
+            occurrenceIndex: 0,
+            focusWindow: true,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
+    }
+
+    [Fact]
+    public async Task TypeTextAsync_WithoutSelector_ReturnsInvalidRequest()
+    {
+        var executor = new UiAutomationExecutor(NullLogger<UiAutomationExecutor>.Instance);
+
+        var result = await executor.TypeTextAsync(
+            "0x1234",
+            "hello",
+            automationId: null,
+            name: null,
+            controlType: null,
+            occurrenceIndex: 0,
+            focusWindow: true,
+            Guid.NewGuid(),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCodes.InvalidRequest, result.Error?.Code);
+    }
+
+    [Theory]
     [InlineData(-1, 1)]
     [InlineData(21, 1)]
     [InlineData(1, 0)]
