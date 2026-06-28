@@ -88,7 +88,7 @@ public sealed partial class UiAutomationExecutor
             walker = automation.ControlViewWalker;
             var seen = 0;
             var visited = 0;
-            match = FindClickTarget(
+            match = FindTarget(
                 root,
                 walker,
                 automationId,
@@ -137,7 +137,7 @@ public sealed partial class UiAutomationExecutor
     }
 
     [SupportedOSPlatform("windows")]
-    private static IUIAutomationElement? FindClickTarget(
+    private static IUIAutomationElement? FindTarget(
         IUIAutomationElement parent,
         IUIAutomationTreeWalker walker,
         string? automationId,
@@ -148,7 +148,7 @@ public sealed partial class UiAutomationExecutor
         ref int visited,
         CancellationToken cancellationToken)
     {
-        if (MatchesClickSelector(parent, automationId, name, controlType))
+        if (MatchesSelector(parent, automationId, name, controlType))
         {
             if (seen == occurrenceIndex)
                 return parent;
@@ -178,7 +178,7 @@ public sealed partial class UiAutomationExecutor
             var transfer = false;
             try
             {
-                var result = FindClickTarget(
+                var result = FindTarget(
                     current,
                     walker,
                     automationId,
@@ -213,7 +213,7 @@ public sealed partial class UiAutomationExecutor
     }
 
     [SupportedOSPlatform("windows")]
-    private static bool MatchesClickSelector(
+    private static bool MatchesSelector(
         IUIAutomationElement element,
         string? automationId,
         string? name,

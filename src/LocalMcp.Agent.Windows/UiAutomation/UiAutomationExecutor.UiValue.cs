@@ -149,7 +149,7 @@ public sealed partial class UiAutomationExecutor
             walker = automation.ControlViewWalker;
             var seen = 0;
             var visited = 0;
-            match = FindClickTarget(
+            match = FindTarget(
                 root,
                 walker,
                 automationId,
@@ -231,7 +231,7 @@ public sealed partial class UiAutomationExecutor
             walker = automation.ControlViewWalker;
             var seen = 0;
             var visited = 0;
-            match = FindClickTarget(
+            match = FindTarget(
                 root,
                 walker,
                 automationId,

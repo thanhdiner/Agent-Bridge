@@ -62,6 +62,7 @@ public sealed class CommandDeserializerTests
                 nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
                 nameof(UiGetValueCommand) => JsonSerializer.Deserialize<UiGetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiSetValueCommand) => JsonSerializer.Deserialize<UiSetValueCommand>(payload, JsonOptions.Default),
+                nameof(UiWaitCommand) => JsonSerializer.Deserialize<UiWaitCommand>(payload, JsonOptions.Default),
                 nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(payload, JsonOptions.Default),
@@ -451,6 +452,44 @@ public sealed class CommandDeserializerTests
         Assert.Equal(0, setCommand.OccurrenceIndex);
         Assert.True(setCommand.FocusWindow);
         Assert.False(setCommand.Append);
+    }
+
+    [Fact]
+    public void Deserialize_UiWaitCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiWaitCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"automationId\":\"status\",\"name\":\"Status\",\"controlType\":\"Text\",\"occurrenceIndex\":2,\"condition\":\"value-contains\",\"expectedValue\":\"Ready\",\"timeoutMs\":25000,\"pollIntervalMs\":125}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var waitCommand = Assert.IsType<UiWaitCommand>(command);
+        Assert.Equal("0x1234", waitCommand.WindowHandle);
+        Assert.Equal("status", waitCommand.AutomationId);
+        Assert.Equal("Status", waitCommand.Name);
+        Assert.Equal("Text", waitCommand.ControlType);
+        Assert.Equal(2, waitCommand.OccurrenceIndex);
+        Assert.Equal(UiWaitConditions.ValueContains, waitCommand.Condition);
+        Assert.Equal("Ready", waitCommand.ExpectedValue);
+        Assert.Equal(25_000, waitCommand.TimeoutMs);
+        Assert.Equal(125, waitCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_UiWaitCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiWaitCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"name\":\"Status\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var waitCommand = Assert.IsType<UiWaitCommand>(command);
+        Assert.Equal(0, waitCommand.OccurrenceIndex);
+        Assert.Equal(UiWaitConditions.Exists, waitCommand.Condition);
+        Assert.Null(waitCommand.ExpectedValue);
+        Assert.Equal(10_000, waitCommand.TimeoutMs);
+        Assert.Equal(200, waitCommand.PollIntervalMs);
     }
 
     [Fact]
