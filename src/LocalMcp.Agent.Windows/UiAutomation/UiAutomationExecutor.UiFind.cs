@@ -23,6 +23,11 @@ public sealed partial class UiAutomationExecutor
         (UIA_PatternIds.UIA_TransformPatternId, "transform"),
         (UIA_PatternIds.UIA_ScrollPatternId, "scroll"),
         (UIA_PatternIds.UIA_ScrollItemPatternId, "scroll-item"),
+        (UIA_PatternIds.UIA_GridPatternId, "grid"),
+        (UIA_PatternIds.UIA_TablePatternId, "table"),
+        (UIA_PatternIds.UIA_GridItemPatternId, "grid-item"),
+        (UIA_PatternIds.UIA_TableItemPatternId, "table-item"),
+        (UIA_PatternIds.UIA_VirtualizedItemPatternId, "virtualized-item"),
         (UIA_PatternIds.UIA_ExpandCollapsePatternId, "expand-collapse")
     ];
 
