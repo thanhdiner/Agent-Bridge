@@ -37,6 +37,10 @@ public static class ErrorCodes
     public const string AppLaunchFailed = "APP_LAUNCH_FAILED";
     public const string AppResolveFailed = "APP_RESOLVE_FAILED";
     public const string AppNotFound = "APP_NOT_FOUND";
+    public const string AppCloseFailed = "APP_CLOSE_FAILED";
+    public const string AppProcessAmbiguous = "APP_PROCESS_AMBIGUOUS";
+    public const string AppProcessMismatch = "APP_PROCESS_MISMATCH";
+    public const string AppCloseProtected = "APP_CLOSE_PROTECTED";
     public const string UiAutomationUnavailable = "UI_AUTOMATION_UNAVAILABLE";
     public const string UiAutomationFailed = "UI_AUTOMATION_FAILED";
     public const string UiElementNotFound = "UI_ELEMENT_NOT_FOUND";
