@@ -67,6 +67,7 @@ public sealed class CommandDeserializerTests
                 nameof(UiGetValueCommand) => JsonSerializer.Deserialize<UiGetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiSetValueCommand) => JsonSerializer.Deserialize<UiSetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiWaitCommand) => JsonSerializer.Deserialize<UiWaitCommand>(payload, JsonOptions.Default),
+                nameof(UiFindCommand) => JsonSerializer.Deserialize<UiFindCommand>(payload, JsonOptions.Default),
                 nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(payload, JsonOptions.Default),
@@ -640,6 +641,38 @@ public sealed class CommandDeserializerTests
         Assert.Null(waitCommand.ExpectedValue);
         Assert.Equal(10_000, waitCommand.TimeoutMs);
         Assert.Equal(200, waitCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_UiFindCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiFindCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"automationId\":\"searchBox\",\"nameContains\":\"Search\",\"controlType\":\"Edit\",\"maxDepth\":10,\"maxResults\":25}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var findCommand = Assert.IsType<UiFindCommand>(command);
+        Assert.Equal("0x1234", findCommand.WindowHandle);
+        Assert.Equal("searchBox", findCommand.AutomationId);
+        Assert.Equal("Search", findCommand.NameContains);
+        Assert.Equal("Edit", findCommand.ControlType);
+        Assert.Equal(10, findCommand.MaxDepth);
+        Assert.Equal(25, findCommand.MaxResults);
+    }
+
+    [Fact]
+    public void Deserialize_UiFindCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiFindCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"1234\",\"nameContains\":\"Save\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var findCommand = Assert.IsType<UiFindCommand>(command);
+        Assert.Equal(8, findCommand.MaxDepth);
+        Assert.Equal(50, findCommand.MaxResults);
     }
 
     [Fact]

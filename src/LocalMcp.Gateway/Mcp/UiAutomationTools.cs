@@ -89,6 +89,78 @@ public sealed class UiAutomationTools
     }
 
     [McpServerTool(
+        Name = "ui_find",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false),
+     Description("Searches a bounded Windows UI Automation tree for matching controls. automationId and controlType are exact case-insensitive matches; nameContains is a case-insensitive substring. Returns compact control metadata, supported patterns, and occurrenceIndex for follow-up UI actions. Requires dev:execute scope.")]
+    public async Task<CallToolResult> FindUiAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
+        [Description("Optional exact automationId match")] string? automationId = null,
+        [Description("Optional case-insensitive substring of the control name")] string? nameContains = null,
+        [Description("Optional exact control type such as Button, Edit, Document, or Pane")] string? controlType = null,
+        [Description("Maximum descendant depth from the window root (default: 8, hard limit: 20)")] int maxDepth = 8,
+        [Description("Maximum matching controls returned (default: 50, hard limit: 100)")] int maxResults = 50)
+    {
+        if (!await AuthorizeScopeAsync())
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(windowHandle) || windowHandle.Length > 32 || windowHandle.Any(char.IsControl))
+            return CreateErrorResult("INVALID_REQUEST", "windowHandle is required and must be at most 32 characters without control characters.");
+        if (string.IsNullOrWhiteSpace(automationId)
+            && string.IsNullOrWhiteSpace(nameContains)
+            && string.IsNullOrWhiteSpace(controlType))
+            return CreateErrorResult("INVALID_REQUEST", "automationId, nameContains, or controlType is required.");
+        if (automationId?.Length > 1024 || nameContains?.Length > 1024 || controlType?.Length > 128)
+            return CreateErrorResult("INVALID_REQUEST", "automationId and nameContains must be at most 1024 characters; controlType must be at most 128 characters.");
+        if (maxDepth is < 0 or > 20)
+            return CreateErrorResult("INVALID_REQUEST", "maxDepth must be between 0 and 20.");
+        if (maxResults is < 1 or > 100)
+            return CreateErrorResult("INVALID_REQUEST", "maxResults must be between 1 and 100.");
+
+        var command = new UiFindCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            WindowHandle = windowHandle,
+            AutomationId = automationId,
+            NameContains = nameContains,
+            ControlType = controlType,
+            MaxDepth = maxDepth,
+            MaxResults = maxResults
+        };
+
+        try
+        {
+            var result = await _dispatcher.SendAsync<UiFindResult>(command, GetCancellationToken());
+            if (result.Success && result.Data is not null)
+            {
+                return new CallToolResult
+                {
+                    Content = [new TextContentBlock
+                    {
+                        Text = JsonSerializer.Serialize(result.Data, JsonOptions.Default)
+                    }],
+                    IsError = false
+                };
+            }
+
+            return CreateErrorResult(
+                result.Error?.Code ?? "INTERNAL_ERROR",
+                result.Error?.Message ?? "An unexpected error occurred during command execution.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error executing ui_find for device {DeviceId}", deviceId);
+            return CreateErrorResult("INTERNAL_ERROR", "An unexpected error occurred on the gateway.");
+        }
+    }
+
+    [McpServerTool(
         Name = "ui_tree",
         ReadOnly = true,
         Destructive = false,
