@@ -56,6 +56,7 @@ public sealed class CommandDeserializerTests
                 nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(payload, JsonOptions.Default),
                 nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
                 nameof(AppResolveCommand) => JsonSerializer.Deserialize<AppResolveCommand>(payload, JsonOptions.Default),
+                nameof(AppOpenCommand) => JsonSerializer.Deserialize<AppOpenCommand>(payload, JsonOptions.Default),
                 nameof(AppLaunchCommand) => JsonSerializer.Deserialize<AppLaunchCommand>(payload, JsonOptions.Default),
                 nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(payload, JsonOptions.Default),
                 nameof(WindowWaitCommand) => JsonSerializer.Deserialize<WindowWaitCommand>(payload, JsonOptions.Default),
@@ -332,6 +333,44 @@ public sealed class CommandDeserializerTests
         var resolveCommand = Assert.IsType<AppResolveCommand>(command);
         Assert.Equal("vscode", resolveCommand.AppId);
         Assert.False(resolveCommand.Refresh);
+    }
+
+    [Fact]
+    public void Deserialize_AppOpenCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppOpenCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"appId\":\"chrome\",\"arguments\":[\"https://www.youtube.com\"],\"refresh\":true,\"waitForWindow\":false,\"windowTitleContains\":\"YouTube\",\"timeoutMs\":25000,\"pollIntervalMs\":125}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var openCommand = Assert.IsType<AppOpenCommand>(command);
+        Assert.Equal("chrome", openCommand.AppId);
+        Assert.Equal(new[] { "https://www.youtube.com" }, openCommand.Arguments);
+        Assert.True(openCommand.Refresh);
+        Assert.False(openCommand.WaitForWindow);
+        Assert.Equal("YouTube", openCommand.WindowTitleContains);
+        Assert.Equal(25_000, openCommand.TimeoutMs);
+        Assert.Equal(125, openCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_AppOpenCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppOpenCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"appId\":\"obsidian\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var openCommand = Assert.IsType<AppOpenCommand>(command);
+        Assert.Equal("obsidian", openCommand.AppId);
+        Assert.Empty(openCommand.Arguments);
+        Assert.False(openCommand.Refresh);
+        Assert.True(openCommand.WaitForWindow);
+        Assert.Null(openCommand.WindowTitleContains);
+        Assert.Equal(15_000, openCommand.TimeoutMs);
+        Assert.Equal(100, openCommand.PollIntervalMs);
     }
 
     [Fact]

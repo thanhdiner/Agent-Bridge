@@ -14,4 +14,14 @@ public interface IAppLauncher
         int pollIntervalMs,
         Guid commandId,
         CancellationToken cancellationToken);
+
+    Task<CommandResult<AppLaunchResult>> LaunchResolvedAsync(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        bool waitForWindow,
+        string? windowTitleContains,
+        int timeoutMs,
+        int pollIntervalMs,
+        Guid commandId,
+        CancellationToken cancellationToken);
 }

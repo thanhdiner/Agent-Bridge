@@ -63,7 +63,7 @@ public sealed class AppLauncher : IAppLauncher
         _logger = logger;
     }
 
-    public async Task<CommandResult<AppLaunchResult>> LaunchAsync(
+    public Task<CommandResult<AppLaunchResult>> LaunchAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
@@ -71,6 +71,50 @@ public sealed class AppLauncher : IAppLauncher
         string? windowTitleContains,
         int timeoutMs,
         int pollIntervalMs,
+        Guid commandId,
+        CancellationToken cancellationToken) =>
+        LaunchCoreAsync(
+            executable,
+            arguments,
+            workingDirectory,
+            waitForWindow,
+            windowTitleContains,
+            timeoutMs,
+            pollIntervalMs,
+            resolvedExecutable: false,
+            commandId,
+            cancellationToken);
+
+    public Task<CommandResult<AppLaunchResult>> LaunchResolvedAsync(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        bool waitForWindow,
+        string? windowTitleContains,
+        int timeoutMs,
+        int pollIntervalMs,
+        Guid commandId,
+        CancellationToken cancellationToken) =>
+        LaunchCoreAsync(
+            executablePath,
+            arguments,
+            workingDirectory: null,
+            waitForWindow,
+            windowTitleContains,
+            timeoutMs,
+            pollIntervalMs,
+            resolvedExecutable: true,
+            commandId,
+            cancellationToken);
+
+    private async Task<CommandResult<AppLaunchResult>> LaunchCoreAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? workingDirectory,
+        bool waitForWindow,
+        string? windowTitleContains,
+        int timeoutMs,
+        int pollIntervalMs,
+        bool resolvedExecutable,
         Guid commandId,
         CancellationToken cancellationToken)
     {
@@ -121,7 +165,10 @@ public sealed class AppLauncher : IAppLauncher
             return Failure(commandId, ErrorCodes.AccessDenied,
                 "Application launch is disabled while the Windows agent is running elevated.");
 
-        var resolveError = ResolveExecutable(executable, out var executablePath);
+        string executablePath;
+        var resolveError = resolvedExecutable
+            ? ValidateExplicitExecutable(executable, out executablePath)
+            : ResolveExecutable(executable, out executablePath);
         if (resolveError is not null)
             return new CommandResult<AppLaunchResult>
             {

@@ -116,6 +116,10 @@ public sealed partial class CommandHandler
         {
             return await HandleAppResolveAsync(appResolveCommand, cancellationToken);
         }
+        else if (command is AppOpenCommand appOpenCommand)
+        {
+            return await HandleAppOpenAsync(appOpenCommand, cancellationToken);
+        }
         else if (command is AppLaunchCommand appLaunchCommand)
         {
             return await HandleAppLaunchAsync(appLaunchCommand, cancellationToken);
