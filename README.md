@@ -75,6 +75,7 @@ graph TD
 | Tool | Description |
 |---|---|
 | <code>project_verify</code> | Detects .NET, Node.js, Rust, PHP/Laravel, Python, or Go projects and runs fixed `build`, `test`, `lint`, or `typecheck` steps with bounded output and timeout controls. Python prefers `.venv\Scripts` tools and uses fixed fallbacks; Go disables automatic toolchain and module downloads. |
+| `window_list` | Lists top-level app windows and their handles for use with `ui_tree`. |
 | `ui_tree` | Reads a bounded Windows UI Automation tree for one live window handle and returns control names, automation IDs, control types, bounds, enabled states, and bounded values. Password values are not returned. |
 
 > [!CAUTION]

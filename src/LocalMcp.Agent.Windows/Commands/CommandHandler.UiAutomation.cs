@@ -33,6 +33,49 @@ public sealed partial class CommandHandler
         _uiAutomationExecutor = uiAutomationExecutor;
     }
 
+    private async Task<CommandResult<JsonElement>> HandleWindowListAsync(
+        WindowListCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(
+                    ErrorCodes.UiAutomationUnavailable,
+                    "Window enumeration is not configured on this agent.")
+            };
+        }
+
+        var result = await _uiAutomationExecutor.ListWindowsAsync(
+            command.IncludeInvisible,
+            command.IncludeUntitled,
+            command.MaxWindows,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
     private async Task<CommandResult<JsonElement>> HandleUiTreeAsync(
         UiTreeCommand command,
         CancellationToken cancellationToken)

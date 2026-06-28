@@ -55,6 +55,7 @@ public sealed class CommandDeserializerTests
                 nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(payload, JsonOptions.Default),
                 nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(payload, JsonOptions.Default),
                 nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
+                nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(payload, JsonOptions.Default),
                 nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(payload, JsonOptions.Default),
@@ -263,6 +264,36 @@ public sealed class CommandDeserializerTests
         var refreshCommand = Assert.IsType<GitRefreshIndexCommand>(command);
         Assert.Equal("C:/src/repo", refreshCommand.Path);
         Assert.Equal("src/app.cs", refreshCommand.PathSpec);
+    }
+
+    [Fact]
+    public void Deserialize_WindowListCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowListCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"includeInvisible\":true,\"includeUntitled\":true,\"maxWindows\":250}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var listCommand = Assert.IsType<WindowListCommand>(command);
+        Assert.True(listCommand.IncludeInvisible);
+        Assert.True(listCommand.IncludeUntitled);
+        Assert.Equal(250, listCommand.MaxWindows);
+    }
+
+    [Fact]
+    public void Deserialize_WindowListCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"WindowListCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var listCommand = Assert.IsType<WindowListCommand>(command);
+        Assert.False(listCommand.IncludeInvisible);
+        Assert.False(listCommand.IncludeUntitled);
+        Assert.Equal(100, listCommand.MaxWindows);
     }
 
     [Fact]
