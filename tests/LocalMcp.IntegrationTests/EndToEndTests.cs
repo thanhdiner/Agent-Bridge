@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -606,6 +607,99 @@ public sealed class EndToEndTests : IAsyncDisposable
         Assert.Equal((long)text.Length, data.BytesDeleted);
         Assert.NotNull(data.Sha256);
         Assert.False(File.Exists(filePath));
+    }
+
+    private void RunGitInTemp(string args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = _tempRoot,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using var process = Process.Start(startInfo);
+        process?.WaitForExit();
+    }
+
+    [Fact]
+    public async Task GitRestoreFile_EndToEnd_RestoresSuccessfully()
+    {
+        await InitializeAsync();
+        Assert.NotNull(_tempRoot);
+
+        RunGitInTemp("init");
+        RunGitInTemp("config user.name \"Test\"");
+        RunGitInTemp("config user.email \"test@example.com\"");
+        RunGitInTemp("config commit.gpgsign false");
+
+        var filePath = Path.Combine(_tempRoot, "test.txt");
+        await File.WriteAllTextAsync(filePath, "HEAD content\n");
+
+        RunGitInTemp("add test.txt");
+        RunGitInTemp("commit -m \"Initial\"");
+
+        // Modify file
+        await File.WriteAllTextAsync(filePath, "Modified content\n");
+
+        var mcpTools = new FileSystemTools(
+            _gatewayApp!.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
+        );
+
+        var response = await mcpTools.GitRestoreFileAsync(_deviceId, _tempRoot, "test.txt", expectedSha256: null);
+
+        Assert.False(response.IsError);
+        Assert.NotNull(response.Content);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<GitRestoreFileResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.Equal("HEAD", data.Source);
+        Assert.True(data.Changed);
+
+        var restoredContent = await File.ReadAllTextAsync(filePath);
+        Assert.Equal("HEAD content\n", restoredContent);
+    }
+
+    [Fact]
+    public async Task GitRefreshIndex_EndToEnd_RefreshesSuccessfully()
+    {
+        await InitializeAsync();
+        Assert.NotNull(_tempRoot);
+
+        RunGitInTemp("init");
+        RunGitInTemp("config user.name \"Test\"");
+        RunGitInTemp("config user.email \"test@example.com\"");
+        RunGitInTemp("config commit.gpgsign false");
+
+        var filePath = Path.Combine(_tempRoot, "test.txt");
+        await File.WriteAllTextAsync(filePath, "Clean content\n");
+
+        RunGitInTemp("add test.txt");
+        RunGitInTemp("commit -m \"Initial\"");
+
+        var mcpTools = new FileSystemTools(
+            _gatewayApp!.Services.GetRequiredService<ICommandDispatcher>(),
+            _gatewayApp.Services.GetRequiredService<IAuthorizationService>(),
+            NullLogger<FileSystemTools>.Instance,
+            _gatewayApp.Services.GetService<IHttpContextAccessor>()
+        );
+
+        var response = await mcpTools.GitRefreshIndexAsync(_deviceId, _tempRoot, "test.txt");
+
+        Assert.False(response.IsError);
+        Assert.NotNull(response.Content);
+        var textBlock = Assert.IsType<TextContentBlock>(response.Content[0]);
+        var data = JsonSerializer.Deserialize<GitRefreshIndexResult>(textBlock.Text, JsonOptions.Default);
+
+        Assert.NotNull(data);
+        Assert.True(data.CleanAfterRefresh);
     }
 
     public async ValueTask DisposeAsync()

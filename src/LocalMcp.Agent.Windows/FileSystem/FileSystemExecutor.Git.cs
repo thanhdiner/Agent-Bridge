@@ -893,4 +893,602 @@ public sealed partial class FileSystemExecutor
         int BytesReturned,
         bool ResponseTruncated,
         bool Omitted);
+
+    public async Task<CommandResult<GitRestoreFileResult>> GitRestoreFileAsync(
+        string path,
+        string pathSpec,
+        string? expectedSha256,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var resolution = await ResolveGitRepositoryRootAsync(path, commandId, cancellationToken);
+            if (resolution.Error is not null)
+                return new CommandResult<GitRestoreFileResult> { CommandId = commandId, Success = false, Error = resolution.Error };
+
+            var repositoryRoot = resolution.Root!;
+
+            var configurationError = await ValidateSafeGitConfigurationAsync(repositoryRoot, cancellationToken);
+            if (configurationError is not null)
+                return new CommandResult<GitRestoreFileResult> { CommandId = commandId, Success = false, Error = configurationError };
+
+            if (string.IsNullOrWhiteSpace(pathSpec) ||
+                pathSpec.Contains('*') || pathSpec.Contains('?') ||
+                pathSpec.Contains('[') || pathSpec.Contains(']') ||
+                pathSpec.Contains("..") || pathSpec.Contains('\\') ||
+                pathSpec.Contains(':') || pathSpec.StartsWith('/'))
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.InvalidRequest, "Invalid pathSpec format. Magic, wildcards, absolute path, backslash, colon, and traversal are rejected.")
+                };
+            }
+
+            var fullFilePath = Path.GetFullPath(Path.Combine(repositoryRoot, pathSpec.Replace('/', Path.DirectorySeparatorChar)));
+            if (!IsPathWithinRoot(repositoryRoot, fullFilePath))
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.WriteNotAllowed, "Path is outside the repository root.")
+                };
+            }
+
+            var policyError = _pathPolicy.AuthorizeWriteFile(fullFilePath, out var normalizedFilePath);
+            if (policyError is not null)
+            {
+                return new CommandResult<GitRestoreFileResult> { CommandId = commandId, Success = false, Error = policyError };
+            }
+
+            if (File.Exists(normalizedFilePath))
+            {
+                var attrs = File.GetAttributes(normalizedFilePath);
+                if (attrs.HasFlag(FileAttributes.Directory) || attrs.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return new CommandResult<GitRestoreFileResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.AccessDenied, "Cannot restore onto a directory, symlink or reparse point.")
+                    };
+                }
+            }
+            else if (Directory.Exists(normalizedFilePath))
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "Cannot restore onto a directory.")
+                };
+            }
+
+            var lsTreeProcess = await RunGitAsync(
+                repositoryRoot,
+                ["ls-tree", "-z", "HEAD", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (lsTreeProcess.TimedOut)
+                return new CommandResult<GitRestoreFileResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandTimeout, "Git query timed out.") };
+            if (lsTreeProcess.StartError is not null)
+                return new CommandResult<GitRestoreFileResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.GitNotAvailable, lsTreeProcess.StartError) };
+            if (lsTreeProcess.ExitCode != 0 || string.IsNullOrWhiteSpace(lsTreeProcess.Stdout))
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileNotFound, "The requested file is not tracked in HEAD.")
+                };
+            }
+
+            var parts = lsTreeProcess.Stdout.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 4)
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.GitCommandFailed, "Failed to parse Git tracking metadata from HEAD.")
+                };
+            }
+
+            var mode = parts[0];
+            var type = parts[1];
+            if (type != "blob" || mode == "120000" || mode == "160000")
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "The tracked object in HEAD is not a regular file (symlinks/submodules are rejected).")
+                };
+            }
+
+            var checkAttrProcess = await RunGitAsync(
+                repositoryRoot,
+                ["check-attr", "filter", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (checkAttrProcess.ExitCode == 0 && !string.IsNullOrWhiteSpace(checkAttrProcess.Stdout))
+            {
+                var filterIndex = checkAttrProcess.Stdout.LastIndexOf(':');
+                if (filterIndex >= 0)
+                {
+                    var filterValue = checkAttrProcess.Stdout[(filterIndex + 1)..].Trim();
+                    if (filterValue != "unspecified")
+                    {
+                        return new CommandResult<GitRestoreFileResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.AccessDenied, "Files with custom Git filters are rejected.")
+                        };
+                    }
+                }
+            }
+
+            var catSizeProcess = await RunGitAsync(
+                repositoryRoot,
+                ["cat-file", "-s", $"HEAD:{pathSpec}"],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (catSizeProcess.ExitCode != 0 || !long.TryParse(catSizeProcess.Stdout.Trim(), out var blobSize))
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.GitCommandFailed, "Failed to retrieve the blob size from HEAD.")
+                };
+            }
+
+            if (blobSize > _options.MaxWriteBytes)
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileTooLarge, "The target file size exceeds the allowed MaxWriteBytes limit.")
+                };
+            }
+
+            var catBlobProcess = await RunGitBytesAsync(
+                repositoryRoot,
+                ["cat-file", "blob", $"HEAD:{pathSpec}"],
+                maxStdoutBytes: (int)_options.MaxWriteBytes + 1024,
+                timeout: TimeSpan.FromSeconds(20),
+                cancellationToken);
+
+            if (catBlobProcess.ExitCode != 0)
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.GitCommandFailed, "Failed to retrieve the file content from HEAD.")
+                };
+            }
+
+            var blobBytes = catBlobProcess.StdoutBytes;
+
+            string? previousSha256 = null;
+            if (File.Exists(normalizedFilePath))
+            {
+                var prevBytes = await File.ReadAllBytesAsync(normalizedFilePath, cancellationToken);
+                previousSha256 = ComputeSha256(prevBytes);
+            }
+
+            if (expectedSha256 is not null && !string.Equals(expectedSha256, previousSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CommandResult<GitRestoreFileResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.HashMismatch, "The expected SHA-256 hash does not match the actual hash of the current file.")
+                };
+            }
+
+            var parentDir = Path.GetDirectoryName(normalizedFilePath);
+            if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
+            {
+                Directory.CreateDirectory(parentDir);
+            }
+
+            await File.WriteAllBytesAsync(normalizedFilePath, blobBytes, cancellationToken);
+
+            var currentSha256 = ComputeSha256(blobBytes);
+            var changed = previousSha256 != currentSha256;
+
+            return new CommandResult<GitRestoreFileResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new GitRestoreFileResult
+                {
+                    RepositoryRoot = repositoryRoot,
+                    Path = normalizedFilePath,
+                    Source = "HEAD",
+                    PreviousSha256 = previousSha256,
+                    Sha256 = currentSha256,
+                    Size = blobBytes.Length,
+                    Changed = changed
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<GitRestoreFileResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandCancelled, "The Git restore command was cancelled.") };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected Git restore failure for command {CommandId}", commandId);
+            return new CommandResult<GitRestoreFileResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while restoring the file.") };
+        }
+    }
+
+    public async Task<CommandResult<GitRefreshIndexResult>> GitRefreshIndexAsync(
+        string path,
+        string pathSpec,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var resolution = await ResolveGitRepositoryRootAsync(path, commandId, cancellationToken);
+            if (resolution.Error is not null)
+                return new CommandResult<GitRefreshIndexResult> { CommandId = commandId, Success = false, Error = resolution.Error };
+
+            var repositoryRoot = resolution.Root!;
+
+            var configurationError = await ValidateSafeGitConfigurationAsync(repositoryRoot, cancellationToken);
+            if (configurationError is not null)
+                return new CommandResult<GitRefreshIndexResult> { CommandId = commandId, Success = false, Error = configurationError };
+
+            if (string.IsNullOrWhiteSpace(pathSpec) ||
+                pathSpec.Contains('*') || pathSpec.Contains('?') ||
+                pathSpec.Contains('[') || pathSpec.Contains(']') ||
+                pathSpec.Contains("..") || pathSpec.Contains('\\') ||
+                pathSpec.Contains(':') || pathSpec.StartsWith('/'))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.InvalidRequest, "Invalid pathSpec format. Magic, wildcards, absolute path, backslash, colon, and traversal are rejected.")
+                };
+            }
+
+            var fullFilePath = Path.GetFullPath(Path.Combine(repositoryRoot, pathSpec.Replace('/', Path.DirectorySeparatorChar)));
+            if (!IsPathWithinRoot(repositoryRoot, fullFilePath))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.WriteNotAllowed, "Path is outside the repository root.")
+                };
+            }
+
+            var policyError = _pathPolicy.AuthorizeWriteFile(fullFilePath, out var normalizedFilePath);
+            if (policyError is not null)
+            {
+                return new CommandResult<GitRefreshIndexResult> { CommandId = commandId, Success = false, Error = policyError };
+            }
+
+            if (!File.Exists(normalizedFilePath))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileNotFound, "The requested file does not exist on disk.")
+                };
+            }
+
+            var attrs = File.GetAttributes(normalizedFilePath);
+            if (attrs.HasFlag(FileAttributes.Directory) || attrs.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "Symlinks, directories and reparse points are rejected.")
+                };
+            }
+
+            var lsFilesProcess = await RunGitAsync(
+                repositoryRoot,
+                ["ls-files", "--stage", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (lsFilesProcess.ExitCode != 0 || string.IsNullOrWhiteSpace(lsFilesProcess.Stdout))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileNotFound, "The requested file is not tracked in the repository.")
+                };
+            }
+
+            var parts = lsFilesProcess.Stdout.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 4)
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.GitCommandFailed, "Failed to parse Git index metadata.")
+                };
+            }
+
+            var indexMode = parts[0];
+            var indexObjectId = parts[1];
+
+            if (indexMode == "120000" || indexMode == "160000")
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "Submodules and symlinks in index are rejected.")
+                };
+            }
+
+            var lsUnmergedProcess = await RunGitAsync(
+                repositoryRoot,
+                ["ls-files", "--unmerged", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(lsUnmergedProcess.Stdout))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.AccessDenied, "Files with conflict stages are rejected.")
+                };
+            }
+
+            var checkAttrProcess = await RunGitAsync(
+                repositoryRoot,
+                ["check-attr", "filter", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (checkAttrProcess.ExitCode == 0 && !string.IsNullOrWhiteSpace(checkAttrProcess.Stdout))
+            {
+                var filterIndex = checkAttrProcess.Stdout.LastIndexOf(':');
+                if (filterIndex >= 0)
+                {
+                    var filterValue = checkAttrProcess.Stdout[(filterIndex + 1)..].Trim();
+                    if (filterValue != "unspecified")
+                    {
+                        return new CommandResult<GitRefreshIndexResult>
+                        {
+                            CommandId = commandId,
+                            Success = false,
+                            Error = new CommandError(ErrorCodes.AccessDenied, "Files with custom Git filters are rejected.")
+                        };
+                    }
+                }
+            }
+
+            var hashObjectProcess = await RunGitAsync(
+                repositoryRoot,
+                ["hash-object", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (hashObjectProcess.ExitCode != 0 || string.IsNullOrWhiteSpace(hashObjectProcess.Stdout))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.GitCommandFailed, "Failed to compute working tree object ID.")
+                };
+            }
+
+            var workingTreeObjectId = hashObjectProcess.Stdout.Trim();
+
+            if (!string.Equals(workingTreeObjectId, indexObjectId, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CommandResult<GitRefreshIndexResult>
+                {
+                    CommandId = commandId,
+                    Success = false,
+                    Error = new CommandError(ErrorCodes.FileConflict, "The semantic content of the working tree file differs from the index.")
+                };
+            }
+
+            var diffFilesProcessBefore = await RunGitAsync(
+                repositoryRoot,
+                ["diff-files", "--quiet", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            bool needsRefresh = diffFilesProcessBefore.ExitCode != 0;
+            bool rewrittenFromIndex = false;
+
+            if (needsRefresh)
+            {
+                var checkoutProcess = await RunGitAsync(
+                    repositoryRoot,
+                    ["-c", "core.autocrlf=false", "checkout-index", "-f", "--", pathSpec],
+                    maxStdoutBytes: 65_536,
+                    timeout: TimeSpan.FromSeconds(15),
+                    cancellationToken);
+
+                if (checkoutProcess.ExitCode != 0)
+                {
+                    return new CommandResult<GitRefreshIndexResult>
+                    {
+                        CommandId = commandId,
+                        Success = false,
+                        Error = new CommandError(ErrorCodes.GitCommandFailed, $"Failed to checkout file from index: {checkoutProcess.Stderr}")
+                    };
+                }
+
+                rewrittenFromIndex = true;
+
+                var updateIndexProcess = await RunGitAsync(
+                    repositoryRoot,
+                    ["-c", "core.autocrlf=false", "update-index", "--really-refresh", "--", pathSpec],
+                    maxStdoutBytes: 65_536,
+                    timeout: TimeSpan.FromSeconds(15),
+                    cancellationToken);
+            }
+
+            var diffFilesProcessAfter = await RunGitAsync(
+                repositoryRoot,
+                ["diff-files", "--quiet", "--", pathSpec],
+                maxStdoutBytes: 65_536,
+                timeout: TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            bool cleanAfterRefresh = diffFilesProcessAfter.ExitCode == 0;
+
+            return new CommandResult<GitRefreshIndexResult>
+            {
+                CommandId = commandId,
+                Success = true,
+                Data = new GitRefreshIndexResult
+                {
+                    RepositoryRoot = repositoryRoot,
+                    Path = normalizedFilePath,
+                    IndexObjectId = indexObjectId,
+                    WorkingTreeObjectId = workingTreeObjectId,
+                    RewrittenFromIndex = rewrittenFromIndex,
+                    CleanAfterRefresh = cleanAfterRefresh
+                }
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new CommandResult<GitRefreshIndexResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.CommandCancelled, "The Git refresh-index command was cancelled.") };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected Git refresh-index failure for command {CommandId}", commandId);
+            return new CommandResult<GitRefreshIndexResult> { CommandId = commandId, Success = false, Error = new CommandError(ErrorCodes.InternalError, "An unexpected error occurred while refreshing the index.") };
+        }
+    }
+
+    private async Task<GitBytesResult> RunGitBytesAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        int maxStdoutBytes,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("core.pager=cat");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("color.ui=false");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("core.fsmonitor=false");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("submodule.recurse=false");
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        startInfo.Environment["GIT_PAGER"] = "cat";
+        startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        startInfo.Environment["LC_ALL"] = "C";
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start())
+                return GitBytesResult.NotStarted("Git process could not be started.");
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "Unable to start Git process.");
+            return GitBytesResult.NotStarted("Git process could not be started.");
+        }
+
+        var stdoutTask = ReadBoundedOutputAsync(process.StandardOutput.BaseStream, maxStdoutBytes);
+        var stderrTask = ReadBoundedOutputAsync(process.StandardError.BaseStream, 65_536);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+
+        var timedOut = false;
+        try
+        {
+            await process.WaitForExitAsync(timeoutSource.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            timedOut = true;
+            TryKillProcess(process);
+            await WaitForExitAfterKillAsync(process);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcess(process);
+            await WaitForExitAfterKillAsync(process);
+            throw;
+        }
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        return new GitBytesResult(
+            timedOut ? -1 : process.ExitCode,
+            stdout.Bytes,
+            LenientUtf8Encoding.GetString(stderr.Bytes),
+            stdout.Truncated,
+            stderr.Truncated,
+            timedOut,
+            StartError: null);
+    }
+
+    private sealed record GitBytesResult(
+        int ExitCode,
+        byte[] StdoutBytes,
+        string Stderr,
+        bool StdoutTruncated,
+        bool StderrTruncated,
+        bool TimedOut,
+        string? StartError)
+    {
+        public static GitBytesResult NotStarted(string error) => new(
+            ExitCode: -1,
+            StdoutBytes: Array.Empty<byte>(),
+            Stderr: string.Empty,
+            StdoutTruncated: false,
+            StderrTruncated: false,
+            TimedOut: false,
+            StartError: error);
+    }
 }

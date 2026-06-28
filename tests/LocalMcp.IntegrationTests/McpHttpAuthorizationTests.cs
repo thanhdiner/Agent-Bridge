@@ -526,6 +526,74 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task FilesWriteScope_CallingGitRestoreFile_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_restore_file",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src/repo", pathSpec = "app.cs" }
+        );
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("AGENT_OFFLINE", body);
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingGitRestoreFile_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_restore_file",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src/repo", pathSpec = "app.cs" }
+        );
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("FORBIDDEN", body);
+    }
+
+    [Fact]
+    public async Task FilesWriteScope_CallingGitRefreshIndex_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:write");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_refresh_index",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src/repo", pathSpec = "app.cs" }
+        );
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("AGENT_OFFLINE", body);
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingGitRefreshIndex_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(
+            token: token,
+            method: "tools/call",
+            toolName: "git_refresh_index",
+            arguments: new { deviceId = "missing-test-device", path = "C:/src/repo", pathSpec = "app.cs" }
+        );
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("FORBIDDEN", body);
+    }
+
+    [Fact]
     public async Task FilesReadScope_CallingFsWrite_ReturnsForbidden()
     {
         await StartServerAsync();

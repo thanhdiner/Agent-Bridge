@@ -91,6 +91,8 @@ graph TD
 | `fs_copy` | Copies a file or bounded directory tree into a writable root. Directory sources require `recursive: true`, reject merge/overwrite, enforce entry and byte limits, reject reparse points at every level, and publish through a temporary sibling directory followed by an atomic rename. |
 | `fs_delete` | Deletes one file from a writable root after confirmation. Directories are not supported; optional SHA-256 concurrency checks and `missingOk` are supported. |
 | `fs_rmdir` | Removes one empty directory from a writable root after confirmation. Recursive deletion is not supported, configured roots are protected, and `missingOk` is supported. |
+| `git_restore_file` | Restores a regular tracked file from HEAD into the working tree on a target Windows agent device. Does not modify the Git index/staging. Requires Git on the agent and files:write scope. |
+| `git_refresh_index` | Refreshes the Git index for a single regular tracked file on a target Windows agent device, updating out-of-sync stat cache or line ending attributes if semantic content matches the index. Requires Git on the agent and files:write scope. |
 
 > [!IMPORTANT]
 > **Write tools (including `fs_mkdir`) are disabled by default.** `WritableRoots` in `appsettings.json` is an empty list. You must explicitly add directories before write tools can succeed.

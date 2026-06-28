@@ -104,6 +104,14 @@ public sealed partial class CommandHandler
         {
             return await HandleGitShowAsync(gitShowCommand, cancellationToken);
         }
+        else if (command is GitRestoreFileCommand gitRestoreFileCommand)
+        {
+            return await HandleGitRestoreFileAsync(gitRestoreFileCommand, cancellationToken);
+        }
+        else if (command is GitRefreshIndexCommand gitRefreshIndexCommand)
+        {
+            return await HandleGitRefreshIndexAsync(gitRefreshIndexCommand, cancellationToken);
+        }
         else if (command is ProjectCheckCommand projectCheckCommand)
         {
             return await HandleProjectCheckAsync(projectCheckCommand, cancellationToken);
@@ -587,6 +595,91 @@ public sealed partial class CommandHandler
             command.IncludeStats,
             command.ContextLines,
             command.MaxBytes,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleGitRestoreFileAsync(
+        GitRestoreFileCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.GitRestoreFileAsync(
+            normalizedPath,
+            command.PathSpec,
+            command.ExpectedSha256,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleGitRefreshIndexAsync(
+        GitRefreshIndexCommand command,
+        CancellationToken cancellationToken)
+    {
+        var error = _pathPolicy.AuthorizeReadDirectory(command.Path, out var normalizedPath);
+        if (error is not null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = error,
+                Data = JsonSerializer.SerializeToElement<object?>(null)
+            };
+        }
+
+        var result = await _fileSystemExecutor.GitRefreshIndexAsync(
+            normalizedPath,
+            command.PathSpec,
             command.CommandId,
             cancellationToken);
 
