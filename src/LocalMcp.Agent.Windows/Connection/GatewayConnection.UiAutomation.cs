@@ -9,6 +9,8 @@ public sealed partial class GatewayConnection
     private static AgentCommand? DeserializeExtendedCommand(string? typeName, string rawJson) =>
         typeName switch
         {
+            nameof(AppResolveCommand) => JsonSerializer.Deserialize<AppResolveCommand>(rawJson, JsonOptions.Default),
+            nameof(AppLaunchCommand) => JsonSerializer.Deserialize<AppLaunchCommand>(rawJson, JsonOptions.Default),
             nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(rawJson, JsonOptions.Default),
             nameof(WindowWaitCommand) => JsonSerializer.Deserialize<WindowWaitCommand>(rawJson, JsonOptions.Default),
             nameof(WindowFocusCommand) => JsonSerializer.Deserialize<WindowFocusCommand>(rawJson, JsonOptions.Default),

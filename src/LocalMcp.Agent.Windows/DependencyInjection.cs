@@ -1,3 +1,4 @@
+using LocalMcp.Agent.Windows.AppLaunch;
 using LocalMcp.Agent.Windows.Connection;
 using LocalMcp.Agent.Windows.Security;
 using LocalMcp.Agent.Windows.FileSystem;
@@ -53,6 +54,33 @@ public static class DependencyInjection
             }, "All WritableRoots must be located within at least one of the configured AllowedRoots.")
             .ValidateOnStart();
 
+        services.AddOptions<AppLaunchOptions>()
+            .Bind(configuration.GetSection(AppLaunchOptions.SectionName))
+            .Validate(o => o.AllowedExecutables is not null, "AppLaunch:AllowedExecutables must be configured as an array.")
+            .Validate(o => o.AllowedExecutables.All(entry =>
+                !string.IsNullOrWhiteSpace(entry)
+                && entry.Length <= 32768
+                && !entry.Any(char.IsControl)),
+                "AppLaunch:AllowedExecutables contains an invalid entry.")
+            .ValidateOnStart();
+
+        services.AddOptions<AppResolverOptions>()
+            .Bind(configuration.GetSection(AppResolverOptions.SectionName))
+            .Validate(o => o.MaxCacheEntries is >= 1 and <= 1024,
+                "AppResolver:MaxCacheEntries must be between 1 and 1024.")
+            .Validate(o => o.MaxStartMenuShortcuts is >= 0 and <= 10000,
+                "AppResolver:MaxStartMenuShortcuts must be between 0 and 10000.")
+            .Validate(o => o.Aliases is not null
+                && o.Aliases.All(pair =>
+                    !string.IsNullOrWhiteSpace(pair.Key)
+                    && pair.Key.Length <= 128
+                    && !pair.Key.Any(char.IsControl)
+                    && !string.IsNullOrWhiteSpace(pair.Value)
+                    && pair.Value.Length <= 32768
+                    && !pair.Value.Any(char.IsControl)),
+                "AppResolver:Aliases contains an invalid entry.")
+            .ValidateOnStart();
+
         services.AddOptions<AgentSecurityOptions>()
             .Bind(configuration.GetSection(AgentSecurityOptions.SectionName))
             .Validate(o =>
@@ -85,6 +113,8 @@ public static class DependencyInjection
             sp.GetRequiredService<PowerShellSessionRegistry>());
         services.AddSingleton<PowerShellSessionExecutor>();
         services.AddSingleton<IUiAutomationExecutor, UiAutomationExecutor>();
+        services.AddSingleton<IAppResolver, AppResolver>();
+        services.AddSingleton<IAppLauncher, AppLauncher>();
         services.AddSingleton<CommandHandler>(sp =>
             new CommandHandler(
                 sp.GetRequiredService<IPathPolicy>(),
@@ -93,6 +123,8 @@ public static class DependencyInjection
                 sp.GetRequiredService<PowerShellSessionRegistry>(),
                 sp.GetRequiredService<PowerShellSessionExecutor>(),
                 sp.GetRequiredService<IUiAutomationExecutor>(),
+                sp.GetRequiredService<IAppLauncher>(),
+                sp.GetRequiredService<IAppResolver>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CommandHandler>>()));
         services.AddSingleton<GatewayConnection>();
 

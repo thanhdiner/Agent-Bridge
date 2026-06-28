@@ -55,6 +55,8 @@ public sealed class CommandDeserializerTests
                 nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(payload, JsonOptions.Default),
                 nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(payload, JsonOptions.Default),
                 nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
+                nameof(AppResolveCommand) => JsonSerializer.Deserialize<AppResolveCommand>(payload, JsonOptions.Default),
+                nameof(AppLaunchCommand) => JsonSerializer.Deserialize<AppLaunchCommand>(payload, JsonOptions.Default),
                 nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(payload, JsonOptions.Default),
                 nameof(WindowWaitCommand) => JsonSerializer.Deserialize<WindowWaitCommand>(payload, JsonOptions.Default),
                 nameof(WindowFocusCommand) => JsonSerializer.Deserialize<WindowFocusCommand>(payload, JsonOptions.Default),
@@ -302,6 +304,71 @@ public sealed class CommandDeserializerTests
         Assert.False(listCommand.IncludeInvisible);
         Assert.False(listCommand.IncludeUntitled);
         Assert.Equal(100, listCommand.MaxWindows);
+    }
+
+    [Fact]
+    public void Deserialize_AppResolveCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppResolveCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"appId\":\"chrome\",\"refresh\":true}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var resolveCommand = Assert.IsType<AppResolveCommand>(command);
+        Assert.Equal("chrome", resolveCommand.AppId);
+        Assert.True(resolveCommand.Refresh);
+    }
+
+    [Fact]
+    public void Deserialize_AppResolveCommand_WithoutRefresh_DefaultsFalse()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppResolveCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"appId\":\"vscode\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var resolveCommand = Assert.IsType<AppResolveCommand>(command);
+        Assert.Equal("vscode", resolveCommand.AppId);
+        Assert.False(resolveCommand.Refresh);
+    }
+
+    [Fact]
+    public void Deserialize_AppLaunchCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppLaunchCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"executable\":\"notepad.exe\",\"arguments\":[\"one\",\"two words\"],\"workingDirectory\":\"C:\\\\Temp\",\"waitForWindow\":false,\"windowTitleContains\":\"Draft\",\"timeoutMs\":25000,\"pollIntervalMs\":125}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var launchCommand = Assert.IsType<AppLaunchCommand>(command);
+        Assert.Equal("notepad.exe", launchCommand.Executable);
+        Assert.Equal(new[] { "one", "two words" }, launchCommand.Arguments);
+        Assert.Equal("C:\\Temp", launchCommand.WorkingDirectory);
+        Assert.False(launchCommand.WaitForWindow);
+        Assert.Equal("Draft", launchCommand.WindowTitleContains);
+        Assert.Equal(25_000, launchCommand.TimeoutMs);
+        Assert.Equal(125, launchCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_AppLaunchCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"AppLaunchCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"executable\":\"notepad.exe\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var launchCommand = Assert.IsType<AppLaunchCommand>(command);
+        Assert.Empty(launchCommand.Arguments);
+        Assert.Null(launchCommand.WorkingDirectory);
+        Assert.True(launchCommand.WaitForWindow);
+        Assert.Null(launchCommand.WindowTitleContains);
+        Assert.Equal(15_000, launchCommand.TimeoutMs);
+        Assert.Equal(100, launchCommand.PollIntervalMs);
     }
 
     [Fact]
