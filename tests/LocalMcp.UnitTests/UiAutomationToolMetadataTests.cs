@@ -6,9 +6,11 @@ namespace LocalMcp.UnitTests;
 
 public sealed class UiAutomationToolMetadataTests
 {
-    private static MethodInfo ToolMethod => typeof(UiAutomationTools)
+    private static MethodInfo GetToolMethod(string name) => typeof(UiAutomationTools)
         .GetMethods()
-        .Single(method => method.GetCustomAttribute<McpServerToolAttribute>()?.Name == "ui_tree");
+        .Single(method => method.GetCustomAttribute<McpServerToolAttribute>()?.Name == name);
+
+    private static MethodInfo ToolMethod => GetToolMethod("ui_tree");
 
     [Fact]
     public void UiTree_HasExpectedAnnotations()
@@ -35,5 +37,30 @@ public sealed class UiAutomationToolMetadataTests
         var forbidden = new[] { "CancellationToken", "HttpContext", "ClaimsPrincipal", "IServiceProvider", "Object" };
         foreach (var parameter in ToolMethod.GetParameters())
             Assert.DoesNotContain(parameter.ParameterType.Name, forbidden);
+    }
+
+    [Fact]
+    public void UiFind_HasExpectedAnnotationsAndSchema()
+    {
+        var method = GetToolMethod("ui_find");
+        var attribute = method.GetCustomAttribute<McpServerToolAttribute>();
+        Assert.NotNull(attribute);
+        Assert.True(attribute!.ReadOnly);
+        Assert.False(attribute.Destructive);
+        Assert.True(attribute.Idempotent);
+        Assert.False(attribute.OpenWorld);
+
+        var actual = method.GetParameters().Select(parameter => parameter.Name!).ToHashSet();
+        var expected = new[]
+        {
+            "deviceId",
+            "windowHandle",
+            "automationId",
+            "nameContains",
+            "controlType",
+            "maxDepth",
+            "maxResults"
+        }.ToHashSet();
+        Assert.True(expected.SetEquals(actual));
     }
 }

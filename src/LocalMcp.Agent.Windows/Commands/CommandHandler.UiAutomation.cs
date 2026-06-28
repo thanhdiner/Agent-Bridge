@@ -128,6 +128,52 @@ public sealed partial class CommandHandler
         };
     }
 
+    private async Task<CommandResult<JsonElement>> HandleUiFindAsync(
+        UiFindCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(
+                    ErrorCodes.UiAutomationUnavailable,
+                    "Windows UI Automation is not configured on this agent.")
+            };
+        }
+
+        var result = await _uiAutomationExecutor.FindAsync(
+            command.WindowHandle,
+            command.AutomationId,
+            command.NameContains,
+            command.ControlType,
+            command.MaxDepth,
+            command.MaxResults,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
     private async Task<CommandResult<JsonElement>> HandleUiTreeAsync(
         UiTreeCommand command,
         CancellationToken cancellationToken)

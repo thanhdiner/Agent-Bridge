@@ -160,6 +160,10 @@ public sealed partial class CommandHandler
         {
             return await HandleUiWaitAsync(uiWaitCommand, cancellationToken);
         }
+        else if (command is UiFindCommand uiFindCommand)
+        {
+            return await HandleUiFindAsync(uiFindCommand, cancellationToken);
+        }
         else if (command is UiTreeCommand uiTreeCommand)
         {
             return await HandleUiTreeAsync(uiTreeCommand, cancellationToken);

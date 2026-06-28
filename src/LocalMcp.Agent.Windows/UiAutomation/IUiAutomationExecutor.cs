@@ -92,6 +92,16 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<UiFindResult>> FindAsync(
+        string windowHandle,
+        string? automationId,
+        string? nameContains,
+        string? controlType,
+        int maxDepth,
+        int maxResults,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<UiTreeResult>> GetTreeAsync(
         string windowHandle,
         int maxDepth,
