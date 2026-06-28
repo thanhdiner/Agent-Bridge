@@ -93,6 +93,47 @@ public sealed class PathPolicy : IPathPolicy
         return null;
     }
 
+    public CommandError? AuthorizeExecuteFile(string rawPath, out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+
+        var pathError = ValidateBasicPath(rawPath, out var fullPath);
+        if (pathError is not null)
+            return pathError;
+
+        if (!string.Equals(Path.GetExtension(fullPath), ".exe", StringComparison.OrdinalIgnoreCase))
+            return new CommandError(ErrorCodes.InvalidRequest, "Only .exe files can be launched.");
+
+        var reparseError = VerifyNoReparsePointsInOriginalPath(fullPath);
+        if (reparseError is not null)
+            return reparseError;
+
+        if (Directory.Exists(fullPath))
+            return new CommandError(ErrorCodes.AccessDenied, "The executable path is a directory, not a file.");
+        if (!File.Exists(fullPath))
+            return new CommandError(ErrorCodes.FileNotFound, "The executable file was not found.");
+
+        string physicalPath;
+        try
+        {
+            var attributes = File.GetAttributes(fullPath);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                return new CommandError(ErrorCodes.AccessDenied, "Reparse points are not allowed for executable paths.");
+            physicalPath = ResolvePhysicalPath(fullPath);
+        }
+        catch (Exception)
+        {
+            return new CommandError(ErrorCodes.AccessDenied, "Failed to resolve the executable path.");
+        }
+
+        var rootError = ValidateAllowedRootsAndSegments(physicalPath, fullPath);
+        if (rootError is not null)
+            return rootError;
+
+        normalizedPath = physicalPath;
+        return null;
+    }
+
     public CommandError? AuthorizeReadDirectory(string rawPath, out string normalizedPath)
     {
         normalizedPath = string.Empty;

@@ -15,6 +15,11 @@ public interface IPathPolicy
     CommandError? AuthorizeReadFile(string rawPath, out string normalizedPath);
 
     /// <summary>
+    /// Authorises an existing Windows executable for direct process launch.
+    /// </summary>
+    CommandError? AuthorizeExecuteFile(string rawPath, out string normalizedPath);
+
+    /// <summary>
     /// Authorises a directory path for read access.
     /// </summary>
     CommandError? AuthorizeReadDirectory(string rawPath, out string normalizedPath);

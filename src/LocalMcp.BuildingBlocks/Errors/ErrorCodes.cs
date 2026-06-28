@@ -32,6 +32,10 @@ public static class ErrorCodes
     public const string WindowCloseFailed = "WINDOW_CLOSE_FAILED";
     public const string WindowMoveFailed = "WINDOW_MOVE_FAILED";
     public const string WindowWaitTimeout = "WINDOW_WAIT_TIMEOUT";
+    public const string AppExecutableNotAllowed = "APP_EXECUTABLE_NOT_ALLOWED";
+    public const string AppExecutableInvalid = "APP_EXECUTABLE_INVALID";
+    public const string AppLaunchFailed = "APP_LAUNCH_FAILED";
+    public const string AppResolveFailed = "APP_RESOLVE_FAILED";
     public const string UiAutomationUnavailable = "UI_AUTOMATION_UNAVAILABLE";
     public const string UiAutomationFailed = "UI_AUTOMATION_FAILED";
     public const string UiElementNotFound = "UI_ELEMENT_NOT_FOUND";

@@ -112,6 +112,14 @@ public sealed partial class CommandHandler
         {
             return await HandleGitRefreshIndexAsync(gitRefreshIndexCommand, cancellationToken);
         }
+        else if (command is AppResolveCommand appResolveCommand)
+        {
+            return await HandleAppResolveAsync(appResolveCommand, cancellationToken);
+        }
+        else if (command is AppLaunchCommand appLaunchCommand)
+        {
+            return await HandleAppLaunchAsync(appLaunchCommand, cancellationToken);
+        }
         else if (command is WindowListCommand windowListCommand)
         {
             return await HandleWindowListAsync(windowListCommand, cancellationToken);
