@@ -49,6 +49,8 @@ public static class ErrorCodes
     public const string UiWaitTimeout = "UI_WAIT_TIMEOUT";
     public const string UiKeyboardInputFailed = "UI_KEYBOARD_INPUT_FAILED";
     public const string UiForegroundMismatch = "UI_FOREGROUND_MISMATCH";
+    public const string UiScrollNotSupported = "UI_SCROLL_NOT_SUPPORTED";
+    public const string UiScrollFailed = "UI_SCROLL_FAILED";
 
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";

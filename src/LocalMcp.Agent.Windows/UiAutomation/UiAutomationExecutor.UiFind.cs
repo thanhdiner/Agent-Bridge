@@ -20,7 +20,9 @@ public sealed partial class UiAutomationExecutor
         (UIA_PatternIds.UIA_TextPatternId, "text"),
         (UIA_PatternIds.UIA_LegacyIAccessiblePatternId, "legacy-accessible"),
         (UIA_PatternIds.UIA_WindowPatternId, "window"),
-        (UIA_PatternIds.UIA_TransformPatternId, "transform")
+        (UIA_PatternIds.UIA_TransformPatternId, "transform"),
+        (UIA_PatternIds.UIA_ScrollPatternId, "scroll"),
+        (UIA_PatternIds.UIA_ScrollItemPatternId, "scroll-item")
     ];
 
     public async Task<CommandResult<UiFindResult>> FindAsync(
@@ -166,13 +168,24 @@ public sealed partial class UiAutomationExecutor
 
         if (MatchesFindSelector(name, matchedAutomationId, matchedControlType, automationId, nameContains, controlType))
         {
-            var key = CreateFindOccurrenceKey(
-                name,
-                matchedAutomationId,
-                matchedControlType,
-                preferAutomationId: !string.IsNullOrEmpty(automationId));
-            context.Occurrences.TryGetValue(key, out var occurrenceIndex);
-            context.Occurrences[key] = occurrenceIndex + 1;
+            context.ControlTypeOccurrences.TryGetValue(matchedControlType, out var controlTypeOccurrenceIndex);
+            context.ControlTypeOccurrences[matchedControlType] = controlTypeOccurrenceIndex + 1;
+
+            int occurrenceIndex;
+            if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(matchedAutomationId))
+            {
+                occurrenceIndex = controlTypeOccurrenceIndex;
+            }
+            else
+            {
+                var key = CreateFindOccurrenceKey(
+                    name,
+                    matchedAutomationId,
+                    matchedControlType,
+                    preferAutomationId: !string.IsNullOrEmpty(automationId));
+                context.Occurrences.TryGetValue(key, out occurrenceIndex);
+                context.Occurrences[key] = occurrenceIndex + 1;
+            }
 
             context.Matches.Add(new UiFindMatch
             {
@@ -346,6 +359,7 @@ public sealed partial class UiAutomationExecutor
         public CancellationToken CancellationToken { get; }
         public List<UiFindMatch> Matches { get; } = [];
         public Dictionary<string, int> Occurrences { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> ControlTypeOccurrences { get; } = new(StringComparer.OrdinalIgnoreCase);
         public int VisitedNodes { get; set; }
         public bool Truncated { get; set; }
         public bool StopRequested { get; set; }

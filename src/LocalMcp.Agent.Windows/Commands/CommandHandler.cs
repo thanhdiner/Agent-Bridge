@@ -164,6 +164,10 @@ public sealed partial class CommandHandler
         {
             return await HandleUiTypeTextAsync(uiTypeTextCommand, cancellationToken);
         }
+        else if (command is UiScrollCommand uiScrollCommand)
+        {
+            return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.AdditionalUiDispatch.HandleAsync(_uiAutomationExecutor, uiScrollCommand, cancellationToken));
+        }
         else if (command is UiWaitCommand uiWaitCommand)
         {
             return await HandleUiWaitAsync(uiWaitCommand, cancellationToken);

@@ -22,6 +22,7 @@ public sealed partial class GatewayConnection
             nameof(UiSetValueCommand) => JsonSerializer.Deserialize<UiSetValueCommand>(rawJson, JsonOptions.Default),
             nameof(UiPressKeyCommand) => JsonSerializer.Deserialize<UiPressKeyCommand>(rawJson, JsonOptions.Default),
             nameof(UiTypeTextCommand) => JsonSerializer.Deserialize<UiTypeTextCommand>(rawJson, JsonOptions.Default),
+            nameof(UiScrollCommand) => JsonSerializer.Deserialize<UiScrollCommand>(rawJson, JsonOptions.Default),
             nameof(UiWaitCommand) => JsonSerializer.Deserialize<UiWaitCommand>(rawJson, JsonOptions.Default),
             nameof(UiFindCommand) => JsonSerializer.Deserialize<UiFindCommand>(rawJson, JsonOptions.Default),
             nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(rawJson, JsonOptions.Default),
