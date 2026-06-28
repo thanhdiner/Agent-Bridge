@@ -79,6 +79,28 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<UiPressKeyResult>> PressKeyAsync(
+        string windowHandle,
+        string keys,
+        string? automationId,
+        string? name,
+        string? controlType,
+        int occurrenceIndex,
+        bool focusWindow,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
+    Task<CommandResult<UiTypeTextResult>> TypeTextAsync(
+        string windowHandle,
+        string text,
+        string? automationId,
+        string? name,
+        string? controlType,
+        int occurrenceIndex,
+        bool focusWindow,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<UiWaitResult>> WaitAsync(
         string windowHandle,
         string? automationId,

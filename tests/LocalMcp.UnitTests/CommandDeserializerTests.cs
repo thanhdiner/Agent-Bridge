@@ -66,6 +66,8 @@ public sealed class CommandDeserializerTests
                 nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
                 nameof(UiGetValueCommand) => JsonSerializer.Deserialize<UiGetValueCommand>(payload, JsonOptions.Default),
                 nameof(UiSetValueCommand) => JsonSerializer.Deserialize<UiSetValueCommand>(payload, JsonOptions.Default),
+                nameof(UiPressKeyCommand) => JsonSerializer.Deserialize<UiPressKeyCommand>(payload, JsonOptions.Default),
+                nameof(UiTypeTextCommand) => JsonSerializer.Deserialize<UiTypeTextCommand>(payload, JsonOptions.Default),
                 nameof(UiWaitCommand) => JsonSerializer.Deserialize<UiWaitCommand>(payload, JsonOptions.Default),
                 nameof(UiFindCommand) => JsonSerializer.Deserialize<UiFindCommand>(payload, JsonOptions.Default),
                 nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(payload, JsonOptions.Default),
@@ -603,6 +605,70 @@ public sealed class CommandDeserializerTests
         Assert.Equal(0, setCommand.OccurrenceIndex);
         Assert.True(setCommand.FocusWindow);
         Assert.False(setCommand.Append);
+    }
+
+    [Fact]
+    public void Deserialize_UiPressKeyCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiPressKeyCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"keys\":\"Ctrl+L\",\"automationId\":\"address\",\"name\":\"Address\",\"controlType\":\"Edit\",\"occurrenceIndex\":2,\"focusWindow\":false}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var keyCommand = Assert.IsType<UiPressKeyCommand>(command);
+        Assert.Equal("Ctrl+L", keyCommand.Keys);
+        Assert.Equal("address", keyCommand.AutomationId);
+        Assert.Equal("Address", keyCommand.Name);
+        Assert.Equal("Edit", keyCommand.ControlType);
+        Assert.Equal(2, keyCommand.OccurrenceIndex);
+        Assert.False(keyCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiPressKeyCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiPressKeyCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"keys\":\"F5\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var keyCommand = Assert.IsType<UiPressKeyCommand>(command);
+        Assert.Equal(0, keyCommand.OccurrenceIndex);
+        Assert.True(keyCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiTypeTextCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiTypeTextCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"text\":\"hello\",\"automationId\":\"editor\",\"name\":\"Text editor\",\"controlType\":\"Document\",\"occurrenceIndex\":1,\"focusWindow\":false}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var textCommand = Assert.IsType<UiTypeTextCommand>(command);
+        Assert.Equal("hello", textCommand.Text);
+        Assert.Equal("editor", textCommand.AutomationId);
+        Assert.Equal("Text editor", textCommand.Name);
+        Assert.Equal("Document", textCommand.ControlType);
+        Assert.Equal(1, textCommand.OccurrenceIndex);
+        Assert.False(textCommand.FocusWindow);
+    }
+
+    [Fact]
+    public void Deserialize_UiTypeTextCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiTypeTextCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-28T00:00:00Z\",\"windowHandle\":\"0x1234\",\"text\":\"hello\",\"name\":\"Text editor\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var textCommand = Assert.IsType<UiTypeTextCommand>(command);
+        Assert.Equal(0, textCommand.OccurrenceIndex);
+        Assert.True(textCommand.FocusWindow);
     }
 
     [Fact]

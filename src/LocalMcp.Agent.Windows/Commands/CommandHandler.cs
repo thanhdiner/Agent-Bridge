@@ -156,6 +156,14 @@ public sealed partial class CommandHandler
         {
             return await HandleUiSetValueAsync(uiSetValueCommand, cancellationToken);
         }
+        else if (command is UiPressKeyCommand uiPressKeyCommand)
+        {
+            return await HandleUiPressKeyAsync(uiPressKeyCommand, cancellationToken);
+        }
+        else if (command is UiTypeTextCommand uiTypeTextCommand)
+        {
+            return await HandleUiTypeTextAsync(uiTypeTextCommand, cancellationToken);
+        }
         else if (command is UiWaitCommand uiWaitCommand)
         {
             return await HandleUiWaitAsync(uiWaitCommand, cancellationToken);
