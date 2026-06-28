@@ -55,6 +55,7 @@ public sealed class CommandDeserializerTests
                 nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(payload, JsonOptions.Default),
                 nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(payload, JsonOptions.Default),
                 nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
+                nameof(UiTreeCommand) => JsonSerializer.Deserialize<UiTreeCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
@@ -262,6 +263,35 @@ public sealed class CommandDeserializerTests
         var refreshCommand = Assert.IsType<GitRefreshIndexCommand>(command);
         Assert.Equal("C:/src/repo", refreshCommand.Path);
         Assert.Equal("src/app.cs", refreshCommand.PathSpec);
+    }
+
+    [Fact]
+    public void Deserialize_UiTreeCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiTreeCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"windowHandle\":\"0x1234\",\"maxDepth\":8,\"maxNodes\":750}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var treeCommand = Assert.IsType<UiTreeCommand>(command);
+        Assert.Equal("0x1234", treeCommand.WindowHandle);
+        Assert.Equal(8, treeCommand.MaxDepth);
+        Assert.Equal(750, treeCommand.MaxNodes);
+    }
+
+    [Fact]
+    public void Deserialize_UiTreeCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"UiTreeCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"windowHandle\":\"1234\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var treeCommand = Assert.IsType<UiTreeCommand>(command);
+        Assert.Equal(6, treeCommand.MaxDepth);
+        Assert.Equal(500, treeCommand.MaxNodes);
     }
 
     [Fact]

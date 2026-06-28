@@ -9,7 +9,7 @@ using LocalMcp.BuildingBlocks.Serialization;
 using LocalMcp.BuildingBlocks.Errors;
 namespace LocalMcp.Agent.Windows.Connection;
 
-public sealed class GatewayConnection : IAsyncDisposable
+public sealed partial class GatewayConnection : IAsyncDisposable
 {
     private readonly AgentOptions _agentOptions;
     private readonly AgentSecurityOptions _agentSecurityOptions;
@@ -157,7 +157,7 @@ public sealed class GatewayConnection : IAsyncDisposable
                         nameof(CopyCommand) => JsonSerializer.Deserialize<CopyCommand>(rawJson, JsonOptions.Default),
                         nameof(DeleteCommand) => JsonSerializer.Deserialize<DeleteCommand>(rawJson, JsonOptions.Default),
                         nameof(RemoveDirectoryCommand) => JsonSerializer.Deserialize<RemoveDirectoryCommand>(rawJson, JsonOptions.Default),
-                        _ => null
+                        _ => DeserializeExtendedCommand(typeName, rawJson)
                     };
                 }
                 catch (JsonException ex)

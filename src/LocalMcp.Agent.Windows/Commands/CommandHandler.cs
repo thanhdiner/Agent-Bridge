@@ -112,6 +112,10 @@ public sealed partial class CommandHandler
         {
             return await HandleGitRefreshIndexAsync(gitRefreshIndexCommand, cancellationToken);
         }
+        else if (command is UiTreeCommand uiTreeCommand)
+        {
+            return await HandleUiTreeAsync(uiTreeCommand, cancellationToken);
+        }
         else if (command is ProjectCheckCommand projectCheckCommand)
         {
             return await HandleProjectCheckAsync(projectCheckCommand, cancellationToken);
