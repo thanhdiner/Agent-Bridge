@@ -443,6 +443,66 @@ public sealed class FileSystemTools
         return await DispatchAsync<GitShowResult>(command, "git_show", deviceId, GetCancellationToken());
     }
 
+    [McpServerTool(Name = "git_restore_file", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false), Description("Restores a regular tracked file from HEAD into the working tree on a target Windows agent device. Does not modify the Git index/staging. Requires Git on the agent and files:write scope.")]
+    public async Task<CallToolResult> GitRestoreFileAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute directory path inside the Git working tree")] string path,
+        [Description("Exactly one repository-relative literal file path to restore")] string pathSpec,
+        [Description("Optional expected SHA-256 hash of the current file content as a concurrency guard")] string? expectedSha256 = null)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+        }
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+        if (string.IsNullOrWhiteSpace(pathSpec))
+            return CreateErrorResult("INVALID_REQUEST", "pathSpec parameter is required.");
+
+        var command = new GitRestoreFileCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            PathSpec = pathSpec,
+            ExpectedSha256 = expectedSha256
+        };
+
+        return await DispatchAsync<GitRestoreFileResult>(command, "git_restore_file", deviceId, GetCancellationToken());
+    }
+
+    [McpServerTool(Name = "git_refresh_index", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false), Description("Refreshes the Git index for a single regular tracked file on a target Windows agent device, updating out-of-sync stat cache or line ending attributes if semantic content matches the index. Requires Git on the agent and files:write scope.")]
+    public async Task<CallToolResult> GitRefreshIndexAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("An absolute directory path inside the Git working tree")] string path,
+        [Description("Exactly one repository-relative literal file path to refresh")] string pathSpec)
+    {
+        if (!await AuthorizeScopeAsync("FilesWritePolicy"))
+        {
+            return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:write");
+        }
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        if (string.IsNullOrWhiteSpace(path))
+            return CreateErrorResult("INVALID_REQUEST", "path parameter is required.");
+        if (string.IsNullOrWhiteSpace(pathSpec))
+            return CreateErrorResult("INVALID_REQUEST", "pathSpec parameter is required.");
+
+        var command = new GitRefreshIndexCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = path,
+            PathSpec = pathSpec
+        };
+
+        return await DispatchAsync<GitRefreshIndexResult>(command, "git_refresh_index", deviceId, GetCancellationToken());
+    }
+
     [McpServerTool(Name = "project_verify", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description("Detects a supported project type and runs fixed build, test, lint, or typecheck steps on the target Windows agent. Supports .NET, Node.js, Rust, PHP/Laravel, Python, and Go projects. This executes project-defined code and may generate build artifacts. Requires dev:execute scope. Ask the user for confirmation before executing.")]
     public async Task<CallToolResult> ProjectCheckAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,

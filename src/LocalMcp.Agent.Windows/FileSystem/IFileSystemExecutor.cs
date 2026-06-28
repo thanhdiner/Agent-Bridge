@@ -103,6 +103,21 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<GitRestoreFileResult>> GitRestoreFileAsync(
+        string path,
+        string pathSpec,
+        string? expectedSha256,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
+    Task<CommandResult<GitRefreshIndexResult>> GitRefreshIndexAsync(
+        string path,
+        string pathSpec,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<ProjectVerifyResult>> ProjectCheckAsync(
         string path,
         string projectType,

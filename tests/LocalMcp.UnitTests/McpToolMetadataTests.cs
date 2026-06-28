@@ -127,6 +127,8 @@ public sealed class McpToolMetadataTests
     [Fact] public void GitDiff_NoInternalParameters() => AssertNoInternalParams("git_diff");
     [Fact] public void GitLog_NoInternalParameters() => AssertNoInternalParams("git_log");
     [Fact] public void GitShow_NoInternalParameters() => AssertNoInternalParams("git_show");
+    [Fact] public void GitRestoreFile_NoInternalParameters() => AssertNoInternalParams("git_restore_file");
+    [Fact] public void GitRefreshIndex_NoInternalParameters() => AssertNoInternalParams("git_refresh_index");
     [Fact] public void ProjectCheck_NoInternalParameters() => AssertNoInternalParams(ExecutionToolName);
     [Fact] public void FsWrite_NoInternalParameters() => AssertNoInternalParams("fs_write");
     [Fact] public void FsPatch_NoInternalParameters() => AssertNoInternalParams("fs_patch");
@@ -247,6 +249,22 @@ public sealed class McpToolMetadataTests
     {
         var names = GetParamNames("git_show").ToHashSet();
         var expected = new[] { "deviceId", "path", "revision", "pathSpecs", "includePatch", "includeStats", "contextLines", "maxBytes" }.ToHashSet();
+        Assert.True(expected.SetEquals(names));
+    }
+
+    [Fact]
+    public void GitRestoreFile_HasExactSchema()
+    {
+        var names = GetParamNames("git_restore_file").ToHashSet();
+        var expected = new[] { "deviceId", "path", "pathSpec", "expectedSha256" }.ToHashSet();
+        Assert.True(expected.SetEquals(names));
+    }
+
+    [Fact]
+    public void GitRefreshIndex_HasExactSchema()
+    {
+        var names = GetParamNames("git_refresh_index").ToHashSet();
+        var expected = new[] { "deviceId", "path", "pathSpec" }.ToHashSet();
         Assert.True(expected.SetEquals(names));
     }
 

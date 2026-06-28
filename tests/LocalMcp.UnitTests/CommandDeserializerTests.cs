@@ -53,6 +53,8 @@ public sealed class CommandDeserializerTests
                 nameof(GitDiffCommand) => JsonSerializer.Deserialize<GitDiffCommand>(payload, JsonOptions.Default),
                 nameof(GitLogCommand) => JsonSerializer.Deserialize<GitLogCommand>(payload, JsonOptions.Default),
                 nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(payload, JsonOptions.Default),
+                nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(payload, JsonOptions.Default),
+                nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(payload, JsonOptions.Default),
                 nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(payload, JsonOptions.Default),
                 nameof(PowerShellExecuteCommand) => JsonSerializer.Deserialize<PowerShellExecuteCommand>(payload, JsonOptions.Default),
                 nameof(TreeCommand) => JsonSerializer.Deserialize<TreeCommand>(payload, JsonOptions.Default),
@@ -229,6 +231,37 @@ public sealed class CommandDeserializerTests
         var statusCommand = Assert.IsType<GitStatusCommand>(command);
         Assert.True(statusCommand.IncludeUntracked);
         Assert.Equal(1000, statusCommand.MaxEntries);
+    }
+
+    [Fact]
+    public void Deserialize_GitRestoreFileCommand_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitRestoreFileCommand\",\"commandId\":\"{{id}}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\",\"pathSpec\":\"src/app.cs\",\"expectedSha256\":\"abc\"}}";
+        json = json.Replace("{id}", id.ToString(), StringComparison.Ordinal);
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var restoreCommand = Assert.IsType<GitRestoreFileCommand>(command);
+        Assert.Equal("C:/src/repo", restoreCommand.Path);
+        Assert.Equal("src/app.cs", restoreCommand.PathSpec);
+        Assert.Equal("abc", restoreCommand.ExpectedSha256);
+    }
+
+    [Fact]
+    public void Deserialize_GitRefreshIndexCommand_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"GitRefreshIndexCommand\",\"commandId\":\"{{id}}\",\"deviceId\":\"dev\",\"createdAt\":\"2024-01-01T00:00:00Z\",\"path\":\"C:/src/repo\",\"pathSpec\":\"src/app.cs\"}}";
+        json = json.Replace("{id}", id.ToString(), StringComparison.Ordinal);
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var refreshCommand = Assert.IsType<GitRefreshIndexCommand>(command);
+        Assert.Equal("C:/src/repo", refreshCommand.Path);
+        Assert.Equal("src/app.cs", refreshCommand.PathSpec);
     }
 
     [Fact]
