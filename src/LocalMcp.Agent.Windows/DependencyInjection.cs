@@ -3,6 +3,7 @@ using LocalMcp.Agent.Windows.Security;
 using LocalMcp.Agent.Windows.FileSystem;
 using LocalMcp.Agent.Windows.Commands;
 using LocalMcp.Agent.Windows.PowerShell;
+using LocalMcp.Agent.Windows.UiAutomation;
 using Microsoft.Extensions.Configuration;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -83,6 +84,7 @@ public static class DependencyInjection
         services.AddSingleton<IPowerShellSessionCoordinator>(sp =>
             sp.GetRequiredService<PowerShellSessionRegistry>());
         services.AddSingleton<PowerShellSessionExecutor>();
+        services.AddSingleton<IUiAutomationExecutor, UiAutomationExecutor>();
         services.AddSingleton<CommandHandler>(sp =>
             new CommandHandler(
                 sp.GetRequiredService<IPathPolicy>(),
@@ -90,6 +92,7 @@ public static class DependencyInjection
                 sp.GetRequiredService<IDirectoryCopyExecutor>(),
                 sp.GetRequiredService<PowerShellSessionRegistry>(),
                 sp.GetRequiredService<PowerShellSessionExecutor>(),
+                sp.GetRequiredService<IUiAutomationExecutor>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CommandHandler>>()));
         services.AddSingleton<GatewayConnection>();
 

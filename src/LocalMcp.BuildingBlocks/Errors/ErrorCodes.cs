@@ -26,6 +26,9 @@ public static class ErrorCodes
     public const string GitCommandFailed = "GIT_COMMAND_FAILED";
     public const string ProjectTypeNotDetected = "PROJECT_TYPE_NOT_DETECTED";
     public const string ProjectManifestInvalid = "PROJECT_MANIFEST_INVALID";
+    public const string WindowNotFound = "WINDOW_NOT_FOUND";
+    public const string UiAutomationUnavailable = "UI_AUTOMATION_UNAVAILABLE";
+    public const string UiAutomationFailed = "UI_AUTOMATION_FAILED";
 
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";

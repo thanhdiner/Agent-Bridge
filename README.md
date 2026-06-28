@@ -75,6 +75,7 @@ graph TD
 | Tool | Description |
 |---|---|
 | <code>project_verify</code> | Detects .NET, Node.js, Rust, PHP/Laravel, Python, or Go projects and runs fixed `build`, `test`, `lint`, or `typecheck` steps with bounded output and timeout controls. Python prefers `.venv\Scripts` tools and uses fixed fallbacks; Go disables automatic toolchain and module downloads. |
+| `ui_tree` | Reads a bounded Windows UI Automation tree for one live window handle and returns control names, automation IDs, control types, bounds, enabled states, and bounded values. Password values are not returned. |
 
 > [!CAUTION]
 > Project verification executes repository-defined code and may generate build artifacts. It is not an operating-system sandbox. Grant `dev:execute` only to trusted clients and run it only against trusted projects. Execution is denied entirely when `Security:AuthenticationEnabled=false`.

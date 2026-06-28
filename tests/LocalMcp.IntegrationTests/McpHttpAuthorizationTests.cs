@@ -66,7 +66,8 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
         builder.Services.AddMcpServer()
             .WithHttpTransport()
             .WithTools<FileSystemTools>()
-            .WithTools<BatchReadTools>();
+            .WithTools<BatchReadTools>()
+            .WithTools<UiAutomationTools>();
 
         builder.Services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, opts =>
         {
@@ -385,6 +386,38 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
                 deviceId = "missing-test-device",
                 path = "C:/src/repo"
             });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task DevExecuteScope_CallingUiTree_ReachesDispatch_AgentOffline()
+    {
+        await StartServerAsync();
+        var token = MakeToken("dev:execute");
+        var resp = await SendMcpRequestAsync(token, "tools/call", "ui_tree", new
+        {
+            deviceId = "missing-test-device",
+            windowHandle = "0x1234",
+            maxDepth = 6,
+            maxNodes = 500
+        });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("AGENT_OFFLINE", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task FilesReadScope_CallingUiTree_ReturnsForbidden()
+    {
+        await StartServerAsync();
+        var token = MakeToken("files:read");
+        var resp = await SendMcpRequestAsync(token, "tools/call", "ui_tree", new
+        {
+            deviceId = "missing-test-device",
+            windowHandle = "0x1234"
+        });
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Contains("FORBIDDEN", await resp.Content.ReadAsStringAsync());
