@@ -70,9 +70,42 @@ public sealed partial class UiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken)
     {
+        var snapshot = CaptureWindowSnapshot(
+            includeInvisible,
+            includeUntitled,
+            cancellationToken);
+        if (!snapshot.Completed)
+        {
+            return WindowListFailure(
+                commandId,
+                ErrorCodes.WindowEnumerationFailed,
+                "Windows could not enumerate top-level windows.");
+        }
+
+        var truncated = snapshot.Windows.Count > maxWindows;
+        var windows = snapshot.Windows.Take(maxWindows).ToList();
+        return new CommandResult<WindowListResult>
+        {
+            CommandId = commandId,
+            Success = true,
+            Data = new WindowListResult
+            {
+                Windows = windows,
+                Count = windows.Count,
+                MaxWindows = maxWindows,
+                Truncated = truncated
+            }
+        };
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static WindowSnapshot CaptureWindowSnapshot(
+        bool includeInvisible,
+        bool includeUntitled,
+        CancellationToken cancellationToken)
+    {
         var windows = new List<WindowInfo>();
         var foregroundWindow = GetForegroundWindow();
-        var truncated = false;
         var cancelled = false;
         var zOrder = 0;
 
@@ -96,12 +129,6 @@ public sealed partial class UiAutomationExecutor
             var title = ReadWindowTitle(windowHandle);
             if (!includeUntitled && string.IsNullOrWhiteSpace(title))
                 return true;
-
-            if (windows.Count >= maxWindows)
-            {
-                truncated = true;
-                return false;
-            }
 
             GetWindowThreadProcessId(windowHandle, out var processId);
             windows.Add(new WindowInfo
@@ -128,35 +155,14 @@ public sealed partial class UiAutomationExecutor
 
         var completed = EnumWindows(callback, IntPtr.Zero);
         GC.KeepAlive(callback);
-
         if (cancelled)
             cancellationToken.ThrowIfCancellationRequested();
-
-        if (!completed && !truncated)
-        {
-            return WindowListFailure(
-                commandId,
-                ErrorCodes.WindowEnumerationFailed,
-                "Windows could not enumerate top-level windows.");
-        }
 
         var ordered = windows
             .OrderByDescending(window => window.IsForeground)
             .ThenBy(window => window.ZOrder)
             .ToList();
-
-        return new CommandResult<WindowListResult>
-        {
-            CommandId = commandId,
-            Success = true,
-            Data = new WindowListResult
-            {
-                Windows = ordered,
-                Count = ordered.Count,
-                MaxWindows = maxWindows,
-                Truncated = truncated
-            }
-        };
+        return new WindowSnapshot(completed, ordered);
     }
 
     [SupportedOSPlatform("windows")]
@@ -239,6 +245,8 @@ public sealed partial class UiAutomationExecutor
             Success = false,
             Error = new CommandError(code, message)
         };
+
+    private sealed record WindowSnapshot(bool Completed, IReadOnlyList<WindowInfo> Windows);
 
     private delegate bool EnumWindowsProc(IntPtr windowHandle, IntPtr parameter);
 
