@@ -149,6 +149,7 @@ internal class PowerShellSessionRegistry : IPowerShellSessionCoordinator, IDispo
                 {
                     if (session.State == PowerShellSessionStateValue.Running)
                     {
+                        session.OutputIncomplete = true;
                         var proc = session.Process;
                         if (proc != null)
                         {
@@ -163,20 +164,41 @@ internal class PowerShellSessionRegistry : IPowerShellSessionCoordinator, IDispo
                                     bool exited = proc.WaitForExit(TimeSpan.FromSeconds(2));
                                     if (exited)
                                     {
-                                        if (session.State == PowerShellSessionStateValue.Running)
+                                        // Give the executor's drain tasks a short bounded time (e.g. 200ms) to drain and auto-transition
+                                        try
                                         {
+                                            session.CompletionTask.Wait(TimeSpan.FromMilliseconds(200));
+                                        }
+                                        catch {}
+
+                                        if (!session.CompletionTask.IsCompleted)
+                                        {
+                                            session.OutputIncomplete = true;
                                             session.TryTransition(PowerShellSessionStateValue.Cancelled);
                                         }
                                     }
                                     else
                                     {
+                                        session.OutputIncomplete = true;
+                                        if (!session.CompletionTask.IsCompleted)
+                                        {
+                                            session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                                        }
                                         _logger.LogCritical("CRITICAL: Process tree for session {SessionId} (PID {Pid}) failed to exit after forced kill.", session.SessionId, proc.Id);
                                     }
                                 }
                                 else
                                 {
-                                    if (session.State == PowerShellSessionStateValue.Running)
+                                    // Process already exited, but completion task might be draining
+                                    try
                                     {
+                                        session.CompletionTask.Wait(TimeSpan.FromMilliseconds(200));
+                                    }
+                                    catch {}
+
+                                    if (!session.CompletionTask.IsCompleted)
+                                    {
+                                        session.OutputIncomplete = true;
                                         session.TryTransition(PowerShellSessionStateValue.Cancelled);
                                     }
                                 }
@@ -188,7 +210,10 @@ internal class PowerShellSessionRegistry : IPowerShellSessionCoordinator, IDispo
                         }
                         else
                         {
-                            session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                            if (!session.CompletionTask.IsCompleted)
+                            {
+                                session.TryTransition(PowerShellSessionStateValue.Cancelled);
+                            }
                         }
                     }
                 }

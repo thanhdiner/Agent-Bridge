@@ -31,7 +31,8 @@ internal sealed record OutputSnapshot(
     long NextStdoutOffset,
     long NextStderrOffset,
     bool Truncated,
-    bool InvalidUtf8 = false);
+    bool InvalidUtf8 = false,
+    bool OutputIncomplete = false);
 
 internal class PowerShellSessionState : IDisposable
 {
@@ -46,6 +47,8 @@ internal class PowerShellSessionState : IDisposable
     private volatile PowerShellSessionSnapshot _snapshot = new(PowerShellSessionStateValue.Running, null, null);
 
     private readonly object _outputLock = new();
+    private bool _outputFinalized;
+    public bool OutputIncomplete { get; set; }
     private byte[]? _stdoutBuffer;
     private byte[]? _stderrBuffer;
     private int _stdoutLength;
@@ -110,10 +113,16 @@ internal class PowerShellSessionState : IDisposable
         {
             if (_snapshot.State == PowerShellSessionStateValue.Running)
             {
-                // 1. Finalize stdout/stderr pending state first (by discarding incomplete bytes)
-                FlushPendingBytes();
+                lock (_outputLock)
+                {
+                    // a. finalize pending bytes
+                    FlushPendingBytes();
 
-                // 2. Publish terminal state snapshot
+                    // b. set _outputFinalized = true
+                    _outputFinalized = true;
+                }
+
+                // c. publish terminal snapshot
                 _snapshot = new PowerShellSessionSnapshot(newState, DateTimeOffset.UtcNow, exitCode);
                 transitioned = true;
             }
@@ -121,7 +130,7 @@ internal class PowerShellSessionState : IDisposable
 
         if (transitioned)
         {
-            // 3. Complete CompletionTask last
+            // d. complete CompletionTask cuối cùng
             _completionSource.TrySetResult();
         }
         return transitioned;
@@ -131,7 +140,7 @@ internal class PowerShellSessionState : IDisposable
     {
         lock (_outputLock)
         {
-            if (_truncated)
+            if (_outputFinalized || _truncated)
                 return;
 
             byte[] combined;
@@ -223,7 +232,7 @@ internal class PowerShellSessionState : IDisposable
     {
         lock (_outputLock)
         {
-            if (_truncated)
+            if (_outputFinalized || _truncated)
                 return;
 
             byte[] combined;
@@ -343,7 +352,8 @@ internal class PowerShellSessionState : IDisposable
                 NextStdoutOffset: stdOffset + stdoutLen,
                 NextStderrOffset: errOffset + stderrLen,
                 Truncated: _truncated,
-                InvalidUtf8: _invalidUtf8Detected);
+                InvalidUtf8: _invalidUtf8Detected,
+                OutputIncomplete: OutputIncomplete);
         }
     }
 

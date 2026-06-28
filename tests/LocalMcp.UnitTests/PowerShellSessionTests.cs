@@ -1510,8 +1510,8 @@ public sealed class PowerShellSessionTests
             // Verify force kill was initiated
             Assert.True(nonCancellableSession.SignalCancelCalled);
 
-            // Verify session transition to Cancelled
-            Assert.Equal(PowerShellSessionStateValue.Cancelled, session.State);
+            // Verify session transition to Cancelled or Failed
+            Assert.True(session.State == PowerShellSessionStateValue.Cancelled || session.State == PowerShellSessionStateValue.Failed);
 
             // Verify CompletionTask is completed
             Assert.True(session.CompletionTask.IsCompleted);
@@ -1532,5 +1532,120 @@ public sealed class PowerShellSessionTests
         {
             registry.Dispose();
         }
+    }
+
+    [Fact]
+    public void SessionState_AppendAfterTransition_Ignored()
+    {
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        state.TryTransition(PowerShellSessionStateValue.Completed, 0);
+
+        var data = System.Text.Encoding.UTF8.GetBytes("HELLO");
+        state.AppendStdout(data, data.Length);
+        state.AppendStderr(data, data.Length);
+
+        var snap = state.ReadOutput(0, 0, 100);
+        Assert.Empty(snap.StdoutBytes);
+        Assert.Empty(snap.StderrBytes);
+    }
+
+    [Fact]
+    public async Task SessionState_CompletionTaskAwait_FreezeDraining()
+    {
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        var initial = System.Text.Encoding.UTF8.GetBytes("INITIAL");
+        state.AppendStdout(initial, initial.Length);
+
+        // Transition to Completed
+        state.TryTransition(PowerShellSessionStateValue.Completed, 0);
+
+        // Await CompletionTask
+        await state.CompletionTask;
+
+        // Capture output immediately after await
+        var snap1 = state.ReadOutput(0, 0, 100);
+        Assert.Equal("INITIAL", System.Text.Encoding.UTF8.GetString(snap1.StdoutBytes));
+
+        // Fake late drain task tries to append
+        var late = System.Text.Encoding.UTF8.GetBytes("LATE");
+        state.AppendStdout(late, late.Length);
+
+        // Output must remain identical
+        var snap2 = state.ReadOutput(0, 0, 100);
+        Assert.Equal("INITIAL", System.Text.Encoding.UTF8.GetString(snap2.StdoutBytes));
+    }
+
+    [PwshFact]
+    public async Task RegistryShutdown_FallbackForceKill_OutputIncompleteAndFrozen()
+    {
+        var pwshPath = GetPwshPath();
+        Assert.NotNull(pwshPath);
+
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<PowerShellSessionRegistry>.Instance;
+        var registry = new TestNonCancellableRegistry(logger);
+
+        try
+        {
+            var executor = new PowerShellSessionExecutor(registry, NullLogger<PowerShellSessionExecutor>());
+            var session = registry.TryCreate("dev-1", 4096, out _);
+            Assert.NotNull(session);
+
+            executor.StartBackground(
+                session!,
+                pwshPath!,
+                AppDomain.CurrentDomain.BaseDirectory,
+                "Write-Output 'BEFORE'; Start-Sleep -Seconds 100",
+                timeoutSeconds: 120);
+
+            // Wait for output "BEFORE" to be written
+            string outputText = "";
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (!outputText.Contains("BEFORE") && !cts.IsCancellationRequested)
+            {
+                var snap = session.ReadOutput(0, 0, 4096);
+                outputText = System.Text.Encoding.UTF8.GetString(snap.StdoutBytes);
+                await Task.Delay(100);
+            }
+            Assert.Contains("BEFORE", outputText);
+
+            // Trigger CancelAll which will fallback to force-kill after 5s graceful timeout
+            registry.CancelAll();
+
+            // Verify final state is terminal (Cancelled or Failed)
+            Assert.True(session.State == PowerShellSessionStateValue.Cancelled || session.State == PowerShellSessionStateValue.Failed);
+            var finalSnap = session.ReadOutput(0, 0, 4096);
+            Assert.True(finalSnap.OutputIncomplete, "Output should be marked incomplete due to force-kill fallback");
+
+            var beforeBytes = finalSnap.StdoutBytes;
+            var beforeInvalid = finalSnap.InvalidUtf8;
+
+            // Try to append late data
+            var late = System.Text.Encoding.UTF8.GetBytes("LATE");
+            session.AppendStdout(late, late.Length);
+
+            // Verify output snapshot and InvalidUtf8 are completely frozen and unchanged
+            var snapAfterLate = session.ReadOutput(0, 0, 4096);
+            Assert.Equal(beforeBytes, snapAfterLate.StdoutBytes);
+            Assert.Equal(beforeInvalid, snapAfterLate.InvalidUtf8);
+        }
+        finally
+        {
+            registry.Dispose();
+        }
+    }
+
+    [Fact]
+    public void SessionState_DisposeRunningSession_AppendIgnored()
+    {
+        var state = new PowerShellSessionState(Guid.NewGuid(), "dev", 1024);
+        state.Dispose();
+
+        var late = System.Text.Encoding.UTF8.GetBytes("LATE");
+        state.AppendStdout(late, late.Length);
+        state.AppendStderr(late, late.Length);
+
+        var snap = state.ReadOutput(0, 0, 100);
+        Assert.Empty(snap.StdoutBytes);
+        Assert.Empty(snap.StderrBytes);
     }
 }

@@ -38,4 +38,7 @@ public sealed record PowerShellSessionResult
 
     /// <summary>True when invalid UTF-8 sequences were detected and discarded during execution or at terminal transition.</summary>
     public bool InvalidUtf8 { get; init; }
+
+    /// <summary>True when session output collection was forced early and final logs might be incomplete.</summary>
+    public bool OutputIncomplete { get; init; }
 }
