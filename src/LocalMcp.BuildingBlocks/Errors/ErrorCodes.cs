@@ -50,6 +50,11 @@ public static class ErrorCodes
     public const string UiToggleNotSupported = "UI_TOGGLE_NOT_SUPPORTED";
     public const string UiToggleFailed = "UI_TOGGLE_FAILED";
     public const string UiToggleVerificationFailed = "UI_TOGGLE_VERIFICATION_FAILED";
+    public const string UiRangeValueNotSupported = "UI_RANGE_VALUE_NOT_SUPPORTED";
+    public const string UiRangeValueReadOnly = "UI_RANGE_VALUE_READ_ONLY";
+    public const string UiRangeValueOutOfRange = "UI_RANGE_VALUE_OUT_OF_RANGE";
+    public const string UiRangeValueFailed = "UI_RANGE_VALUE_FAILED";
+    public const string UiRangeValueVerificationFailed = "UI_RANGE_VALUE_VERIFICATION_FAILED";
     public const string UiValueNotSupported = "UI_VALUE_NOT_SUPPORTED";
     public const string UiValueReadFailed = "UI_VALUE_READ_FAILED";
     public const string UiValueWriteFailed = "UI_VALUE_WRITE_FAILED";
