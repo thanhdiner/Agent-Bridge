@@ -18,6 +18,7 @@ public sealed partial class UiAutomationExecutor
         (UIA_PatternIds.UIA_ValuePatternId, "value"),
         (UIA_PatternIds.UIA_RangeValuePatternId, "range-value"),
         (UIA_PatternIds.UIA_TextPatternId, "text"),
+        (UIA_PatternIds.UIA_TextPattern2Id, "text2"),
         (UIA_PatternIds.UIA_LegacyIAccessiblePatternId, "legacy-accessible"),
         (UIA_PatternIds.UIA_WindowPatternId, "window"),
         (UIA_PatternIds.UIA_TransformPatternId, "transform"),
