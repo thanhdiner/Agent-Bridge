@@ -47,6 +47,9 @@ public static class ErrorCodes
     public const string UiExpandCollapseNotSupported = "UI_EXPAND_COLLAPSE_NOT_SUPPORTED";
     public const string UiExpandCollapseFailed = "UI_EXPAND_COLLAPSE_FAILED";
     public const string UiExpandCollapseVerificationFailed = "UI_EXPAND_COLLAPSE_VERIFICATION_FAILED";
+    public const string UiToggleNotSupported = "UI_TOGGLE_NOT_SUPPORTED";
+    public const string UiToggleFailed = "UI_TOGGLE_FAILED";
+    public const string UiToggleVerificationFailed = "UI_TOGGLE_VERIFICATION_FAILED";
     public const string UiValueNotSupported = "UI_VALUE_NOT_SUPPORTED";
     public const string UiValueReadFailed = "UI_VALUE_READ_FAILED";
     public const string UiValueWriteFailed = "UI_VALUE_WRITE_FAILED";
