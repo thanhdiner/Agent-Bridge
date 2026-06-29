@@ -35,6 +35,24 @@ public sealed class UiKeyboardTools
     }
 
     [McpServerTool(
+        Name = "ui_hotkey",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = false,
+        OpenWorld = false),
+     Description("Sends one validated keyboard chord to a target Windows window or control. Requires dev:execute scope.")]
+    public Task<CallToolResult> HotkeyAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
+        [Description("The key chord as + joined tokens, for example CTRL+A. Maximum 64 characters.")] string keys,
+        [Description("Optional exact automationId of the control to target")] string? automationId = null,
+        [Description("Optional exact control name of the control to target")] string? name = null,
+        [Description("Optional exact control type such as Edit or Button")] string? controlType = null,
+        [Description("Zero-based index when multiple controls match (default: 0, hard limit: 1000)")] int occurrenceIndex = 0,
+        [Description("Whether to focus the target window before executing the key chord (default: true)")] bool focusWindow = true) =>
+        PressKeyAsync(deviceId, windowHandle, keys, automationId, name, controlType, occurrenceIndex, focusWindow);
+
+    [McpServerTool(
         Name = "ui_press_key",
         ReadOnly = false,
         Destructive = true,

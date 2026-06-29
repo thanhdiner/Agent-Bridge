@@ -4,6 +4,7 @@ using LocalMcp.Agent.Windows.Security;
 using LocalMcp.Agent.Windows.FileSystem;
 using LocalMcp.Agent.Windows.Commands;
 using LocalMcp.Agent.Windows.PowerShell;
+using LocalMcp.Agent.Windows.ProcessControl;
 using LocalMcp.Agent.Windows.UiAutomation;
 using Microsoft.Extensions.Configuration;
 
@@ -119,6 +120,7 @@ public static class DependencyInjection
         services.AddSingleton<IAppProcessCatalog, AppProcessCatalog>();
         services.AddSingleton<IAppCloser, AppCloser>();
         services.AddSingleton<IProcessWaiter, ProcessWaiter>();
+        services.AddSingleton<IProcessManager, ProcessManager>();
         services.AddSingleton<CommandHandler>(sp =>
             new CommandHandler(
                 sp.GetRequiredService<IPathPolicy>(),
@@ -132,6 +134,7 @@ public static class DependencyInjection
                 sp.GetRequiredService<IAppOpener>(),
                 sp.GetRequiredService<IAppCloser>(),
                 sp.GetRequiredService<IProcessWaiter>(),
+                sp.GetRequiredService<IProcessManager>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CommandHandler>>()));
         services.AddSingleton<GatewayConnection>();
 

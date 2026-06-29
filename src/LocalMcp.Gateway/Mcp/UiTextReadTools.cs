@@ -33,6 +33,38 @@ public sealed class UiTextReadTools
     }
 
     [McpServerTool(
+        Name = "ui_get_text",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false),
+     Description("Reads bounded text from one Windows UI Automation control. This is the Phase 4 alias of ui_text_read and supports document, visible, or selection scopes. Password text is always redacted. Requires dev:execute scope.")]
+    public Task<CallToolResult> GetTextAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
+        [Description("Text scope: document, visible, or selection (default: document)")] string scope = UiTextReadScopes.Document,
+        [Description("Optional exact automationId selector")] string? automationId = null,
+        [Description("Optional exact control name selector")] string? name = null,
+        [Description("Optional exact control type such as Document, Edit, or Text; at least one selector is required")] string? controlType = null,
+        [Description("Zero-based index when multiple controls match (default: 0, hard limit: 1000)")] int occurrenceIndex = 0,
+        [Description("Zero-based first line to return (default: 0)")] int startLine = 0,
+        [Description("Maximum lines requested (default: 200, hard limit: 10000)")] int lineCount = 200,
+        [Description("Maximum characters returned (default and hard limit: 65536)")] int maxCharacters = 65_536,
+        [Description("Whether to focus the target window before reading (default: false)")] bool focusWindow = false) =>
+        ReadAsync(
+            deviceId,
+            windowHandle,
+            scope,
+            automationId,
+            name,
+            controlType,
+            occurrenceIndex,
+            startLine,
+            lineCount,
+            maxCharacters,
+            focusWindow);
+
+    [McpServerTool(
         Name = "ui_text_read",
         ReadOnly = true,
         Destructive = false,
