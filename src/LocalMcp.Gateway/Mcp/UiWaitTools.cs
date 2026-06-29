@@ -40,7 +40,7 @@ public sealed class UiWaitTools
         Destructive = false,
         Idempotent = true,
         OpenWorld = false),
-     Description("Waits until a Windows UI Automation control satisfies exists, not-exists, enabled, disabled, value-equals, or value-contains. Does not focus or modify the window. Requires dev:execute scope.")]
+     Description("Waits until a Windows UI Automation control appears, disappears, becomes enabled, disabled, focused, matches a value, or changes value. Does not focus or modify the window. Requires dev:execute scope.")]
     public async Task<CallToolResult> WaitUiAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
@@ -48,7 +48,7 @@ public sealed class UiWaitTools
         [Description("Exact control name; either automationId or name is required")] string? name = null,
         [Description("Optional exact control type such as Button, Edit, Document, or Pane")] string? controlType = null,
         [Description("Zero-based index when multiple controls match (default: 0, hard limit: 1000)")] int occurrenceIndex = 0,
-        [Description("Condition: exists, not-exists, enabled, disabled, value-equals, or value-contains (default: exists)")] string condition = UiWaitConditions.Exists,
+        [Description("Condition: exists, not-exists, enabled, disabled, focused, value-equals, value-contains, or value-changed. Aliases: appears and disappears (default: exists)")] string condition = UiWaitConditions.Exists,
         [Description("Required for value-equals and value-contains; empty string is allowed")] string? expectedValue = null,
         [Description("Maximum wait in milliseconds (default: 10000, hard limit: 300000)")] int timeoutMs = 10_000,
         [Description("Delay between polls in milliseconds (default: 200, range: 25-5000)")] int pollIntervalMs = 200)
@@ -66,7 +66,7 @@ public sealed class UiWaitTools
         if (occurrenceIndex is < 0 or > 1000)
             return Error("INVALID_REQUEST", "occurrenceIndex must be between 0 and 1000.");
         if (!UiWaitConditions.TryNormalize(condition, out var normalizedCondition))
-            return Error("INVALID_REQUEST", "condition must be one of: exists, not-exists, enabled, disabled, value-equals, value-contains.");
+            return Error("INVALID_REQUEST", "condition must be one of: exists, not-exists, enabled, disabled, focused, value-equals, value-contains, value-changed. Aliases: appears, disappears.");
         if (UiWaitConditions.RequiresExpectedValue(normalizedCondition) && expectedValue is null)
             return Error("INVALID_REQUEST", "expectedValue is required for value-equals and value-contains conditions.");
         if (expectedValue?.Length > MaxExpectedValueCharacters)

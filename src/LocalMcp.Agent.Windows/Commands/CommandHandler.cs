@@ -128,6 +128,10 @@ public sealed partial class CommandHandler
         {
             return await HandleAppLaunchAsync(appLaunchCommand, cancellationToken);
         }
+        else if (command is ProcessWaitCommand processWaitCommand)
+        {
+            return await HandleProcessWaitAsync(processWaitCommand, cancellationToken);
+        }
         else if (command is WindowListCommand windowListCommand)
         {
             return await HandleWindowListAsync(windowListCommand, cancellationToken);

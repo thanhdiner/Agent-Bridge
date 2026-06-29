@@ -10,12 +10,17 @@ public static class WindowWaitConditions
 
     public static bool TryNormalize(string? value, out string normalized)
     {
-        normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
-        return normalized is Exists
-            or NotExists
-            or Foreground
-            or TitleEquals
-            or TitleContains;
+        var candidate = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        normalized = candidate switch
+        {
+            Exists or "appears" => Exists,
+            NotExists or "disappears" => NotExists,
+            Foreground or "focused" => Foreground,
+            TitleEquals => TitleEquals,
+            TitleContains => TitleContains,
+            _ => string.Empty
+        };
+        return normalized.Length > 0;
     }
 
     public static bool RequiresExpectedTitle(string condition) =>

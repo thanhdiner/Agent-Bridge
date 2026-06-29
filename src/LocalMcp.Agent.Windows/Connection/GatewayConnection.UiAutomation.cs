@@ -12,6 +12,7 @@ public sealed partial class GatewayConnection
             nameof(AppResolveCommand) => JsonSerializer.Deserialize<AppResolveCommand>(rawJson, JsonOptions.Default),
             nameof(AppOpenCommand) => JsonSerializer.Deserialize<AppOpenCommand>(rawJson, JsonOptions.Default),
             nameof(AppCloseCommand) => JsonSerializer.Deserialize<AppCloseCommand>(rawJson, JsonOptions.Default),
+            nameof(ProcessWaitCommand) => JsonSerializer.Deserialize<ProcessWaitCommand>(rawJson, JsonOptions.Default),
             nameof(AppLaunchCommand) => JsonSerializer.Deserialize<AppLaunchCommand>(rawJson, JsonOptions.Default),
             nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(rawJson, JsonOptions.Default),
             nameof(WindowWaitCommand) => JsonSerializer.Deserialize<WindowWaitCommand>(rawJson, JsonOptions.Default),

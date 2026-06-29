@@ -15,6 +15,9 @@ public sealed class WindowWaitExecutorValidationTests
     [InlineData("exists", "exists")]
     [InlineData(" NOT-EXISTS ", "not-exists")]
     [InlineData("Foreground", "foreground")]
+    [InlineData("focused", "foreground")]
+    [InlineData("appears", "exists")]
+    [InlineData("disappears", "not-exists")]
     [InlineData("TITLE-EQUALS", "title-equals")]
     [InlineData("title-contains", "title-contains")]
     public void Conditions_NormalizeSupportedValues(string input, string expected)

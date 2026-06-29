@@ -54,7 +54,7 @@ public sealed partial class UiAutomationExecutor
         if (occurrenceIndex is < 0 or > 1000)
             return WindowWaitFailure(commandId, ErrorCodes.InvalidRequest, "occurrenceIndex must be between 0 and 1000.");
         if (!WindowWaitConditions.TryNormalize(condition, out var normalizedCondition))
-            return WindowWaitFailure(commandId, ErrorCodes.InvalidRequest, "condition must be one of: exists, not-exists, foreground, title-equals, title-contains.");
+            return WindowWaitFailure(commandId, ErrorCodes.InvalidRequest, "condition must be one of: exists, not-exists, foreground, title-equals, title-contains. Aliases: appears, disappears, focused.");
         if (WindowWaitConditions.RequiresExpectedTitle(normalizedCondition) && expectedTitle is null)
             return WindowWaitFailure(commandId, ErrorCodes.InvalidRequest, "expectedTitle is required for title-equals and title-contains conditions.");
         if (!ValidWindowSelectorText(expectedTitle, allowEmpty: true))
@@ -155,9 +155,14 @@ public sealed partial class UiAutomationExecutor
                     Data = new WindowWaitResult
                     {
                         Condition = condition,
+                        CompletionReason = "condition-satisfied",
+                        FinalState = lastMatch is null
+                            ? "not-exists"
+                            : lastMatch.IsForeground ? "foreground" : "exists",
                         ExpectedTitle = WindowWaitConditions.RequiresExpectedTitle(condition)
                             ? expectedTitle
                             : null,
+                        ElapsedMs = (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
                         WaitedMs = (int)Math.Min(int.MaxValue, stopwatch.ElapsedMilliseconds),
                         PollCount = pollCount,
                         OccurrenceIndex = occurrenceIndex,

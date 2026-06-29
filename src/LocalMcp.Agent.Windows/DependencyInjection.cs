@@ -118,6 +118,7 @@ public static class DependencyInjection
         services.AddSingleton<IAppOpener, AppOpener>();
         services.AddSingleton<IAppProcessCatalog, AppProcessCatalog>();
         services.AddSingleton<IAppCloser, AppCloser>();
+        services.AddSingleton<IProcessWaiter, ProcessWaiter>();
         services.AddSingleton<CommandHandler>(sp =>
             new CommandHandler(
                 sp.GetRequiredService<IPathPolicy>(),
@@ -130,6 +131,7 @@ public static class DependencyInjection
                 sp.GetRequiredService<IAppResolver>(),
                 sp.GetRequiredService<IAppOpener>(),
                 sp.GetRequiredService<IAppCloser>(),
+                sp.GetRequiredService<IProcessWaiter>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CommandHandler>>()));
         services.AddSingleton<GatewayConnection>();
 

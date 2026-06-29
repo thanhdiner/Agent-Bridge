@@ -60,6 +60,15 @@ public static class AgentCommandTimeouts
             return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 10_000);
         }
 
+        if (command is ProcessWaitCommand processWaitCommand)
+        {
+            var requestedWaitMilliseconds = Math.Clamp(
+                processWaitCommand.TimeoutMs,
+                1,
+                300_000);
+            return TimeSpan.FromMilliseconds(requestedWaitMilliseconds + 10_000);
+        }
+
         if (command is UiWaitCommand uiWaitCommand)
         {
             var requestedWaitMilliseconds = Math.Clamp(
