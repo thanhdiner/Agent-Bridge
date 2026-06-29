@@ -70,6 +70,26 @@ public sealed partial class CommandHandler
         return WindowActionToJson(result);
     }
 
+    private async Task<CommandResult<JsonElement>> HandleScreenScreenshotAsync(
+        ScreenScreenshotCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_uiAutomationExecutor is null)
+            return WindowActionUnavailable(command.CommandId, "Screen screenshot capture is not configured on this agent.");
+
+        var result = await _uiAutomationExecutor.CaptureScreenScreenshotAsync(
+            command.MonitorIndex,
+            command.X,
+            command.Y,
+            command.Width,
+            command.Height,
+            command.MaxWidth,
+            command.MaxHeight,
+            command.CommandId,
+            cancellationToken);
+        return WindowActionToJson(result);
+    }
+
     private async Task<CommandResult<JsonElement>> HandleUiClickAsync(
         UiClickCommand command,
         CancellationToken cancellationToken)

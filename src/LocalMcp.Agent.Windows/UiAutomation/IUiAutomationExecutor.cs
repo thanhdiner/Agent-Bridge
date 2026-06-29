@@ -54,6 +54,17 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<ScreenScreenshotResult>> CaptureScreenScreenshotAsync(
+        int? monitorIndex,
+        int? x,
+        int? y,
+        int? width,
+        int? height,
+        int maxWidth,
+        int maxHeight,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<WindowClickResult>> ClickWindowAsync(
         string windowHandle,
         int x,

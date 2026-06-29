@@ -34,6 +34,8 @@ public static class ErrorCodes
     public const string WindowWaitTimeout = "WINDOW_WAIT_TIMEOUT";
     public const string WindowScreenshotFailed = "WINDOW_SCREENSHOT_FAILED";
     public const string WindowScreenshotTooLarge = "WINDOW_SCREENSHOT_TOO_LARGE";
+    public const string ScreenScreenshotFailed = "SCREEN_SCREENSHOT_FAILED";
+    public const string ScreenScreenshotTooLarge = "SCREEN_SCREENSHOT_TOO_LARGE";
     public const string WindowClickFailed = "WINDOW_CLICK_FAILED";
     public const string WindowDragFailed = "WINDOW_DRAG_FAILED";
     public const string WindowGuardMismatch = "WINDOW_GUARD_MISMATCH";
