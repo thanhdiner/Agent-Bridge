@@ -75,8 +75,15 @@ graph TD
 | Tool | Description |
 |---|---|
 | <code>project_verify</code> | Detects .NET, Node.js, Rust, PHP/Laravel, Python, or Go projects and runs fixed `build`, `test`, `lint`, or `typecheck` steps with bounded output and timeout controls. Python prefers `.venv\Scripts` tools and uses fixed fallbacks; Go disables automatic toolchain and module downloads. |
-| `window_list` | Lists top-level app windows and their handles for use with `ui_tree`. |
+| `window_list` | Lists top-level app windows and their handles for use with UI Automation tools. |
 | `ui_tree` | Reads a bounded Windows UI Automation tree for one live window handle and returns control names, automation IDs, control types, bounds, enabled states, and bounded values. Password values are not returned. |
+| `ui_get_text` | Reads bounded document, visible, or selected text from one UI Automation control. Supports paging and redacts password text. |
+| `clipboard_get` | Reads bounded Unicode text from the Windows clipboard without converting non-text formats. |
+| `clipboard_set` | Replaces the Windows clipboard with Unicode text and optionally verifies the write without echoing the text in the result. |
+| `ui_hotkey` | Sends one validated keyboard chord to an exact window or UI Automation control using the existing guarded keyboard executor. |
+| `process_list` | Lists live processes with bounded metadata, optional name filtering, and optional exclusion of windowless processes. |
+| `process_kill` | Terminates one exact PID with an optional process-name guard against PID reuse, bounded exit wait, child-tree support, and protected-process refusal. |
+| `file_dialog_set_path` | Finds a writable file-name field in a Windows Open or Save dialog, sets and verifies the path, and can optionally submit with Enter. |
 
 > [!CAUTION]
 > Project verification executes repository-defined code and may generate build artifacts. It is not an operating-system sandbox. Grant `dev:execute` only to trusted clients and run it only against trusted projects. Execution is denied entirely when `Security:AuthenticationEnabled=false`.
@@ -296,6 +303,9 @@ LocalMcp/
 │  │  ├─ Hubs/AgentHub.cs               # SignalR hub
 │  │  ├─ Mcp/FileSystemTools.cs         # Core MCP tools (scope-gated)
 │  │  ├─ Mcp/BatchReadTools.cs          # Bounded multi-file read MCP tool
+│  │  ├─ Mcp/ClipboardTools.cs          # Unicode clipboard read/write tools
+│  │  ├─ Mcp/ProcessTools.cs            # Process list/kill tools
+│  │  ├─ Mcp/FileDialogTools.cs         # Verified Open/Save dialog path entry
 │  │  ├─ Security/
 │  │  │  ├─ SecurityOptions.cs
 │  │  │  └─ McpPolicies.cs              # files:read / files:write authorization policies
@@ -313,6 +323,8 @@ LocalMcp/
 │  │  │  ├─ AgentOptions.cs
 │  │  │  └─ GatewayConnection.cs        # SignalR client, command dispatch
 │  │  ├─ Commands/CommandHandler.cs
+│  │  ├─ ProcessControl/                # Bounded process listing and guarded PID-first termination
+│  │  ├─ UiAutomation/                  # Text, clipboard, hotkey, file-dialog, screen, and control automation
 │  │  ├─ FileSystem/
 │  │  │  ├─ IFileSystemExecutor.cs
 │  │  │  ├─ ITransferExecutor.cs        # Bounded file/directory copy orchestration

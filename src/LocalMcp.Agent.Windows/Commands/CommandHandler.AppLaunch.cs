@@ -2,6 +2,7 @@ using System.Text.Json;
 using LocalMcp.Agent.Windows.AppLaunch;
 using LocalMcp.Agent.Windows.FileSystem;
 using LocalMcp.Agent.Windows.PowerShell;
+using LocalMcp.Agent.Windows.ProcessControl;
 using LocalMcp.Agent.Windows.Security;
 using LocalMcp.Agent.Windows.UiAutomation;
 using LocalMcp.BuildingBlocks.Errors;
@@ -31,6 +32,7 @@ public sealed partial class CommandHandler
         IAppOpener appOpener,
         IAppCloser appCloser,
         IProcessWaiter processWaiter,
+        IProcessManager processManager,
         ILogger<CommandHandler> logger)
         : this(
             pathPolicy,
@@ -46,6 +48,7 @@ public sealed partial class CommandHandler
         _appOpener = appOpener;
         _appCloser = appCloser;
         _processWaiter = processWaiter;
+        _processManager = processManager;
     }
 
     private async Task<CommandResult<JsonElement>> HandleAppResolveAsync(

@@ -132,6 +132,14 @@ public sealed partial class CommandHandler
         {
             return await HandleProcessWaitAsync(processWaitCommand, cancellationToken);
         }
+        else if (command is ProcessListCommand processListCommand)
+        {
+            return await HandleProcessListAsync(processListCommand, cancellationToken);
+        }
+        else if (command is ProcessKillCommand processKillCommand)
+        {
+            return await HandleProcessKillAsync(processKillCommand, cancellationToken);
+        }
         else if (command is WindowListCommand windowListCommand)
         {
             return await HandleWindowListAsync(windowListCommand, cancellationToken);
@@ -211,6 +219,18 @@ public sealed partial class CommandHandler
         else if (command is UiTextReadCommand uiTextReadCommand)
         {
             return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.UiTextReadDispatch.HandleAsync(_uiAutomationExecutor, uiTextReadCommand, cancellationToken));
+        }
+        else if (command is ClipboardGetCommand clipboardGetCommand)
+        {
+            return await HandleClipboardGetAsync(clipboardGetCommand, cancellationToken);
+        }
+        else if (command is ClipboardSetCommand clipboardSetCommand)
+        {
+            return await HandleClipboardSetAsync(clipboardSetCommand, cancellationToken);
+        }
+        else if (command is FileDialogSetPathCommand fileDialogSetPathCommand)
+        {
+            return await HandleFileDialogSetPathAsync(fileDialogSetPathCommand, cancellationToken);
         }
         else if (command is UiGetStateCommand uiGetStateCommand)
         {
