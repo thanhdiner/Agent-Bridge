@@ -1,432 +1,317 @@
-# LocalMcp — Local Windows File System MCP Gateway
+# AgentBridge
 
-LocalMcp is a secure, production-shaped system that exposes the local Windows file system to AI clients (such as ChatGPT) using the Model Context Protocol (MCP). It uses a strict separation between the Control Plane (Gateway) and the Execution Plane (Windows Agent), connected via SignalR.
+A Windows-first MCP bridge that lets AI agents inspect, control, and automate a real desktop through guarded filesystem, process, window, screen, UI Automation, clipboard, and PowerShell tools.
 
----
+> **Status:** active development. Tool schemas and configuration may still change.
+>
+> The repository is named AgentBridge, while the current .NET projects and namespaces still use the internal `LocalMcp.*` name.
 
-## System Architecture
+## Why AgentBridge exists
+
+Browser automation is not enough when an agent must work with Notepad, terminals, media players, desktop IDEs, native dialogs, or applications that expose incomplete accessibility data.
+
+AgentBridge provides a local execution layer between an MCP client and a Windows desktop. It prefers structured Windows UI Automation when possible, then falls back to guarded screenshots and coordinate input when an application does not expose a useful accessibility tree.
+
+The bridge is designed around explicit boundaries:
+
+- the MCP client talks only to the Gateway;
+- the Gateway authenticates the client and applies scope policies;
+- the Windows Agent performs local work through SignalR commands;
+- filesystem access is restricted by configured roots;
+- desktop input can be guarded by window handle, process ID, title, and foreground state;
+- screenshots are returned as in-memory PNG data instead of temporary image files.
+
+## Core capabilities
+
+| Area | What AgentBridge can do | Representative tools |
+|---|---|---|
+| Desktop observation | List windows, capture the full virtual desktop, one monitor, a region, or one window, with bounds and DPI metadata | `window_list`, `screen_screenshot`, `window_screenshot` |
+| Structured UI Automation | Inspect controls, find elements, read text and state, set values, click, select, toggle, scroll, focus, expand, and wait | `ui_tree`, `ui_find`, `ui_get_text`, `ui_click`, `ui_select`, `ui_toggle`, `ui_scroll`, `ui_wait` |
+| Coordinate fallback | Click, double-click, right-click, drag, and scroll only while the expected window remains foreground | `screen_click`, `screen_double_click`, `screen_right_click`, `screen_drag`, `screen_scroll` |
+| Window control | Focus, move, resize, drag, click, wait for, and close top-level windows | `window_focus`, `window_move`, `window_drag`, `window_click`, `window_wait`, `window_close` |
+| Applications and processes | Resolve installed apps, launch or open them, wait for processes, list processes, and terminate an exact guarded PID | `app_resolve`, `app_launch`, `app_open`, `app_close`, `process_wait`, `process_list`, `process_kill` |
+| Text and native dialogs | Read or replace clipboard text, send guarded key chords, type text, and set paths in Open or Save dialogs | `clipboard_get`, `clipboard_set`, `ui_hotkey`, `ui_type_text`, `file_dialog_set_path` |
+| Files and Git | Read, search, patch, copy, move, delete, inspect Git state and history, and verify projects inside configured roots | `fs_read`, `fs_search_context`, `fs_batch_patch`, `git_status`, `git_diff`, `git_log`, `project_verify` |
+| PowerShell | Run bounded PowerShell 7 commands, start observable sessions, poll status, and cancel process trees | `powershell_exec`, `powershell_start`, `powershell_status`, `powershell_cancel` |
+
+The Gateway currently registers the complete tool surface from `src/LocalMcp.Gateway/Mcp/`. Aliases such as `ui_get_text` and `ui_hotkey` keep the public API readable while reusing the existing execution core.
+
+## Requirements
+
+- Windows with an interactive desktop session
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- PowerShell 7 (`pwsh.exe`) for PowerShell tools
+- An MCP client that supports Streamable HTTP
+- An OAuth/OIDC provider when enabling desktop execution tools
+
+The verified development path is Windows. A macOS or Linux desktop agent is not implemented. The Gateway is built with ASP.NET Core, but gateway-only cross-platform deployment is not currently documented or tested by CI.
+
+## Quick Start
+
+The shortest safe path is to build the solution, configure one dedicated directory, start the Gateway, then start the Windows Agent.
+
+### 1. Clone and build
+
+```powershell
+git clone https://github.com/thanhdiner/Agent-Bridge.git
+cd Agent-Bridge
+dotnet restore .\LocalMcp.sln
+dotnet build .\LocalMcp.sln -c Release --no-restore
+```
+
+### 2. Create a restricted working directory
+
+```powershell
+New-Item -ItemType Directory -Force C:\AgentBridgeWorkspace | Out-Null
+```
+
+Do not begin with an entire drive in `WritableRoots`. Start with one disposable workspace, test the policies, then expand deliberately.
+
+### 3. Start the Gateway
+
+Open terminal 1:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --project .\src\LocalMcp.Gateway -c Release --no-build
+```
+
+The default development profile listens on `http://localhost:5227`.
+
+### 4. Start the Windows Agent
+
+Open terminal 2:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+$env:Agent__DeviceId = "development-machine"
+$env:Agent__GatewayUrl = "http://localhost:5227"
+$env:FileAccess__AllowedRoots__0 = "C:\AgentBridgeWorkspace"
+$env:FileAccess__WritableRoots__0 = "C:\AgentBridgeWorkspace"
+$env:AppLaunch__AllowedExecutables__0 = "notepad.exe"
+
+dotnet run --project .\src\LocalMcp.Agent.Windows -c Release --no-build
+```
+
+A successful first connection produces Agent and Gateway logs showing that the SignalR connection started and the device registered.
+
+> **Important:** with client authentication disabled, filesystem read and write policies can run in local development, but `dev:execute` is intentionally denied. Desktop control, screenshots, process control, application control, and PowerShell tools require authenticated access with the `dev:execute` scope.
+
+## Enable full desktop automation
+
+Full desktop execution requires two separate authentication layers:
+
+1. OAuth/OIDC protects MCP clients calling the Gateway.
+2. A shared device token protects the Windows Agent connecting to the SignalR hub.
+
+Use the same device token in the Gateway and Agent processes, but never commit it to JSON files.
+
+### Gateway environment
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+$env:Security__AuthenticationEnabled = "true"
+$env:Security__PublicExposure = "false"
+$env:Security__PublicBaseUrl = "http://localhost:5227"
+$env:Security__OAuth__Authority = "https://YOUR-TENANT.example.com/"
+$env:Security__OAuth__Audience = "https://agentbridge.local"
+
+$env:AgentSecurity__AuthenticationEnabled = "true"
+$env:LOCALMCP_AGENT_TOKEN = "REPLACE_WITH_A_LONG_RANDOM_TOKEN"
+
+dotnet run --project .\src\LocalMcp.Gateway -c Release
+```
+
+### Agent environment
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+$env:Agent__DeviceId = "development-machine"
+$env:Agent__GatewayUrl = "http://localhost:5227"
+$env:AgentSecurity__AuthenticationEnabled = "true"
+$env:LOCALMCP_AGENT_TOKEN = "REPLACE_WITH_THE_SAME_TOKEN"
+
+$env:FileAccess__AllowedRoots__0 = "C:\AgentBridgeWorkspace"
+$env:FileAccess__WritableRoots__0 = "C:\AgentBridgeWorkspace"
+$env:AppLaunch__AllowedExecutables__0 = "notepad.exe"
+
+dotnet run --project .\src\LocalMcp.Agent.Windows -c Release
+```
+
+The OAuth access token used by the MCP client needs the appropriate scopes:
+
+| Scope | Grants |
+|---|---|
+| `files:read` | Filesystem and Git inspection tools |
+| `files:write` | File creation, patching, moving, copying, and deletion inside writable roots |
+| `dev:execute` | Desktop, process, application, screenshot, PowerShell, and project verification tools |
+
+For an internet-facing Gateway, use HTTPS, enable both authentication layers, and set `Security:PublicExposure=true`. Startup is rejected outside Development when public exposure is enabled without client authentication.
+
+## Configuration reference
+
+AgentBridge uses standard .NET configuration. Values can come from `appsettings.json`, ignored `appsettings.Development.json` files, command-line configuration, or environment variables using `__` as the section separator.
+
+`appsettings.Local.json` is ignored by Git but is not loaded automatically by the current host setup. Use environment variables or `appsettings.Development.json` unless the application is changed to load an additional file.
+
+| Setting or variable | Required | Default | Purpose |
+|---|---:|---|---|
+| `Agent__DeviceId` | Agent | none | Stable device identifier used by Gateway routing |
+| `Agent__GatewayUrl` | Agent | none | Gateway base URL, normally `http://localhost:5227` in development |
+| `FileAccess__AllowedRoots__0` | Agent | none | First filesystem root the Agent may inspect |
+| `FileAccess__WritableRoots__0` | No | empty | First root that permits mutations; must be inside an allowed root |
+| `AppLaunch__AllowedExecutables__0` | No | empty | First executable allowed for direct launch |
+| `Security__AuthenticationEnabled` | No | `false` | Enables OAuth validation for MCP clients |
+| `Security__PublicExposure` | No | `false` | Declares that the Gateway is reachable beyond the local machine |
+| `Security__PublicBaseUrl` | With auth | empty | Public MCP resource URL used in OAuth metadata |
+| `Security__OAuth__Authority` | With auth | empty | OIDC authority URL |
+| `Security__OAuth__Audience` | With auth | empty | Expected access-token audience |
+| `AgentSecurity__AuthenticationEnabled` | No | `false` | Requires a device bearer token on the SignalR hub |
+| `AgentSecurity__TokenEnvironmentVariable` | No | `LOCALMCP_AGENT_TOKEN` | Name of the environment variable containing the device token |
+| `LOCALMCP_AGENT_TOKEN` | With agent auth | none | Shared Agent-to-Gateway token |
+
+The tracked Agent configuration also defines denied path segments, denied credential filenames, blocked key and certificate extensions, and size limits. Review those rules before widening access.
+
+## Architecture
 
 ```mermaid
-graph TD
-    Client["ChatGPT (MCP Client)"]
-    Auth0["Auth0 (OAuth 2.1 / OIDC)"]
+flowchart LR
+    Client["MCP client\nChatGPT, agent, or inspector"]
 
-    subgraph ControlPlane["Control Plane (Gateway)"]
-        McpServer["MCP HTTP Server (/)"]
-        Registry["Agent Connection Registry"]
-        Dispatcher["SignalR Command Dispatcher"]
-        Hub["AgentHub (SignalR)"]
-        JwtMiddleware["JWT Bearer Middleware"]
-        ScopePolicies["Scope Policies (files:read / files:write / dev:execute)"]
+    subgraph Gateway["Gateway / control plane"]
+        HTTP["Streamable HTTP MCP endpoint"]
+        Auth["OAuth validation and scope policies"]
+        Dispatch["Command dispatcher"]
+        Hub["SignalR AgentHub"]
     end
 
-    subgraph ExecutionPlane["Execution Plane (Windows Agent)"]
-        Conn["Gateway Connection (device token auth)"]
-        Handler["Command Handler"]
-        Sandbox["PathPolicy (Sandbox + WritableRoots)"]
-        Executor["File System Executor (strict UTF-8)"]
-        Disk["Windows File System"]
+    subgraph Agent["Windows Agent / execution plane"]
+        Router["Command handler"]
+        Files["PathPolicy and filesystem executor"]
+        UIA["Windows UI Automation"]
+        Win32["Window, screen, input, process, clipboard"]
+        Shell["Bounded PowerShell 7 execution"]
     end
 
-    Client -->|"Bearer token (files:read, files:write, or dev:execute)"| JwtMiddleware
-    JwtMiddleware -->|Validate signature/issuer/audience/lifetime| Auth0
-    JwtMiddleware --> ScopePolicies
-    ScopePolicies -->|fs_read/fs_batch_read/fs_read_range/fs_list/fs_tree/fs_search/fs_search_context/git_status/git_diff/git_log/git_show/project_verify/fs_stat/fs_batch_stat/fs_write/fs_patch/fs_batch_patch/fs_move/fs_copy/fs_delete/fs_rmdir| McpServer
-    McpServer --> Dispatcher
-    Registry -.->|Lookup Connection| Dispatcher
-    Dispatcher -->|SignalR Command| Hub
-    Hub -->|TCP Loopback| Conn
-    Conn --> Handler
-    Handler --> Sandbox
-    Sandbox -->|Safe traversal / I/O| Executor
-    Executor --> Disk
-    Disk --> Executor
-    Executor --> Handler
-    Handler -->|SignalR Response| Hub
-    Hub --> Dispatcher
-    Dispatcher --> McpServer
-    McpServer -->|JSON-RPC result| Client
+    Client --> HTTP --> Auth --> Dispatch --> Hub
+    Hub -->|device-token channel| Router
+    Router --> Files
+    Router --> UIA
+    Router --> Win32
+    Router --> Shell
 ```
 
----
+The Gateway does not directly touch the desktop. It validates and routes commands. The Agent is the only component that accesses the local filesystem, Windows APIs, UI Automation, processes, clipboard, and interactive desktop.
 
-## Exposed MCP Tools
+## Typical agent workflow
 
-### Read tools — require `files:read` scope
+A reliable desktop workflow usually follows this order:
 
-| Tool | Description |
-|---|---|
-| `fs_tree` | Returns a bounded directory tree. Used by ChatGPT to understand project layout. |
-| `fs_list` | Lists immediate children of a directory, sorted directory-first then alphabetically. |
-| `fs_search` | Recursively searches for files matching a query (filename or content). |
-| `fs_search_context` | Searches UTF-8 files using literal or regex matching and returns bounded surrounding lines plus each file's SHA-256. Supports include/exclude globs. |
-| `git_status` | Returns bounded Git working-tree status, branch/upstream metadata, ahead/behind counts, and policy-filtered changed paths. |
-| `git_diff` | Returns a bounded staged or unstaged unified diff for policy-authorized paths. It can append safe synthetic patches for untracked UTF-8 files. |
-| `git_log` | Returns up to 100 recent commits with author, ISO-date, literal-path, pagination, and optional short-stat filters. |
-| `git_show` | Returns one resolved commit's metadata, optional policy-filtered statistics, and a bounded unified patch. |
-| `fs_read` | Reads the text of a single file. Returns size, encoding, SHA-256, and content. |
-| `fs_batch_read` | Reads 1–20 UTF-8 text files in one request with independent per-path errors, stable input ordering, four-way concurrency, UTF-8-safe truncation, and configurable per-file plus total response byte limits. |
-| `fs_read_range` | Streams a UTF-8 text file and returns a bounded one-based line range, total line count, encoding, SHA-256, and truncation status without loading the whole file into memory. Defaults to 200 lines and allows at most 1000 lines per call. |
-| `fs_stat` | Returns metadata (existence, size, SHA-256, encoding, read-only flag, last-write-time, reparse point status) of a path. Returns `Exists = false` for non-existent paths. For files larger than `MaxReadBytes`, skips content hashing/encoding detection, returning `ContentMetadataSkipped = true`. |
-| `fs_batch_stat` | Returns ordered status results for 1–100 paths in one call. Each path is evaluated independently, failures do not abort the batch, and internal concurrency is capped at eight operations. |
+1. Call `device_list` or `device_status` to confirm the Agent is online.
+2. Call `window_list` to locate the target window and capture its handle and PID.
+3. Prefer `ui_find`, `ui_tree`, or `ui_get_text` to work through accessibility metadata.
+4. Use `window_screenshot` or `screen_screenshot` when the app exposes incomplete UI Automation data.
+5. Use coordinate input only with the expected foreground window, PID, and title guards.
+6. Verify the result through UI state, text, a screenshot, or process/window status.
 
-### Execution tools — require `dev:execute` scope
+For long text entry, the practical path is often `clipboard_set` followed by a guarded `ui_hotkey` using `CTRL+V`.
 
-| Tool | Description |
-|---|---|
-| <code>project_verify</code> | Detects .NET, Node.js, Rust, PHP/Laravel, Python, or Go projects and runs fixed `build`, `test`, `lint`, or `typecheck` steps with bounded output and timeout controls. Python prefers `.venv\Scripts` tools and uses fixed fallbacks; Go disables automatic toolchain and module downloads. |
-| `window_list` | Lists top-level app windows and their handles for use with UI Automation tools. |
-| `ui_tree` | Reads a bounded Windows UI Automation tree for one live window handle and returns control names, automation IDs, control types, bounds, enabled states, and bounded values. Password values are not returned. |
-| `ui_get_text` | Reads bounded document, visible, or selected text from one UI Automation control. Supports paging and redacts password text. |
-| `clipboard_get` | Reads bounded Unicode text from the Windows clipboard without converting non-text formats. |
-| `clipboard_set` | Replaces the Windows clipboard with Unicode text and optionally verifies the write without echoing the text in the result. |
-| `ui_hotkey` | Sends one validated keyboard chord to an exact window or UI Automation control using the existing guarded keyboard executor. |
-| `process_list` | Lists live processes with bounded metadata, optional name filtering, and optional exclusion of windowless processes. |
-| `process_kill` | Terminates one exact PID with an optional process-name guard against PID reuse, bounded exit wait, child-tree support, and protected-process refusal. |
-| `file_dialog_set_path` | Finds a writable file-name field in a Windows Open or Save dialog, sets and verifies the path, and can optionally submit with Enter. |
+## Security model
 
-> [!CAUTION]
-> Project verification executes repository-defined code and may generate build artifacts. It is not an operating-system sandbox. Grant `dev:execute` only to trusted clients and run it only against trusted projects. Execution is denied entirely when `Security:AuthenticationEnabled=false`.
+AgentBridge exposes powerful local capabilities. Treat it as privileged automation infrastructure, not a harmless chat plugin.
 
-### Write tools — require `files:write` scope
+- **Execution is not anonymously available.** `dev:execute` fails when client authentication is disabled.
+- **Read and write are separate.** A client with `files:read` does not automatically receive mutation access.
+- **Writes are root-scoped.** `WritableRoots` must sit inside `AllowedRoots`.
+- **Sensitive paths are blocked.** The policy rejects configured segments, credential filenames, and key or certificate extensions.
+- **PowerShell is bounded.** Scripts, output, and runtime have hard limits; process trees are terminated on timeout or cancellation.
+- **PowerShell secrets are stripped.** Child processes remove environment variables whose names resemble tokens, passwords, API keys, credentials, cookies, or bearer secrets.
+- **Coordinate input is guarded.** Screen actions verify the expected foreground window and can additionally check PID, title, and monitor.
+- **Process termination is PID-first.** `process_kill` supports an expected-name guard against PID reuse and refuses protected Windows processes and the Agent itself.
+- **Screenshots stay in memory.** Screenshot tools return PNG payloads with integrity metadata and do not create image files.
 
-| Tool | Description |
-|---|---|
-| `fs_write` | Creates or overwrites a single file using optimistic concurrency (SHA-256 ETag). |
-| `fs_patch` | Applies a list of exact text substitutions atomically to an existing file. |
-| `fs_batch_patch` | Applies text edits to 1–20 UTF-8 files with four-way concurrency, stable ordering, atomic writes per file, and per-item results. |
-| `fs_mkdir` | Creates directory or directories. Gated by `WritableRoots` enforcement. For recursive creation (`recursive: true`), resolves the closest existing ancestor, validates it, checks every proposed subdirectory name against denied patterns, and creates them segment by segment with post-creation safety verification and automatic rollback on failure. |
-| `fs_move` | Moves or renames a file or directory within writable roots. File moves support cross-volume copy-verify-delete fallback with SHA-256 verification, durable temporary writes, rollback on pre-delete failure, and optional source hash guards. Directory moves remain same-volume only. |
-| `fs_copy` | Copies a file or bounded directory tree into a writable root. Directory sources require `recursive: true`, reject merge/overwrite, enforce entry and byte limits, reject reparse points at every level, and publish through a temporary sibling directory followed by an atomic rename. |
-| `fs_delete` | Deletes one file from a writable root after confirmation. Directories are not supported; optional SHA-256 concurrency checks and `missingOk` are supported. |
-| `fs_rmdir` | Removes one empty directory from a writable root after confirmation. Recursive deletion is not supported, configured roots are protected, and `missingOk` is supported. |
-| `git_restore_file` | Restores a regular tracked file from HEAD into the working tree on a target Windows agent device. Does not modify the Git index/staging. Requires Git on the agent and files:write scope. |
-| `git_refresh_index` | Refreshes the Git index for a single regular tracked file on a target Windows agent device, updating out-of-sync stat cache or line ending attributes if semantic content matches the index. Requires Git on the agent and files:write scope. |
+Do not run the Agent as administrator for normal use. PowerShell execution is deliberately disabled when the Agent process is elevated.
 
-> [!IMPORTANT]
-> **Write tools (including `fs_mkdir`) are disabled by default.** `WritableRoots` in `appsettings.json` is an empty list. You must explicitly add directories before write tools can succeed.
+## Testing
 
-> [!NOTE]
-> All tools return structured JSON errors. Internal paths, stack traces, and `.tmp_` filenames are never leaked to MCP clients.
-
----
-
-## Security Model
-
-### OAuth 2.1 (Gateway)
-
-All MCP tool calls require a valid Bearer token issued by Auth0.
-
-Token validation enforces:
-- **Signature** — RS256 signed by Auth0's JWKS
-- **Issuer** — must match `Security:OAuth:Authority`
-- **Audience** — must match `Security:OAuth:Audience`
-- **Lifetime** — `nbf`/`exp` checked with zero clock skew
-- **Scope** — `files:read` for read tools; `files:write` for write tools; `dev:execute` for project checks
-
-The OAuth 2.1 protected-resource metadata is published at:
-```
-GET /.well-known/oauth-protected-resource
-GET /.well-known/oauth-protected-resource/mcp
-```
-
-### PathPolicy sandbox (Windows Agent)
-
-Every filesystem operation passes through `PathPolicy` before executing:
-
-1. **Empty rejection** — null/whitespace paths rejected immediately.
-2. **Canonical normalisation** — resolves absolute physical path, collapses `..` segments.
-3. **Symlink/junction resolution** — recursively resolves links to check the final destination.
-4. **AllowedRoots check** — resolved path must be inside a configured allowed root.
-5. **Prefix collision prevention** — `F:\Project` does not grant access to `F:\Project-evil\`.
-6. **DeniedSegments** — blocks `bin`, `obj`, `.git`, `.ssh`, `AppData`, etc.
-7. **DeniedFileNames** — blocks exact names (`.env`, `id_rsa`) and wildcard patterns (`.env.*`).
-8. **DeniedWriteFileNames** — additional write-specific name denials (`.gitconfig`, etc.).
-9. **DeniedWriteExtensions** — blocks certificate/key file extensions (`.pem`, `.key`, `.pfx`, `.p12`, etc.).
-10. **ReadOnly file check** — write operations reject files with the `ReadOnly` attribute.
-11. **WritableRoots check** — write operations require the resolved path to be inside a writable root.
-12. **Size validation** — `fs_read` rejects files > `MaxReadBytes` (default 2 MB); `fs_read_range` may scan larger files but bounds the returned range to `MaxReadBytes`; writes reject content > `MaxWriteBytes` (default 512 KB); directory copy additionally enforces caller-supplied `maxEntries` and `maxTotalBytes` limits with hard caps of 5000 entries and 1 GiB.
-13. **Git inspection hardening** — Git tools are read-only, disable external diff drivers, text conversion, pagers, prompts, fsmonitor, and submodule recursion. They reject executable clean/process filters configured by the repository itself, while ignoring unrelated global filters such as Git LFS, bound process output/time, and omit paths denied by `PathPolicy`.
-14. **Project execution hardening** — Project verification accepts no arbitrary command or argument string. It selects fixed commands from project adapters, resolves trusted `.venv\Scripts` executables or external toolchains from `PATH`, requires `dev:execute`, bounds output and runtime, disables interactive and color features, prevents Go toolchain/module auto-downloads, and kills the complete process tree on timeout or cancellation.
-
-### Device token (Agent → Gateway SignalR)
-
-The Windows Agent authenticates to the Gateway's AgentHub using a separate device bearer token configured under `AgentSecurity`.
-
----
-
-## Configuration
-
-### Windows Agent — `src/LocalMcp.Agent.Windows/appsettings.json`
-
-```json
-{
-  "Agent": {
-    "DeviceId": "development-machine",
-    "GatewayUrl": "http://localhost:5227"
-  },
-  "FileAccess": {
-    "AllowedRoots": [ "F:\\Your Project Root" ],
-    "WritableRoots": [],
-    "DeniedSegments": [ "bin", "obj", ".git", ".ssh", "node_modules" ],
-    "DeniedFileNames": [ ".env", ".env.*", "id_rsa", "id_ed25519", "credentials.json" ],
-    "DeniedWriteFileNames": [ ".env", ".env.*", "id_rsa", "id_ed25519", ".gitconfig" ],
-    "DeniedWriteExtensions": [ ".pem", ".key", ".pfx", ".p12", ".cer", ".der" ],
-    "MaxReadBytes": 2097152,
-    "MaxWriteBytes": 524288
-  }
-}
-```
-
-> [!IMPORTANT]
-> To enable write tools (`fs_write`, `fs_patch`, `fs_mkdir`, `fs_move`, `fs_copy`, `fs_delete`, and `fs_rmdir`), add the target directory to `WritableRoots`.
-> Start with a dedicated scratch directory (`F:\scratch`) and only expand after testing.
-
-### Gateway — `src/LocalMcp.Gateway/appsettings.json`
-
-```json
-{
-  "Security": {
-    "AuthenticationEnabled": true,
-    "PublicExposure": true,
-    "PublicBaseUrl": "https://mcp.yourdomain.com",
-    "OAuth": {
-      "Authority":       "https://your-tenant.auth0.com/",
-      "Audience":        "https://mcp.yourdomain.com",
-      "RequiredScopes":  [ "files:read" ]
-    }
-  },
-  "AgentSecurity": {
-    "AuthenticationEnabled": true,
-    "DeviceTokens": [ "your-device-secret-token" ]
-  }
-}
-```
-
-Use `appsettings.Local.json` (git-ignored) for secrets. Never commit tokens to source control.
-
-To enable project verification through Auth0, add the `dev:execute` permission to the API and request that scope from the connector. Do not grant it to ordinary read-only clients.
-
----
-
-## How to Run
-
-### 1. Start the Gateway
+Run the complete solution test suite:
 
 ```powershell
-dotnet run --project src/LocalMcp.Gateway -c Release
+dotnet test .\LocalMcp.sln -c Release
 ```
 
-Or: `run-gateway.bat`
+The repository includes:
 
-### 2. Start the Agent
+- unit tests for policies, tools, command validation, UI Automation, screenshots, input, process control, clipboard, and PowerShell;
+- integration tests for Gateway authentication and the SignalR command path;
+- architecture tests for project dependency boundaries.
+
+Some tests interact with Windows APIs and therefore require Windows. A small number of explicitly gated tests open real interactive dialogs only when their environment flag is enabled.
+
+## Troubleshooting
+
+### Agent startup fails with `FileAccess:AllowedRoots must contain at least one valid root directory`
+
+The Agent refuses to start without an allowed filesystem root. Set at least `FileAccess__AllowedRoots__0` to a real directory.
+
+### Desktop tools return `FORBIDDEN`
+
+This is expected when `Security:AuthenticationEnabled=false`. Configure OAuth/OIDC and request the `dev:execute` scope. There is no anonymous execution bypass.
+
+### Gateway or Agent reports a missing Agent token
+
+`AgentSecurity:AuthenticationEnabled` is true, but the configured token environment variable is empty. Set `LOCALMCP_AGENT_TOKEN` to the same value in both process environments.
+
+### PowerShell tools report that `pwsh.exe` is unavailable
+
+Install PowerShell 7 and confirm this works in the Agent terminal:
 
 ```powershell
-dotnet run --project src/LocalMcp.Agent.Windows -c Release
+pwsh --version
 ```
 
-Or: `run-agent.bat`
+Also confirm the Agent is not running elevated.
 
-### 3. Verify the connection
+### A UI control cannot be found
 
-The Agent logs `[AgentHub] Connected as <deviceId>` when the SignalR handshake succeeds.
+Inspect the target with `ui_tree` or `ui_find`. Some Electron, Chromium, game, media, and custom-rendered interfaces expose little or no useful accessibility data. Use a screenshot and guarded coordinate input as the fallback.
 
----
+### Build output is locked
 
-## Testing with ChatGPT
+Stop running Gateway and Agent processes before rebuilding their default output directories. A running .NET process can hold the generated DLLs open on Windows.
 
-### Initial auth flow
-
-1. Open your ChatGPT developer connector or MCP Inspector.
-2. Set the MCP URL to `https://mcp.yourdomain.com/`.
-3. Click **Connect** — ChatGPT fetches `/.well-known/oauth-protected-resource` and redirects to Auth0.
-4. Authenticate with your Auth0 credentials.
-5. ChatGPT stores the access token and begins making tool calls.
-
-### Refreshing after schema changes
-
-When you add or rename tools, ChatGPT must re-fetch the tool list:
-
-1. Go to your ChatGPT settings → Connected Apps / Developer MCP Servers.
-2. Find the server (`https://mcp.yourdomain.com/`) and click **Refresh** or **Re-fetch schemas**.
-3. ChatGPT re-calls `tools/list` and updates its instructions.
-
-### Reconnecting after token expiry
-
-Auth0 access tokens expire (default: 24 h for API tokens). To re-authenticate:
-
-1. In ChatGPT, disconnect and reconnect the MCP server.
-2. Complete the Auth0 login flow again.
-3. A new access token is issued and stored automatically.
-
----
-
-## Recommended Write-Tool Testing Workflow
-
-> [!WARNING]
-> Do **not** add a production project directory to `WritableRoots` for initial testing.
-
-1. Create an isolated scratch directory: `mkdir F:\mcp-scratch`
-2. Add it to `WritableRoots` in `appsettings.json`.
-3. Obtain a token with `files:write` scope via Auth0 device flow or test client.
-4. Use MCP Inspector to call `fs_write` targeting `F:\mcp-scratch\test.txt`.
-5. Verify file is created. Verify SHA-256 conflict protection by re-calling with stale hash.
-6. Only after successful isolated testing, consider adding real project directories.
-
----
-
-## Important Security Warnings
-
-> [!CAUTION]
-> **Public Tunnel Warning**
-> The Cloudflare tunnel (`https://mcp.yourdomain.com`) makes the MCP server reachable from the internet.
-> - `AuthenticationEnabled` **must be `true`** for any public-facing deployment.
-> - The Gateway will **fail startup** if public exposure is enabled without authentication in non-Development environments.
-> - Write tools add further risk — only enable `WritableRoots` for directories you fully control and that cannot affect system integrity.
-
-> [!WARNING]
-> **No `.env` or Key File Writes**
-> `DeniedWriteFileNames` and `DeniedWriteExtensions` block writes to `.env`, `.env.*`, `id_rsa`, `id_ed25519`, `.pem`, `.key`, `.pfx`, `.p12` and other credential files. These cannot be overridden by the `files:write` scope.
-
----
-
-## Project Structure
+## Project layout
 
 ```text
-LocalMcp/
-├─ LocalMcp.sln
-├─ Directory.Build.props
-├─ src/
-│  ├─ LocalMcp.Gateway/
-│  │  ├─ Program.cs                      # Startup & public-exposure guardrail
-│  │  ├─ DependencyInjection.cs
-│  │  ├─ Hubs/AgentHub.cs               # SignalR hub
-│  │  ├─ Mcp/FileSystemTools.cs         # Core MCP tools (scope-gated)
-│  │  ├─ Mcp/BatchReadTools.cs          # Bounded multi-file read MCP tool
-│  │  ├─ Mcp/ClipboardTools.cs          # Unicode clipboard read/write tools
-│  │  ├─ Mcp/ProcessTools.cs            # Process list/kill tools
-│  │  ├─ Mcp/FileDialogTools.cs         # Verified Open/Save dialog path entry
-│  │  ├─ Security/
-│  │  │  ├─ SecurityOptions.cs
-│  │  │  └─ McpPolicies.cs              # files:read / files:write authorization policies
-│  │  ├─ Connections/
-│  │  │  ├─ IAgentConnectionRegistry.cs
-│  │  │  └─ InMemoryAgentConnectionRegistry.cs
-│  │  └─ Commands/
-│  │     ├─ ICommandDispatcher.cs
-│  │     └─ SignalRCommandDispatcher.cs
-│  │
-│  ├─ LocalMcp.Agent.Windows/
-│  │  ├─ Program.cs
-│  │  ├─ Worker.cs
-│  │  ├─ Connection/
-│  │  │  ├─ AgentOptions.cs
-│  │  │  └─ GatewayConnection.cs        # SignalR client, command dispatch
-│  │  ├─ Commands/CommandHandler.cs
-│  │  ├─ ProcessControl/                # Bounded process listing and guarded PID-first termination
-│  │  ├─ UiAutomation/                  # Text, clipboard, hotkey, file-dialog, screen, and control automation
-│  │  ├─ FileSystem/
-│  │  │  ├─ IFileSystemExecutor.cs
-│  │  │  ├─ ITransferExecutor.cs        # Bounded file/directory copy orchestration
-│  │  │  ├─ FileSystemExecutor.cs       # Atomic write, patch, read, list, search
-│  │  │  ├─ FileSystemExecutor.Git.cs   # Bounded, policy-filtered Git status and diff
-│  │  │  ├─ FileSystemExecutor.GitHistory.cs # Bounded Git log/show with revision and path hardening
-│  │  │  └─ FileSystemExecutor.ProjectCheck.cs # Fixed project verification adapters
-│  │  └─ Security/
-│  │     ├─ FileAccessOptions.cs
-│  │     ├─ IPathPolicy.cs
-│  │     └─ PathPolicy.cs               # Sandbox + WritableRoots enforcement
-│  │
-│  ├─ LocalMcp.Contracts/
-│  │  ├─ Commands/
-│  │  │  ├─ ReadFileCommand.cs
-│  │  │  ├─ ReadRangeCommand.cs
-│  │  │  ├─ ListDirectoryCommand.cs
-│  │  │  ├─ TreeCommand.cs
-│  │  │  ├─ SearchFilesCommand.cs
-│  │  │  ├─ SearchContextCommand.cs
-│  │  │  ├─ GitStatusCommand.cs
-│  │  │  ├─ GitDiffCommand.cs
-│  │  │  ├─ GitLogCommand.cs
-│  │  │  ├─ GitShowCommand.cs
-│  │  │  ├─ ProjectCheckCommand.cs
-│  │  │  ├─ AgentCommandTimeouts.cs
-│  │  │  ├─ WriteFileCommand.cs
-│  │  │  ├─ PatchFileCommand.cs
-│  │  │  ├─ CreateDirectoryCommand.cs
-│  │  │  ├─ StatCommand.cs
-│  │  │  ├─ BatchStatCommand.cs
-│  │  │  ├─ BatchReadCommand.cs
-│  │  │  ├─ MoveCommand.cs
-│  │  │  ├─ CopyCommand.cs
-│  │  │  ├─ DeleteCommand.cs
-│  │  │  └─ RemoveDirectoryCommand.cs
-│  │  └─ Results/
-│  │     ├─ CommandError.cs
-│  │     ├─ CommandResult.cs
-│  │     ├─ ReadFileResult.cs
-│  │     ├─ ReadRangeResult.cs
-│  │     ├─ ListDirectoryResult.cs
-│  │     ├─ TreeResult.cs
-│  │     ├─ SearchFilesResult.cs
-│  │     ├─ SearchContextResult.cs
-│  │     ├─ GitStatusResult.cs
-│  │     ├─ GitDiffResult.cs
-│  │     ├─ GitLogResult.cs
-│  │     ├─ GitShowResult.cs
-│  │     ├─ ProjectVerifyResult.cs
-│  │     ├─ WriteFileResult.cs
-│  │     ├─ PatchFileResult.cs
-│  │     ├─ CreateDirectoryResult.cs
-│  │     ├─ StatResult.cs
-│  │     ├─ BatchStatResult.cs
-│  │     ├─ BatchReadResult.cs
-│  │     ├─ MoveResult.cs
-│  │     ├─ CopyResult.cs
-│  │     ├─ DeleteResult.cs
-│  │     └─ RemoveDirectoryResult.cs
-│  │
-│  └─ LocalMcp.BuildingBlocks/
-│     ├─ Errors/ErrorCodes.cs           # Standard error code constants
-│     └─ Serialization/JsonOptions.cs
-│
-└─ tests/
-   ├─ LocalMcp.UnitTests/               # PathPolicy, executor, auth, schema tests
-   ├─ LocalMcp.IntegrationTests/        # End-to-end SignalR integration tests
-   └─ LocalMcp.ArchitectureTests/       # Circular dependency tests
+src/
+  LocalMcp.Gateway/         MCP HTTP server, authentication, policies, SignalR hub, tool schemas
+  LocalMcp.Agent.Windows/   Windows execution engine, UI Automation, Win32, filesystem, PowerShell
+  LocalMcp.Contracts/       Commands and result contracts shared across the SignalR boundary
+  LocalMcp.BuildingBlocks/  Shared errors and serialization
+
+tests/
+  LocalMcp.UnitTests/
+  LocalMcp.IntegrationTests/
+  LocalMcp.ArchitectureTests/
 ```
 
----
+## Model, data, and cost behavior
 
-## Running Tests
+AgentBridge does not embed or call an AI model. Model selection, conversation retention, provider billing, and prompt handling belong to the MCP client and its provider.
+
+The bridge receives only the tool calls sent by that client. Local data returned by a tool, including screenshots, file contents, window metadata, and clipboard text, is sent back through the configured Gateway connection. Configure roots and permissions with the assumption that returned data may enter the client conversation.
+
+## Contributing
+
+Before opening a change:
 
 ```powershell
-dotnet test -c Release
+dotnet build .\LocalMcp.sln -c Release
+dotnet test .\LocalMcp.sln -c Release
 ```
 
-All tests use dynamic, isolated temporary directories and clean up after themselves.
+Keep tool inputs bounded, preserve structured error codes, add metadata and schema tests for public MCP changes, and avoid widening filesystem or desktop permissions silently.
 
-### Test categories
+## License
 
-| Suite | What it covers |
-|---|---|
-| `PathPolicyTests` | AllowedRoots, WritableRoots, DeniedSegments, wildcard denials |
-| `WriteToolsTests` | Executor write/patch safety, BOM absence, UTF-8, conflict, temp cleanup |
-| `DirectoryCreationTests` | Hardened recursive directory segment creation, rollbacks, and junction/symlink escape checks |
-| `StatTests` | Bounded file metadata status, encoding detection, oversized size skips, and unreadable files handling |
-| `BatchStatTests` | Ordered partial-success batches, 1–100 path validation, cancellation, denied paths, and an eight-operation concurrency cap |
-| `BatchReadTests` | Ordered multi-file reads, independent item failures, binary rejection, UTF-8-safe per-file and total truncation, validation, cancellation, and a four-operation concurrency cap |
-| `DeleteTests` | File-only deletion policy, writable-root enforcement, hash conflicts, read-only files, denied paths, and reparse-point rejection |
-| `RemoveDirectoryTests` | Empty-directory-only removal, root protection, missing paths, non-empty races, denied paths, and reparse-point rejection |
-| `ReadRangeTests` | Bounded line-range streaming, large-file reads, UTF-8/BOM validation, binary rejection, response limits, and denied paths |
-| `MoveCopyTests` | File move/copy concurrency plus bounded recursive directory copy, entry/byte limits, denied descendants, destination containment, and temporary-tree cleanup |
-| `CrossVolumeMoveTests` | Same-volume fast path, cross-volume copy-verify-delete fallback, overwrite rollback, source mutation detection, cancellation, and temporary-file cleanup |
-| `GitToolsTests` | Git filter-scope regression coverage, porcelain status parsing, history metadata/short-stat parsing, numstat aggregation, and synthetic untracked-file patch formatting |
-| `ProjectCheckTests` | Project detection, package-manager selection, fixed command planning, and extended transport timeout coverage |
-| `McpToolMetadataTests` | Tool annotations (ReadOnly/Destructive/Idempotent), exact parameter schemas, forbidden internal types |
-| `McpAuthorizationTests` | Real HTTP JSON-RPC with JWT — anonymous→401, scope enforcement per tool |
-| `GatewayAuthTests` | Metadata endpoint, token validation, public exposure guardrail |
-| `CommandDeserializerTests` | Strict command deserialization for all supported commands |
-| `BenchmarkTests` | PathPolicy throughput under sustained load |
-| `EndToEndTests` | Full SignalR loop: Gateway → Agent → FileSystem → Gateway |
-| `ArchitectureTests` | No circular project references |
+No license file is currently included in this repository. Until a license is added, the code is not automatically granted an open-source usage license.
