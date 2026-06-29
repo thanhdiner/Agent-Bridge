@@ -13,7 +13,7 @@ using ModelContextProtocol.Server;
 namespace LocalMcp.Gateway.Mcp;
 
 [McpServerToolType]
-public sealed class WindowCoordinateTools
+public sealed partial class WindowCoordinateTools
 {
     private readonly ICommandDispatcher _dispatcher;
     private readonly IAuthorizationService _authorizationService;
