@@ -148,6 +148,10 @@ public sealed partial class CommandHandler
         {
             return await HandleWindowMoveAsync(windowMoveCommand, cancellationToken);
         }
+        else if (command is WindowScreenshotCommand windowScreenshotCommand)
+        {
+            return await HandleWindowScreenshotAsync(windowScreenshotCommand, cancellationToken);
+        }
         else if (command is UiClickCommand uiClickCommand)
         {
             return await HandleUiClickAsync(uiClickCommand, cancellationToken);

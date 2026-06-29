@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
 using LocalMcp.Contracts.Commands;
@@ -15,6 +16,9 @@ namespace LocalMcp.Gateway.Mcp;
 [McpServerToolType]
 public sealed class WindowActionTools
 {
+    private const int MaximumScreenshotPngBytes = 6 * 1024 * 1024;
+    private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+
     private readonly ICommandDispatcher _dispatcher;
     private readonly IAuthorizationService _authorizationService;
     private readonly IHttpContextAccessor? _httpContextAccessor;
@@ -96,6 +100,108 @@ public sealed class WindowActionTools
                 RestoreIfNeeded = restoreIfNeeded
             },
             "window_move");
+    }
+
+    [McpServerTool(
+        Name = "window_screenshot",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false),
+     Description("Captures one live top-level Windows window as a bounded PNG image. Uses off-screen rendering first and a screen-region fallback when necessary. Does not write a file. Requires dev:execute scope.")]
+    public async Task<CallToolResult> CaptureWindowAsync(
+        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
+        [Description("Maximum output width in pixels (default: 1920, hard limit: 4096)")] int maxWidth = 1920,
+        [Description("Maximum output height in pixels (default: 1080, hard limit: 4096)")] int maxHeight = 1080)
+    {
+        var validation = await ValidateAsync(deviceId, windowHandle);
+        if (validation is not null)
+            return validation;
+        if (maxWidth is < 1 or > 4096 || maxHeight is < 1 or > 4096)
+            return Error("INVALID_REQUEST", "maxWidth and maxHeight must be between 1 and 4096.");
+
+        var command = new WindowScreenshotCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            WindowHandle = windowHandle,
+            MaxWidth = maxWidth,
+            MaxHeight = maxHeight
+        };
+
+        try
+        {
+            var result = await _dispatcher.SendAsync<WindowScreenshotResult>(command, CancellationToken());
+            if (!result.Success || result.Data is null)
+            {
+                return Error(
+                    result.Error?.Code ?? "INTERNAL_ERROR",
+                    result.Error?.Message ?? "An unexpected error occurred during command execution.");
+            }
+
+            return BuildScreenshotResult(result.Data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error executing window_screenshot for device {DeviceId}", deviceId);
+            return Error("INTERNAL_ERROR", "An unexpected error occurred on the gateway.");
+        }
+    }
+
+    private static CallToolResult BuildScreenshotResult(WindowScreenshotResult result)
+    {
+        byte[] png;
+        try
+        {
+            png = Convert.FromBase64String(result.PngBase64);
+        }
+        catch (FormatException)
+        {
+            return Error("WINDOW_SCREENSHOT_FAILED", "The agent returned invalid screenshot data.");
+        }
+
+        if (!string.Equals(result.MimeType, "image/png", StringComparison.OrdinalIgnoreCase) ||
+            png.Length is < 8 or > MaximumScreenshotPngBytes ||
+            png.Length != result.ByteLength ||
+            !png.AsSpan(0, PngSignature.Length).SequenceEqual(PngSignature))
+        {
+            return Error("WINDOW_SCREENSHOT_FAILED", "The screenshot payload is invalid.");
+        }
+
+        var sha256 = Convert.ToHexString(SHA256.HashData(png)).ToLowerInvariant();
+        if (!string.Equals(sha256, result.Sha256, StringComparison.OrdinalIgnoreCase))
+            return Error("WINDOW_SCREENSHOT_FAILED", "The screenshot payload failed integrity verification.");
+
+        var metadata = new
+        {
+            result.WindowHandle,
+            result.Title,
+            result.ProcessId,
+            result.ProcessName,
+            result.Bounds,
+            result.OriginalWidth,
+            result.OriginalHeight,
+            result.Width,
+            result.Height,
+            result.Scaled,
+            result.WasMinimized,
+            result.CaptureMethod,
+            result.MimeType,
+            result.ByteLength,
+            result.Sha256
+        };
+
+        return new CallToolResult
+        {
+            Content =
+            [
+                new TextContentBlock { Text = JsonSerializer.Serialize(metadata, JsonOptions.Default) },
+                ImageContentBlock.FromBytes(png, "image/png")
+            ],
+            IsError = false
+        };
     }
 
     private async Task<CallToolResult?> ValidateAsync(string deviceId, string windowHandle)
