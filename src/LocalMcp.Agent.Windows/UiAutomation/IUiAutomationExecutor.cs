@@ -65,6 +65,46 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<ScreenClickResult>> ClickScreenAsync(
+        string expectedForegroundWindowHandle,
+        int x,
+        int y,
+        int? monitorIndex,
+        string button,
+        int clickCount,
+        int? expectedProcessId,
+        string? expectedWindowTitle,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
+    Task<CommandResult<ScreenDragResult>> DragScreenAsync(
+        string expectedForegroundWindowHandle,
+        int startX,
+        int startY,
+        int endX,
+        int endY,
+        int? startMonitorIndex,
+        int? endMonitorIndex,
+        string button,
+        int durationMs,
+        int steps,
+        int? expectedProcessId,
+        string? expectedWindowTitle,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
+    Task<CommandResult<ScreenScrollResult>> ScrollScreenAsync(
+        string expectedForegroundWindowHandle,
+        int x,
+        int y,
+        int? monitorIndex,
+        string direction,
+        int notches,
+        int? expectedProcessId,
+        string? expectedWindowTitle,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<WindowClickResult>> ClickWindowAsync(
         string windowHandle,
         int x,

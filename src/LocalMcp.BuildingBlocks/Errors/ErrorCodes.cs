@@ -36,6 +36,11 @@ public static class ErrorCodes
     public const string WindowScreenshotTooLarge = "WINDOW_SCREENSHOT_TOO_LARGE";
     public const string ScreenScreenshotFailed = "SCREEN_SCREENSHOT_FAILED";
     public const string ScreenScreenshotTooLarge = "SCREEN_SCREENSHOT_TOO_LARGE";
+    public const string ScreenInputFailed = "SCREEN_INPUT_FAILED";
+    public const string ScreenForegroundMismatch = "SCREEN_FOREGROUND_MISMATCH";
+    public const string ScreenMonitorMismatch = "SCREEN_MONITOR_MISMATCH";
+    public const string ScreenPointOutOfBounds = "SCREEN_POINT_OUT_OF_BOUNDS";
+    public const string ScreenHitTargetMismatch = "SCREEN_HIT_TARGET_MISMATCH";
     public const string WindowClickFailed = "WINDOW_CLICK_FAILED";
     public const string WindowDragFailed = "WINDOW_DRAG_FAILED";
     public const string WindowGuardMismatch = "WINDOW_GUARD_MISMATCH";
