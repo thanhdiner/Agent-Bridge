@@ -32,6 +32,8 @@ public static class ErrorCodes
     public const string WindowCloseFailed = "WINDOW_CLOSE_FAILED";
     public const string WindowMoveFailed = "WINDOW_MOVE_FAILED";
     public const string WindowWaitTimeout = "WINDOW_WAIT_TIMEOUT";
+    public const string WindowScreenshotFailed = "WINDOW_SCREENSHOT_FAILED";
+    public const string WindowScreenshotTooLarge = "WINDOW_SCREENSHOT_TOO_LARGE";
     public const string AppExecutableNotAllowed = "APP_EXECUTABLE_NOT_ALLOWED";
     public const string AppExecutableInvalid = "APP_EXECUTABLE_INVALID";
     public const string AppLaunchFailed = "APP_LAUNCH_FAILED";

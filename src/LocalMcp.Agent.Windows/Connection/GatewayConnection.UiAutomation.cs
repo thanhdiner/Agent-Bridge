@@ -18,6 +18,7 @@ public sealed partial class GatewayConnection
             nameof(WindowFocusCommand) => JsonSerializer.Deserialize<WindowFocusCommand>(rawJson, JsonOptions.Default),
             nameof(WindowCloseCommand) => JsonSerializer.Deserialize<WindowCloseCommand>(rawJson, JsonOptions.Default),
             nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(rawJson, JsonOptions.Default),
+            nameof(WindowScreenshotCommand) => JsonSerializer.Deserialize<WindowScreenshotCommand>(rawJson, JsonOptions.Default),
             nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(rawJson, JsonOptions.Default),
             nameof(UiSelectCommand) => JsonSerializer.Deserialize<UiSelectCommand>(rawJson, JsonOptions.Default),
             nameof(UiExpandCollapseCommand) => JsonSerializer.Deserialize<UiExpandCollapseCommand>(rawJson, JsonOptions.Default),
