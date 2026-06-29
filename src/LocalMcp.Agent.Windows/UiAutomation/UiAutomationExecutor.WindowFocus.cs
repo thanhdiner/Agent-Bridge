@@ -55,6 +55,8 @@ public sealed partial class UiAutomationExecutor
 
         cancellationToken.ThrowIfCancellationRequested();
         var previousForegroundWindow = GetForegroundWindow();
+        var wasMinimized = IsIconic(handle);
+        var restored = false;
         IUIAutomation? automation = null;
         IUIAutomationElement? element = null;
         object? pattern = null;
@@ -65,8 +67,6 @@ public sealed partial class UiAutomationExecutor
             if (element is null)
                 return FocusFailure(commandId, ErrorCodes.WindowNotFound, "Windows UI Automation could not resolve the requested window.");
 
-            var wasMinimized = IsIconic(handle);
-            var restored = false;
             if (wasMinimized)
             {
                 pattern = element.GetCurrentPattern(UIA_PatternIds.UIA_WindowPatternId);

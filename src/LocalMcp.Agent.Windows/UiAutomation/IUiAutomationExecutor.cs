@@ -54,6 +54,31 @@ public interface IUiAutomationExecutor
         Guid commandId,
         CancellationToken cancellationToken);
 
+    Task<CommandResult<WindowClickResult>> ClickWindowAsync(
+        string windowHandle,
+        int x,
+        int y,
+        string button,
+        int clickCount,
+        int? expectedProcessId,
+        string? expectedWindowTitle,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
+    Task<CommandResult<WindowDragResult>> DragWindowAsync(
+        string windowHandle,
+        int startX,
+        int startY,
+        int endX,
+        int endY,
+        string button,
+        int durationMs,
+        int steps,
+        int? expectedProcessId,
+        string? expectedWindowTitle,
+        Guid commandId,
+        CancellationToken cancellationToken);
+
     Task<CommandResult<UiClickResult>> ClickAsync(
         string windowHandle,
         string? automationId,

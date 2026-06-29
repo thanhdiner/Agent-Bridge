@@ -65,6 +65,8 @@ public sealed class CommandDeserializerTests
                 nameof(WindowCloseCommand) => JsonSerializer.Deserialize<WindowCloseCommand>(payload, JsonOptions.Default),
                 nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(payload, JsonOptions.Default),
                 nameof(WindowScreenshotCommand) => JsonSerializer.Deserialize<WindowScreenshotCommand>(payload, JsonOptions.Default),
+                nameof(WindowClickCommand) => JsonSerializer.Deserialize<WindowClickCommand>(payload, JsonOptions.Default),
+                nameof(WindowDragCommand) => JsonSerializer.Deserialize<WindowDragCommand>(payload, JsonOptions.Default),
                 nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
                 nameof(UiGetStateCommand) => JsonSerializer.Deserialize<UiGetStateCommand>(payload, JsonOptions.Default),
                 nameof(UiFocusCommand) => JsonSerializer.Deserialize<UiFocusCommand>(payload, JsonOptions.Default),
