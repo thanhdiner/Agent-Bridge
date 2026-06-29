@@ -156,6 +156,18 @@ public sealed partial class CommandHandler
         {
             return await HandleScreenScreenshotAsync(screenScreenshotCommand, cancellationToken);
         }
+        else if (command is ScreenClickCommand screenClickCommand)
+        {
+            return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.ScreenInputDispatch.HandleClickAsync(_uiAutomationExecutor, screenClickCommand, cancellationToken));
+        }
+        else if (command is ScreenDragCommand screenDragCommand)
+        {
+            return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.ScreenInputDispatch.HandleDragAsync(_uiAutomationExecutor, screenDragCommand, cancellationToken));
+        }
+        else if (command is ScreenScrollCommand screenScrollCommand)
+        {
+            return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.ScreenInputDispatch.HandleScrollAsync(_uiAutomationExecutor, screenScrollCommand, cancellationToken));
+        }
         else if (command is WindowClickCommand windowClickCommand)
         {
             return WindowActionToJson(await LocalMcp.Agent.Windows.UiAutomation.WindowClickDispatch.HandleAsync(_uiAutomationExecutor, windowClickCommand, cancellationToken));
