@@ -65,6 +65,7 @@ public sealed class CommandDeserializerTests
                 nameof(WindowCloseCommand) => JsonSerializer.Deserialize<WindowCloseCommand>(payload, JsonOptions.Default),
                 nameof(WindowMoveCommand) => JsonSerializer.Deserialize<WindowMoveCommand>(payload, JsonOptions.Default),
                 nameof(WindowScreenshotCommand) => JsonSerializer.Deserialize<WindowScreenshotCommand>(payload, JsonOptions.Default),
+                nameof(ScreenScreenshotCommand) => JsonSerializer.Deserialize<ScreenScreenshotCommand>(payload, JsonOptions.Default),
                 nameof(WindowClickCommand) => JsonSerializer.Deserialize<WindowClickCommand>(payload, JsonOptions.Default),
                 nameof(WindowDragCommand) => JsonSerializer.Deserialize<WindowDragCommand>(payload, JsonOptions.Default),
                 nameof(UiClickCommand) => JsonSerializer.Deserialize<UiClickCommand>(payload, JsonOptions.Default),
@@ -579,6 +580,44 @@ public sealed class CommandDeserializerTests
         var screenshotCommand = Assert.IsType<WindowScreenshotCommand>(command);
         Assert.Equal(1920, screenshotCommand.MaxWidth);
         Assert.Equal(1080, screenshotCommand.MaxHeight);
+    }
+
+    [Fact]
+    public void Deserialize_ScreenScreenshotCommand_WithRegion_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ScreenScreenshotCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"x\":-1280,\"y\":20,\"width\":640,\"height\":480,\"maxWidth\":1024,\"maxHeight\":768}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var screenshotCommand = Assert.IsType<ScreenScreenshotCommand>(command);
+        Assert.Null(screenshotCommand.MonitorIndex);
+        Assert.Equal(-1280, screenshotCommand.X);
+        Assert.Equal(20, screenshotCommand.Y);
+        Assert.Equal(640, screenshotCommand.Width);
+        Assert.Equal(480, screenshotCommand.Height);
+        Assert.Equal(1024, screenshotCommand.MaxWidth);
+        Assert.Equal(768, screenshotCommand.MaxHeight);
+    }
+
+    [Fact]
+    public void Deserialize_ScreenScreenshotCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ScreenScreenshotCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var screenshotCommand = Assert.IsType<ScreenScreenshotCommand>(command);
+        Assert.Null(screenshotCommand.MonitorIndex);
+        Assert.Null(screenshotCommand.X);
+        Assert.Null(screenshotCommand.Y);
+        Assert.Null(screenshotCommand.Width);
+        Assert.Null(screenshotCommand.Height);
+        Assert.Equal(4096, screenshotCommand.MaxWidth);
+        Assert.Equal(4096, screenshotCommand.MaxHeight);
     }
 
     [Fact]
