@@ -54,6 +54,7 @@ public static class ErrorCodes
     public const string AppProcessAmbiguous = "APP_PROCESS_AMBIGUOUS";
     public const string AppProcessMismatch = "APP_PROCESS_MISMATCH";
     public const string AppCloseProtected = "APP_CLOSE_PROTECTED";
+    public const string ProcessWaitTimeout = "PROCESS_WAIT_TIMEOUT";
     public const string UiAutomationUnavailable = "UI_AUTOMATION_UNAVAILABLE";
     public const string UiAutomationFailed = "UI_AUTOMATION_FAILED";
     public const string UiElementNotFound = "UI_ELEMENT_NOT_FOUND";

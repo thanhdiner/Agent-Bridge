@@ -15,8 +15,11 @@ public sealed class UiWaitExecutorValidationTests
     [InlineData(" NOT-EXISTS ", "not-exists")]
     [InlineData("Enabled", "enabled")]
     [InlineData("disabled", "disabled")]
+    [InlineData("focused", "focused")]
+    [InlineData("disappears", "not-exists")]
     [InlineData("VALUE-EQUALS", "value-equals")]
     [InlineData("value-contains", "value-contains")]
+    [InlineData("value_changed", "value-changed")]
     public void WaitCondition_Normalization_AcceptsSupportedValues(string input, string expected)
     {
         Assert.True(UiWaitConditions.TryNormalize(input, out var normalized));

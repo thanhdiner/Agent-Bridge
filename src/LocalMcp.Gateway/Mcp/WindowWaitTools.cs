@@ -40,7 +40,7 @@ public sealed class WindowWaitTools
         Destructive = false,
         Idempotent = true,
         OpenWorld = false),
-     Description("Waits until a top-level Windows window satisfies exists, not-exists, foreground, title-equals, or title-contains. Select by handle, PID, process name, class name, exact title, or title substring. Requires dev:execute scope.")]
+     Description("Waits until a top-level Windows window appears, disappears, becomes foreground, or matches a title. Select by handle, PID, process name, class name, exact title, or title substring. Requires dev:execute scope.")]
     public async Task<CallToolResult> WaitWindowAsync(
         [Description("The unique identifier of the target agent device")] string deviceId,
         [Description("Optional native window handle as a decimal string or 0x-prefixed hexadecimal string")] string? windowHandle = null,
@@ -50,7 +50,7 @@ public sealed class WindowWaitTools
         [Description("Optional exact current window title, case-insensitive; empty title is allowed")] string? title = null,
         [Description("Optional substring of the current window title, case-insensitive; empty string is allowed")] string? titleContains = null,
         [Description("Zero-based index when multiple windows match, ordered like window_list (default: 0, hard limit: 1000)")] int occurrenceIndex = 0,
-        [Description("Condition: exists, not-exists, foreground, title-equals, or title-contains (default: exists)")] string condition = WindowWaitConditions.Exists,
+        [Description("Condition: exists, not-exists, foreground, title-equals, or title-contains. Aliases: appears, disappears, focused (default: exists)")] string condition = WindowWaitConditions.Exists,
         [Description("Required for title-equals and title-contains; compared against the selected window's live title")] string? expectedTitle = null,
         [Description("Whether invisible or cloaked windows may match (default: false)")] bool includeInvisible = false,
         [Description("Maximum wait in milliseconds (default: 10000, hard limit: 300000)")] int timeoutMs = 10_000,
@@ -83,7 +83,7 @@ public sealed class WindowWaitTools
         if (occurrenceIndex is < 0 or > 1000)
             return Error("INVALID_REQUEST", "occurrenceIndex must be between 0 and 1000.");
         if (!WindowWaitConditions.TryNormalize(condition, out var normalizedCondition))
-            return Error("INVALID_REQUEST", "condition must be one of: exists, not-exists, foreground, title-equals, title-contains.");
+            return Error("INVALID_REQUEST", "condition must be one of: exists, not-exists, foreground, title-equals, title-contains. Aliases: appears, disappears, focused.");
         if (WindowWaitConditions.RequiresExpectedTitle(normalizedCondition) && expectedTitle is null)
             return Error("INVALID_REQUEST", "expectedTitle is required for title-equals and title-contains conditions.");
         if (!OptionalText(expectedTitle, MaxSelectorCharacters))

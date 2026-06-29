@@ -17,6 +17,7 @@ public sealed partial class CommandHandler
     private readonly IAppResolver? _appResolver;
     private readonly IAppOpener? _appOpener;
     private readonly IAppCloser? _appCloser;
+    private readonly IProcessWaiter? _processWaiter;
 
     internal CommandHandler(
         IPathPolicy pathPolicy,
@@ -29,6 +30,7 @@ public sealed partial class CommandHandler
         IAppResolver appResolver,
         IAppOpener appOpener,
         IAppCloser appCloser,
+        IProcessWaiter processWaiter,
         ILogger<CommandHandler> logger)
         : this(
             pathPolicy,
@@ -43,6 +45,7 @@ public sealed partial class CommandHandler
         _appResolver = appResolver;
         _appOpener = appOpener;
         _appCloser = appCloser;
+        _processWaiter = processWaiter;
     }
 
     private async Task<CommandResult<JsonElement>> HandleAppResolveAsync(
@@ -158,6 +161,52 @@ public sealed partial class CommandHandler
             command.Force,
             command.EntireProcessTree,
             command.TimeoutMs,
+            command.CommandId,
+            cancellationToken);
+
+        if (!result.Success || result.Data is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        return new CommandResult<JsonElement>
+        {
+            CommandId = command.CommandId,
+            Success = true,
+            Data = JsonSerializer.SerializeToElement(
+                result.Data,
+                LocalMcp.BuildingBlocks.Serialization.JsonOptions.Default)
+        };
+    }
+
+    private async Task<CommandResult<JsonElement>> HandleProcessWaitAsync(
+        ProcessWaitCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (_processWaiter is null)
+        {
+            return new CommandResult<JsonElement>
+            {
+                CommandId = command.CommandId,
+                Success = false,
+                Error = new CommandError(
+                    ErrorCodes.InternalError,
+                    "Process waiting is not configured on this agent.")
+            };
+        }
+
+        var result = await _processWaiter.WaitAsync(
+            command.ProcessId,
+            command.ProcessName,
+            command.OccurrenceIndex,
+            command.Condition,
+            command.TimeoutMs,
+            command.PollIntervalMs,
             command.CommandId,
             cancellationToken);
 

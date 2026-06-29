@@ -58,6 +58,7 @@ public sealed class CommandDeserializerTests
                 nameof(AppResolveCommand) => JsonSerializer.Deserialize<AppResolveCommand>(payload, JsonOptions.Default),
                 nameof(AppOpenCommand) => JsonSerializer.Deserialize<AppOpenCommand>(payload, JsonOptions.Default),
                 nameof(AppCloseCommand) => JsonSerializer.Deserialize<AppCloseCommand>(payload, JsonOptions.Default),
+                nameof(ProcessWaitCommand) => JsonSerializer.Deserialize<ProcessWaitCommand>(payload, JsonOptions.Default),
                 nameof(AppLaunchCommand) => JsonSerializer.Deserialize<AppLaunchCommand>(payload, JsonOptions.Default),
                 nameof(WindowListCommand) => JsonSerializer.Deserialize<WindowListCommand>(payload, JsonOptions.Default),
                 nameof(WindowWaitCommand) => JsonSerializer.Deserialize<WindowWaitCommand>(payload, JsonOptions.Default),
@@ -457,6 +458,40 @@ public sealed class CommandDeserializerTests
         Assert.Null(launchCommand.WindowTitleContains);
         Assert.Equal(15_000, launchCommand.TimeoutMs);
         Assert.Equal(100, launchCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_ProcessWaitCommand_WithAllFields_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ProcessWaitCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"processId\":42,\"processName\":\"notepad.exe\",\"occurrenceIndex\":2,\"condition\":\"not-exists\",\"timeoutMs\":25000,\"pollIntervalMs\":125}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var waitCommand = Assert.IsType<ProcessWaitCommand>(command);
+        Assert.Equal(42, waitCommand.ProcessId);
+        Assert.Equal("notepad.exe", waitCommand.ProcessName);
+        Assert.Equal(2, waitCommand.OccurrenceIndex);
+        Assert.Equal(ProcessWaitConditions.NotExists, waitCommand.Condition);
+        Assert.Equal(25_000, waitCommand.TimeoutMs);
+        Assert.Equal(125, waitCommand.PollIntervalMs);
+    }
+
+    [Fact]
+    public void Deserialize_ProcessWaitCommand_WithoutOptionalFields_HasDefaults()
+    {
+        var id = Guid.NewGuid();
+        var json = $"{{\"commandType\":\"ProcessWaitCommand\",\"commandId\":\"{id}\",\"deviceId\":\"dev\",\"createdAt\":\"2026-06-29T00:00:00Z\",\"processName\":\"notepad\"}}";
+
+        var (command, errorCode) = TryDeserialize(json);
+
+        Assert.Null(errorCode);
+        var waitCommand = Assert.IsType<ProcessWaitCommand>(command);
+        Assert.Equal(ProcessWaitConditions.Exists, waitCommand.Condition);
+        Assert.Equal(0, waitCommand.OccurrenceIndex);
+        Assert.Equal(10_000, waitCommand.TimeoutMs);
+        Assert.Equal(200, waitCommand.PollIntervalMs);
     }
 
     [Fact]
