@@ -117,6 +117,28 @@ The Desktop app also creates `%LOCALAPPDATA%\AgentBridge\device.json` and writes
 
 Closing the window hides AgentBridge to the system tray while managed services continue running. Choosing **Exit** stops only processes started by that Desktop session. Existing external Gateway or Agent processes are adopted for status reporting and never terminated.
 
+### Current-user Windows package
+
+Build a zip package that contains the Desktop app plus managed Gateway and Agent services:
+
+```powershell
+.\scripts\build-installer.ps1
+```
+
+The output is written to:
+
+```text
+artifacts\installer\AgentBridge-win-x64-installer.zip
+```
+
+After extracting the zip, run:
+
+```powershell
+.\Install-AgentBridge.cmd
+```
+
+The package installs for the current Windows user under %LOCALAPPDATA%\AgentBridge\App, creates Start Menu and Desktop shortcuts, and launches AgentBridge.Desktop.exe. Pass -NoDesktopShortcut or -NoLaunch to install.ps1 when those optional actions are not wanted.
+
 > **Important:** with client authentication disabled, filesystem read and write policies can run in local development, but `dev:execute` is intentionally denied. Desktop control, screenshots, process control, application control, and PowerShell tools require authenticated access with the `dev:execute` scope.
 
 ## Enable full desktop automation
