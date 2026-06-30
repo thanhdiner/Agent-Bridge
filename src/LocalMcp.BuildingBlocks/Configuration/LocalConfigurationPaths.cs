@@ -5,6 +5,7 @@ public static class LocalConfigurationPaths
     public const string ApplicationDirectoryName = "AgentBridge";
     public const string ConfigurationFileName = "config.json";
     public const string DeviceFileName = "device.json";
+    public const string RuntimeTokenFileName = "runtime-token.bin";
     public const string LogsDirectoryName = "logs";
 
     public static string GetApplicationDataDirectory()
@@ -20,6 +21,9 @@ public static class LocalConfigurationPaths
 
     public static string GetDeviceFilePath() =>
         Path.Combine(GetApplicationDataDirectory(), DeviceFileName);
+
+    public static string GetRuntimeTokenFilePath() =>
+        Path.Combine(GetApplicationDataDirectory(), RuntimeTokenFileName);
 
     public static string GetLogsDirectory() =>
         Path.Combine(GetApplicationDataDirectory(), LogsDirectoryName);

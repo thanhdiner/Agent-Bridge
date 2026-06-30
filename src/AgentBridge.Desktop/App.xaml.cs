@@ -16,12 +16,21 @@ public partial class App : System.Windows.Application
     private Forms.NotifyIcon? _trayIcon;
     private Icon? _applicationIcon;
     private MainWindow? _mainWindow;
+    private SingleInstanceGuard? _singleInstanceGuard;
     private bool _isExiting;
     private bool _servicesStopped;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (!SingleInstanceGuard.TryAcquire(out _singleInstanceGuard))
+        {
+            await DesktopLog.WriteAsync(
+                "A second AgentBridge Desktop launch was blocked by the single-instance guard.");
+            Shutdown();
+            return;
+        }
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
@@ -87,6 +96,7 @@ public partial class App : System.Windows.Application
         }
 
         _applicationIcon?.Dispose();
+        _singleInstanceGuard?.Dispose();
         base.OnExit(e);
     }
 

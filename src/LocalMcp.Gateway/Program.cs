@@ -1,3 +1,4 @@
+using LocalMcp.Gateway;
 using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Hubs;
 using LocalMcp.Gateway.Security;
@@ -7,6 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add Gateway services
 builder.Services.AddGatewayServices(builder.Configuration);
+builder.Services.AddHostedService<ManagedRuntimeControlService>();
 
 // Add SignalR
 builder.Services.AddSignalR(options =>
@@ -77,6 +79,8 @@ app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAn
 app.MapGet("/healthz", () => Results.Json(new
 {
     status = "ok",
+    service = "AgentBridge.Gateway",
+    contractVersion = 1,
     timestampUtc = DateTimeOffset.UtcNow
 })).AllowAnonymous();
 

@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,37 +17,58 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 {
     public const string DefaultGatewayUrl = "http://127.0.0.1:5227";
 
+    private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan ForcedStopTimeout = TimeSpan.FromSeconds(5);
+
     private readonly ServiceBinaryLocator _binaryLocator;
     private readonly LocalDeviceIdentityStore _identityStore;
+    private readonly InternalTokenStore _tokenStore;
     private readonly HttpClient _httpClient;
+    private readonly RestartBackoff _gatewayBackoff = new();
+    private readonly RestartBackoff _agentBackoff = new();
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly SemaphoreSlim _gatewayLogGate = new(1, 1);
     private readonly SemaphoreSlim _agentLogGate = new(1, 1);
     private readonly string _logsDirectory;
+    private readonly string _gatewayUrl;
+    private readonly int _gatewayPort;
     private CancellationTokenSource? _monitorCancellation;
     private Task? _monitorTask;
     private Process? _gatewayProcess;
     private Process? _agentProcess;
-    private DateTimeOffset _lastGatewayStartUtc = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastAgentStartUtc = DateTimeOffset.MinValue;
     private string _deviceId = string.Empty;
-    private bool _gatewaySupportsHealthEndpoint;
-    private bool _agentDetectedByProcessFallback;
+    private string _internalToken = string.Empty;
     private bool _stopping;
 
     public ServiceSupervisor(
         ServiceBinaryLocator? binaryLocator = null,
         LocalDeviceIdentityStore? identityStore = null,
-        HttpClient? httpClient = null)
+        InternalTokenStore? tokenStore = null,
+        HttpClient? httpClient = null,
+        string? gatewayUrl = null)
     {
         _binaryLocator = binaryLocator ?? new ServiceBinaryLocator();
         _identityStore = identityStore ?? new LocalDeviceIdentityStore();
+        _tokenStore = tokenStore ?? new InternalTokenStore();
         _httpClient = httpClient ?? new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(2)
         };
         _logsDirectory = LocalConfigurationPaths.GetLogsDirectory();
-        Current = SupervisorSnapshot.Initial(DefaultGatewayUrl, _logsDirectory);
+
+        var configuredGatewayUrl = gatewayUrl
+            ?? Environment.GetEnvironmentVariable("AGENTBRIDGE_GATEWAY_URL")
+            ?? DefaultGatewayUrl;
+        if (!TryNormalizeGatewayUrl(
+                configuredGatewayUrl,
+                out _gatewayUrl,
+                out _gatewayPort))
+        {
+            throw new ArgumentException(
+                "Managed Gateway URL must be an absolute loopback HTTP URL.",
+                nameof(gatewayUrl));
+        }
+        Current = SupervisorSnapshot.Initial(_gatewayUrl, _logsDirectory);
     }
 
     public event Action<SupervisorSnapshot>? SnapshotChanged;
@@ -60,11 +83,13 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             Directory.CreateDirectory(_logsDirectory);
             var identity = await _identityStore.LoadOrCreateAsync(cancellationToken);
             _deviceId = identity.DeviceId;
+            _internalToken = await _tokenStore.LoadOrCreateAsync(cancellationToken);
+
             Publish(Current with
             {
                 DeviceId = _deviceId,
-                Gateway = StartingStatus("Preparing Gateway…"),
-                Agent = StartingStatus("Preparing Windows Agent…")
+                Gateway = StartingStatus("Preparing Gateway..."),
+                Agent = StartingStatus("Preparing Windows Agent...")
             });
 
             await EnsureGatewayAsync(cancellationToken);
@@ -75,6 +100,10 @@ public sealed class ServiceSupervisor : IAsyncDisposable
                 _monitorCancellation = new CancellationTokenSource();
                 _monitorTask = MonitorLoopAsync(_monitorCancellation.Token);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -98,14 +127,14 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         {
             Publish(Current with
             {
-                Gateway = StartingStatus("Restarting Gateway…"),
-                Agent = StartingStatus("Restarting Windows Agent…")
+                Gateway = StartingStatus("Restarting Gateway..."),
+                Agent = StartingStatus("Restarting Windows Agent...")
             });
 
             await StopOwnedAgentAsync(cancellationToken);
             await StopOwnedGatewayAsync(cancellationToken);
-            _lastGatewayStartUtc = DateTimeOffset.MinValue;
-            _lastAgentStartUtc = DateTimeOffset.MinValue;
+            _gatewayBackoff.Reset();
+            _agentBackoff.Reset();
             await EnsureGatewayAsync(cancellationToken);
             await EnsureAgentAsync(cancellationToken);
         }
@@ -133,10 +162,10 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 
             Publish(Current with
             {
-                Agent = StartingStatus("Applying workspace policy…")
+                Agent = StartingStatus("Applying workspace policy...")
             });
             await StopOwnedAgentAsync(cancellationToken);
-            _lastAgentStartUtc = DateTimeOffset.MinValue;
+            _agentBackoff.Reset();
             await EnsureAgentAsync(cancellationToken);
             return Current.Agent.IsHealthy;
         }
@@ -227,24 +256,33 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 
     private async Task EnsureGatewayAsync(CancellationToken cancellationToken)
     {
-        if (await ProbeGatewayAsync(cancellationToken))
+        await CaptureExitedGatewayAsync();
+
+        var probe = await ProbeGatewayAsync(cancellationToken);
+        if (probe == GatewayProbeState.AgentBridge)
         {
-            Publish(Current with
+            if (IsAlive(_gatewayProcess))
             {
-                Gateway = !_gatewaySupportsHealthEndpoint
-                    ? ExternalStatus(
+                _gatewayBackoff.ObserveHealthy(DateTimeOffset.UtcNow);
+                Publish(Current with
+                {
+                    Gateway = RunningStatus(
+                        "Running",
+                        $"Healthy on {_gatewayUrl}",
+                        _gatewayProcess!.Id,
+                        managed: true)
+                });
+            }
+            else
+            {
+                Publish(Current with
+                {
+                    Gateway = ExternalStatus(
                         "Running externally",
-                        "Legacy Gateway detected on port 5227. Restart it once to enable full health checks.")
-                    : IsAlive(_gatewayProcess)
-                        ? RunningStatus(
-                            "Running",
-                            $"Healthy on {DefaultGatewayUrl}",
-                            _gatewayProcess!.Id,
-                            managed: true)
-                        : ExternalStatus(
-                            "Running externally",
-                            $"A healthy Gateway already owns {DefaultGatewayUrl}.")
-            });
+                        $"A verified AgentBridge Gateway already owns {_gatewayUrl}.")
+                });
+            }
+
             return;
         }
 
@@ -252,18 +290,29 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         {
             Publish(Current with
             {
-                Gateway = StartingStatus("Waiting for Gateway health…", _gatewayProcess!.Id)
+                Gateway = StartingStatus("Waiting for Gateway health...", _gatewayProcess!.Id)
             });
             return;
         }
 
-        if (DateTimeOffset.UtcNow - _lastGatewayStartUtc < TimeSpan.FromSeconds(10))
+        if (probe == GatewayProbeState.ForeignService || IsGatewayPortInUse())
         {
             Publish(Current with
             {
                 Gateway = ErrorStatus(
-                    "Gateway unavailable",
-                    "The last start attempt failed. Automatic retry is cooling down.")
+                    $"Port {_gatewayPort} is occupied",
+                    $"Another application owns TCP port {_gatewayPort}. Close it, then restart AgentBridge.")
+            });
+            return;
+        }
+
+        if (!_gatewayBackoff.CanStart(DateTimeOffset.UtcNow, out var remaining))
+        {
+            Publish(Current with
+            {
+                Gateway = ErrorStatus(
+                    "Gateway restart cooling down",
+                    $"Automatic retry in {FormatSeconds(remaining)} seconds.")
             });
             return;
         }
@@ -275,90 +324,116 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             {
                 Gateway = ErrorStatus(
                     "Gateway binary missing",
-                    "Build LocalMcp.Gateway or package it under services\\gateway.")
+                    "Publish it under services\\gateway or build LocalMcp.Gateway.")
             });
             return;
         }
 
-        _lastGatewayStartUtc = DateTimeOffset.UtcNow;
-        _gatewayProcess = StartProcess(
-            target,
-            "gateway.log",
-            _gatewayLogGate,
-            new Dictionary<string, string>
+        try
+        {
+            _gatewayProcess = StartProcess(
+                target,
+                "gateway.log",
+                _gatewayLogGate,
+                BuildGatewayEnvironment());
+            _gatewayBackoff.RecordStarted(DateTimeOffset.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            var delay = _gatewayBackoff.RecordFailure(DateTimeOffset.UtcNow);
+            await DesktopLog.WriteAsync("Gateway process failed to start.", ex, cancellationToken);
+            Publish(Current with
             {
-                ["ASPNETCORE_URLS"] = DefaultGatewayUrl,
-                ["ASPNETCORE_ENVIRONMENT"] = "Production"
+                Gateway = ErrorStatus(
+                    "Gateway failed to start",
+                    $"Retrying in {FormatSeconds(delay)} seconds. {ex.Message}")
             });
+            return;
+        }
 
         Publish(Current with
         {
             Gateway = StartingStatus(
-                "Starting Gateway…",
+                "Starting Gateway...",
                 _gatewayProcess.Id,
                 target.DisplayPath)
         });
 
-        if (await WaitUntilAsync(ProbeGatewayAsync, TimeSpan.FromSeconds(15), cancellationToken))
+        var healthy = await WaitUntilAsync(
+            async token => await ProbeGatewayAsync(token) == GatewayProbeState.AgentBridge,
+            TimeSpan.FromSeconds(15),
+            cancellationToken);
+
+        if (healthy)
         {
             Publish(Current with
             {
                 Gateway = RunningStatus(
                     "Running",
-                    $"Healthy on {DefaultGatewayUrl}",
+                    $"Healthy on {_gatewayUrl}",
                     _gatewayProcess.Id,
                     managed: true)
             });
             return;
         }
 
+        var processId = TryGetProcessId(_gatewayProcess);
+        await StopOwnedGatewayAsync(cancellationToken);
+        var retryDelay = _gatewayBackoff.RecordFailure(DateTimeOffset.UtcNow);
         Publish(Current with
         {
             Gateway = ErrorStatus(
                 "Gateway failed health check",
-                $"See {Path.Combine(_logsDirectory, "gateway.log")}",
-                TryGetProcessId(_gatewayProcess),
-                IsAlive(_gatewayProcess))
+                $"Retrying in {FormatSeconds(retryDelay)} seconds. See {Path.Combine(_logsDirectory, "gateway.log")}",
+                processId)
         });
     }
 
     private async Task EnsureAgentAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_deviceId))
+        await CaptureExitedAgentAsync();
+
+        if (string.IsNullOrWhiteSpace(_deviceId) || string.IsNullOrWhiteSpace(_internalToken))
         {
             Publish(Current with
             {
-                Agent = ErrorStatus("Device identity unavailable", "device.json could not be loaded.")
+                Agent = ErrorStatus("Runtime identity unavailable", "Device identity or internal token is missing.")
             });
             return;
         }
 
         if (await ProbeAgentAsync(cancellationToken))
         {
-            Publish(Current with
+            if (IsAlive(_agentProcess))
             {
-                Agent = _agentDetectedByProcessFallback
-                    ? ExternalStatus(
-                        "Detected externally",
-                        "Legacy Windows Agent process detected. Restart it once to enable connection health.")
-                    : IsAlive(_agentProcess)
-                        ? RunningStatus(
-                            "Connected",
-                            $"Registered as {_deviceId}",
-                            _agentProcess!.Id,
-                            managed: true)
-                        : ExternalStatus(
-                            "Connected externally",
-                            $"An external Agent is registered as {_deviceId}.")
-            });
+                _agentBackoff.ObserveHealthy(DateTimeOffset.UtcNow);
+                Publish(Current with
+                {
+                    Agent = RunningStatus(
+                        "Connected",
+                        $"Registered as {_deviceId}",
+                        _agentProcess!.Id,
+                        managed: true)
+                });
+            }
+            else
+            {
+                Publish(Current with
+                {
+                    Agent = ExternalStatus(
+                        "Connected externally",
+                        $"An external Agent is registered as {_deviceId}.")
+                });
+            }
+
             return;
         }
 
-        if (!await ProbeGatewayAsync(cancellationToken))
+        if (await ProbeGatewayAsync(cancellationToken) != GatewayProbeState.AgentBridge)
         {
             Publish(Current with
             {
-                Agent = StoppedStatus("Waiting for a healthy Gateway.")
+                Agent = StoppedStatus("Waiting for a verified AgentBridge Gateway.")
             });
             return;
         }
@@ -367,18 +442,18 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         {
             Publish(Current with
             {
-                Agent = StartingStatus("Connecting to Gateway…", _agentProcess!.Id)
+                Agent = StartingStatus("Connecting to Gateway...", _agentProcess!.Id)
             });
             return;
         }
 
-        if (DateTimeOffset.UtcNow - _lastAgentStartUtc < TimeSpan.FromSeconds(10))
+        if (!_agentBackoff.CanStart(DateTimeOffset.UtcNow, out var remaining))
         {
             Publish(Current with
             {
                 Agent = ErrorStatus(
-                    "Agent unavailable",
-                    "The last start attempt failed. Automatic retry is cooling down.")
+                    "Agent restart cooling down",
+                    $"Automatic retry in {FormatSeconds(remaining)} seconds.")
             });
             return;
         }
@@ -390,27 +465,37 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             {
                 Agent = ErrorStatus(
                     "Agent binary missing",
-                    "Build LocalMcp.Agent.Windows or package it under services\\agent.")
+                    "Publish it under services\\agent or build LocalMcp.Agent.Windows.")
             });
             return;
         }
 
-        _lastAgentStartUtc = DateTimeOffset.UtcNow;
-        _agentProcess = StartProcess(
-            target,
-            "agent.log",
-            _agentLogGate,
-            new Dictionary<string, string>
+        try
+        {
+            _agentProcess = StartProcess(
+                target,
+                "agent.log",
+                _agentLogGate,
+                BuildAgentEnvironment());
+            _agentBackoff.RecordStarted(DateTimeOffset.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            var delay = _agentBackoff.RecordFailure(DateTimeOffset.UtcNow);
+            await DesktopLog.WriteAsync("Agent process failed to start.", ex, cancellationToken);
+            Publish(Current with
             {
-                ["DOTNET_ENVIRONMENT"] = "Production",
-                ["Agent__DeviceId"] = _deviceId,
-                ["Agent__GatewayUrl"] = DefaultGatewayUrl
+                Agent = ErrorStatus(
+                    "Agent failed to start",
+                    $"Retrying in {FormatSeconds(delay)} seconds. {ex.Message}")
             });
+            return;
+        }
 
         Publish(Current with
         {
             Agent = StartingStatus(
-                "Connecting Windows Agent…",
+                "Connecting Windows Agent...",
                 _agentProcess.Id,
                 target.DisplayPath)
         });
@@ -428,15 +513,41 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             return;
         }
 
+        var processId = TryGetProcessId(_agentProcess);
+        await StopOwnedAgentAsync(cancellationToken);
+        var retryDelay = _agentBackoff.RecordFailure(DateTimeOffset.UtcNow);
         Publish(Current with
         {
             Agent = ErrorStatus(
                 "Agent failed to connect",
-                $"See {Path.Combine(_logsDirectory, "agent.log")}",
-                TryGetProcessId(_agentProcess),
-                IsAlive(_agentProcess))
+                $"Retrying in {FormatSeconds(retryDelay)} seconds. See {Path.Combine(_logsDirectory, "agent.log")}",
+                processId)
         });
     }
+
+    private IReadOnlyDictionary<string, string> BuildGatewayEnvironment() =>
+        new Dictionary<string, string>
+        {
+            ["ASPNETCORE_URLS"] = _gatewayUrl,
+            ["ASPNETCORE_ENVIRONMENT"] = "Production",
+            ["DOTNET_ENVIRONMENT"] = "Production",
+            ["AGENTBRIDGE_MANAGED_RUNTIME"] = "1",
+            ["AgentSecurity__AuthenticationEnabled"] = "true",
+            ["AgentSecurity__TokenEnvironmentVariable"] = InternalTokenStore.TokenEnvironmentVariable,
+            [InternalTokenStore.TokenEnvironmentVariable] = _internalToken
+        };
+
+    private IReadOnlyDictionary<string, string> BuildAgentEnvironment() =>
+        new Dictionary<string, string>
+        {
+            ["DOTNET_ENVIRONMENT"] = "Production",
+            ["AGENTBRIDGE_MANAGED_RUNTIME"] = "1",
+            ["Agent__DeviceId"] = _deviceId,
+            ["Agent__GatewayUrl"] = _gatewayUrl,
+            ["AgentSecurity__AuthenticationEnabled"] = "true",
+            ["AgentSecurity__TokenEnvironmentVariable"] = InternalTokenStore.TokenEnvironmentVariable,
+            [InternalTokenStore.TokenEnvironmentVariable] = _internalToken
+        };
 
     private Process StartProcess(
         LaunchTarget target,
@@ -451,6 +562,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             WorkingDirectory = target.WorkingDirectory,
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
@@ -497,20 +609,41 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         return process;
     }
 
-    private async Task<bool> ProbeGatewayAsync(CancellationToken cancellationToken)
+    private async Task<GatewayProbeState> ProbeGatewayAsync(CancellationToken cancellationToken)
     {
         try
         {
             using var response = await _httpClient.GetAsync(
-                $"{DefaultGatewayUrl}/healthz",
+                $"{_gatewayUrl}/healthz",
                 cancellationToken);
-            _gatewaySupportsHealthEndpoint = response.IsSuccessStatusCode;
-            return response.IsSuccessStatusCode
-                || response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed;
+
+            if (!response.IsSuccessStatusCode)
+                return GatewayProbeState.ForeignService;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var root = document.RootElement;
+
+            var validStatus = root.TryGetProperty("status", out var status)
+                && string.Equals(status.GetString(), "ok", StringComparison.Ordinal);
+            var validService = root.TryGetProperty("service", out var service)
+                && string.Equals(service.GetString(), "AgentBridge.Gateway", StringComparison.Ordinal);
+
+            return validStatus && validService
+                ? GatewayProbeState.AgentBridge
+                : GatewayProbeState.ForeignService;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (HttpRequestException)
         {
-            return false;
+            return GatewayProbeState.Unreachable;
+        }
+        catch (TaskCanceledException)
+        {
+            return GatewayProbeState.Unreachable;
+        }
+        catch (JsonException)
+        {
+            return GatewayProbeState.ForeignService;
         }
     }
 
@@ -522,18 +655,11 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         try
         {
             using var response = await _httpClient.GetAsync(
-                $"{DefaultGatewayUrl}/healthz/agent/{Uri.EscapeDataString(_deviceId)}",
+                $"{_gatewayUrl}/healthz/agent/{Uri.EscapeDataString(_deviceId)}",
                 cancellationToken);
-            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
-            {
-                _agentDetectedByProcessFallback = IsLegacyAgentProcessRunning();
-                return _agentDetectedByProcessFallback;
-            }
-
             if (!response.IsSuccessStatusCode)
                 return false;
 
-            _agentDetectedByProcessFallback = false;
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
             return document.RootElement.TryGetProperty("online", out var online)
@@ -541,6 +667,20 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         }
         catch (Exception ex) when (
             ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return false;
+        }
+    }
+
+    private bool IsGatewayPortInUse()
+    {
+        try
+        {
+            return IPGlobalProperties.GetIPGlobalProperties()
+                .GetActiveTcpListeners()
+                .Any(endpoint => endpoint.Port == _gatewayPort);
+        }
+        catch (NetworkInformationException)
         {
             return false;
         }
@@ -562,6 +702,38 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         }
 
         return false;
+    }
+
+    private async Task CaptureExitedGatewayAsync()
+    {
+        if (_gatewayProcess is null || IsAlive(_gatewayProcess))
+            return;
+
+        var exitCode = SafeExitCode(_gatewayProcess);
+        _gatewayProcess.Dispose();
+        _gatewayProcess = null;
+        var delay = _gatewayBackoff.RecordFailure(DateTimeOffset.UtcNow);
+        await AppendServiceLogAsync(
+            Path.Combine(_logsDirectory, "gateway.log"),
+            "BACKOFF",
+            $"Unexpected exit code {exitCode}. Next retry in {FormatSeconds(delay)} seconds.",
+            _gatewayLogGate);
+    }
+
+    private async Task CaptureExitedAgentAsync()
+    {
+        if (_agentProcess is null || IsAlive(_agentProcess))
+            return;
+
+        var exitCode = SafeExitCode(_agentProcess);
+        _agentProcess.Dispose();
+        _agentProcess = null;
+        var delay = _agentBackoff.RecordFailure(DateTimeOffset.UtcNow);
+        await AppendServiceLogAsync(
+            Path.Combine(_logsDirectory, "agent.log"),
+            "BACKOFF",
+            $"Unexpected exit code {exitCode}. Next retry in {FormatSeconds(delay)} seconds.",
+            _agentLogGate);
     }
 
     private async Task StopOwnedAgentAsync(CancellationToken cancellationToken)
@@ -592,52 +764,58 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         await AppendServiceLogAsync(
             logPath,
             "STOP",
-            $"Stopping PID {process!.Id}.",
+            $"Requesting graceful stop for PID {process!.Id}.",
             logGate);
 
+        var exitedGracefully = false;
         try
         {
-            process.Kill(entireProcessTree: true);
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            await process.WaitForExitAsync(timeout.Token);
+            await process.StandardInput.WriteLineAsync("stop");
+            await process.StandardInput.FlushAsync();
+
+            using var gracefulTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            gracefulTimeout.CancelAfter(GracefulStopTimeout);
+            await process.WaitForExitAsync(gracefulTimeout.Token);
+            exitedGracefully = true;
         }
         catch (InvalidOperationException)
         {
         }
+        catch (IOException)
+        {
+        }
         catch (OperationCanceledException)
+        {
+        }
+
+        if (!exitedGracefully && IsAlive(process))
         {
             await AppendServiceLogAsync(
                 logPath,
                 "WARN",
-                "Timed out while stopping the process.",
+                $"Graceful stop exceeded {GracefulStopTimeout.TotalSeconds:0} seconds. Killing process tree.",
                 logGate);
-        }
-        finally
-        {
-            process.Dispose();
-        }
-    }
 
-    private static bool IsLegacyAgentProcessRunning()
-    {
-        foreach (var process in Process.GetProcessesByName("LocalMcp.Agent.Windows"))
-        {
             try
             {
-                if (!process.HasExited)
-                    return true;
+                process.Kill(entireProcessTree: true);
+                using var forcedTimeout = new CancellationTokenSource(ForcedStopTimeout);
+                await process.WaitForExitAsync(forcedTimeout.Token);
             }
             catch (InvalidOperationException)
             {
             }
-            finally
+            catch (OperationCanceledException)
             {
-                process.Dispose();
+                await AppendServiceLogAsync(
+                    logPath,
+                    "WARN",
+                    "Process tree did not exit before the forced-stop timeout.",
+                    logGate);
             }
         }
 
-        return false;
+        process.Dispose();
     }
 
     private static bool IsAlive(Process? process)
@@ -677,6 +855,30 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         {
             return -1;
         }
+    }
+
+    private static int FormatSeconds(TimeSpan value) =>
+        Math.Max(1, (int)Math.Ceiling(value.TotalSeconds));
+
+    private static bool TryNormalizeGatewayUrl(
+        string value,
+        out string normalizedUrl,
+        out int port)
+    {
+        normalizedUrl = string.Empty;
+        port = 0;
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttp
+            || !IPAddress.TryParse(uri.Host.Trim('[', ']'), out var address)
+            || !IPAddress.IsLoopback(address))
+        {
+            return false;
+        }
+
+        normalizedUrl = uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+        port = uri.Port;
+        return true;
     }
 
     private static async Task AppendServiceLogAsync(
@@ -763,4 +965,11 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         null,
         false,
         false);
+
+    private enum GatewayProbeState
+    {
+        Unreachable,
+        AgentBridge,
+        ForeignService
+    }
 }
