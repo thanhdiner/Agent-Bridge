@@ -17,8 +17,10 @@ namespace AgentBridge.Desktop;
 public partial class MainWindow : FluentWindow
 {
     private readonly ServiceSupervisor _supervisor;
+    private readonly UpdateService _updateService = new();
     private readonly LocalWorkspaceConfigurationStore _store = new();
     private readonly ObservableCollection<WorkspaceConfigurationEntry> _workspaces = [];
+    private bool _isCheckingForUpdates;
     private readonly DispatcherTimer _feedbackTimer = new()
     {
         Interval = TimeSpan.FromSeconds(4)
@@ -43,6 +45,7 @@ public partial class MainWindow : FluentWindow
     {
         Loaded -= MainWindow_Loaded;
         await ReloadAsync();
+        _ = CheckForUpdatesAsync(isManual: false);
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -129,6 +132,125 @@ public partial class MainWindow : FluentWindow
         finally
         {
             SetServiceButtonsEnabled(true);
+        }
+    }
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e) =>
+        await CheckForUpdatesAsync(isManual: true);
+
+    private async Task CheckForUpdatesAsync(bool isManual)
+    {
+        if (_isCheckingForUpdates)
+            return;
+
+        _isCheckingForUpdates = true;
+        CheckUpdatesButton.IsEnabled = false;
+
+        try
+        {
+            if (isManual)
+            {
+                ShowOverviewFeedback(
+                    "Checking for updates",
+                    "Looking for a newer AgentBridge release.",
+                    InfoBarSeverity.Informational,
+                    autoClose: false);
+            }
+
+            var result = await _updateService.CheckAsync(force: isManual);
+            if (result.IsSkipped)
+                return;
+
+            if (!result.IsUpdateAvailable || result.Manifest is null)
+            {
+                if (isManual)
+                {
+                    ShowOverviewFeedback(
+                        "No update available",
+                        result.Message,
+                        InfoBarSeverity.Success,
+                        autoClose: true);
+                }
+
+                return;
+            }
+
+            var latestVersion = result.LatestVersion?.ToString() ?? result.Manifest.Version;
+            var answer = System.Windows.MessageBox.Show(
+                this,
+                $"AgentBridge {latestVersion} is available.\n\nDownload and start the installer now?",
+                "Update available",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Information);
+
+            if (answer != System.Windows.MessageBoxResult.Yes)
+            {
+                ShowOverviewFeedback(
+                    "Update postponed",
+                    $"AgentBridge {latestVersion} is available when you are ready.",
+                    InfoBarSeverity.Informational,
+                    autoClose: true);
+                return;
+            }
+
+            ShowOverviewFeedback(
+                "Downloading update",
+                $"Downloading AgentBridge {latestVersion} and verifying SHA-256.",
+                InfoBarSeverity.Informational,
+                autoClose: false);
+
+            var downloaded = await _updateService.DownloadPackageAsync(result.Manifest);
+            var installAnswer = System.Windows.MessageBox.Show(
+                this,
+                $"AgentBridge {downloaded.Version} was downloaded and verified.\n\nStart the installer now?",
+                "Install update",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Information);
+
+            if (installAnswer != System.Windows.MessageBoxResult.Yes)
+            {
+                ShowOverviewFeedback(
+                    "Update downloaded",
+                    downloaded.FilePath,
+                    InfoBarSeverity.Success,
+                    autoClose: false);
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = downloaded.FilePath,
+                UseShellExecute = true,
+                Arguments = "/SP- /CLOSEAPPLICATIONS"
+            });
+
+            ShowOverviewFeedback(
+                "Installer started",
+                "Follow the installer to finish updating AgentBridge.",
+                InfoBarSeverity.Success,
+                autoClose: false);
+        }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException
+                                      or IOException
+                                      or UnauthorizedAccessException
+                                      or InvalidDataException
+                                      or InvalidOperationException
+                                      or System.Text.Json.JsonException)
+        {
+            await DesktopLog.WriteAsync("Update check failed.", ex);
+            if (isManual)
+            {
+                ShowOverviewFeedback(
+                    "Update check failed",
+                    ex.Message,
+                    InfoBarSeverity.Error,
+                    autoClose: false);
+            }
+        }
+        finally
+        {
+            _isCheckingForUpdates = false;
+            CheckUpdatesButton.IsEnabled = true;
         }
     }
 
@@ -284,6 +406,7 @@ public partial class MainWindow : FluentWindow
         RestartServicesButton.IsEnabled = enabled;
         RefreshServicesButton.IsEnabled = enabled;
         OpenLogsButton.IsEnabled = enabled;
+        CheckUpdatesButton.IsEnabled = enabled && !_isCheckingForUpdates;
     }
 
     private void UpdateEmptyState()

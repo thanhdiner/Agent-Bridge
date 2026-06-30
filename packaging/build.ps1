@@ -97,6 +97,28 @@ if (!(Test-Path -LiteralPath $outputFile -PathType Leaf)) {
     throw "Expected output file was not created: $outputFile"
 }
 
+$setupSha256 = (Get-FileHash -LiteralPath $outputFile -Algorithm SHA256).Hash.ToLowerInvariant()
+$baseUrl = $env:AGENTBRIDGE_DOWNLOAD_BASE_URL
+if ([string]::IsNullOrWhiteSpace($baseUrl)) {
+    $baseUrl = 'https://github.com/thanhdiner/Agent-Bridge/releases/latest/download'
+}
+
+$installerUrl = $baseUrl.TrimEnd('/') + '/AgentBridgeSetup-win-x64.exe'
+$manifestPath = Join-Path $outputRoot 'agentbridge-update.json'
+$manifest = [ordered]@{
+    version = $version
+    installerUrl = $installerUrl
+    installerSha256 = $setupSha256
+    releaseNotesUrl = 'https://github.com/thanhdiner/Agent-Bridge/releases/latest'
+    mandatory = $false
+    publishedAtUtc = (Get-Date).ToUniversalTime().ToString('O')
+}
+
+$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
 Write-Host ''
 Write-Host 'Setup file is ready:'
 Write-Host "  $outputFile"
+Write-Host ''
+Write-Host 'Update manifest is ready:'
+Write-Host "  $manifestPath"

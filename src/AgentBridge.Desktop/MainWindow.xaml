@@ -377,10 +377,16 @@
                                FontSize="10.5"
                                VerticalAlignment="Center" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <ui:Button x:Name="CheckUpdatesButton"
+                                   Content="Check updates"
+                                   Appearance="Transparent"
+                                   AutomationProperties.AutomationId="CheckUpdatesButton"
+                                   Click="CheckUpdates_Click" />
                         <ui:Button x:Name="RefreshServicesButton"
                                    Content="Refresh"
                                    Icon="{ui:SymbolIcon ArrowSync16}"
                                    Appearance="Transparent"
+                                   Margin="8,0,0,0"
                                    AutomationProperties.AutomationId="RefreshServicesButton"
                                    Click="RefreshServices_Click" />
                         <ui:Button x:Name="OpenLogsButton"
