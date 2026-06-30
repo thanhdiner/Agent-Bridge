@@ -51,6 +51,7 @@ public partial class MainWindow : FluentWindow
         Loaded -= MainWindow_Loaded;
         await ReloadAsync();
         await RefreshDeviceSelectionAsync(showErrors: false);
+        await RefreshActivationStatusAsync(showErrors: false);
         _ = CheckForUpdatesAsync(isManual: false);
     }
 
@@ -125,6 +126,7 @@ public partial class MainWindow : FluentWindow
             SetServiceButtonsEnabled(false);
             await _supervisor.RefreshAsync();
             ApplySupervisorSnapshot(_supervisor.Current);
+            await RefreshActivationStatusAsync(showErrors: true);
         }
         catch (Exception ex)
         {

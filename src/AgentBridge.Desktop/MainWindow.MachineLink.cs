@@ -10,9 +10,79 @@ namespace AgentBridge.Desktop;
 public partial class MainWindow
 {
     private bool _isLinkingThisComputer;
+    private bool _isCheckingActivationStatus;
 
     private async void ActivateDevice_Click(object sender, RoutedEventArgs e) =>
         await LinkThisComputerAsync();
+
+    private async Task RefreshActivationStatusAsync(bool showErrors)
+    {
+        if (_isCheckingActivationStatus)
+            return;
+
+        var snapshot = _supervisor.Current;
+        if (string.IsNullOrWhiteSpace(snapshot.DeviceId))
+        {
+            ActivationStatusText.Text = "Device not ready";
+            ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeWarningBrush");
+            ActivateDeviceButton.Content = "Activate this computer";
+            return;
+        }
+
+        _isCheckingActivationStatus = true;
+        ActivateDeviceButton.IsEnabled = false;
+
+        try
+        {
+            var service = new MachineLinkService();
+            var result = await service.GetStatusAsync(snapshot.GatewayUrl, snapshot.DeviceId);
+            if (result is { Activated: true })
+            {
+                ActivationStatusText.Text = $"Activated • {result.Plan}";
+                ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeSuccessBrush");
+                ActivateDeviceButton.Content = "Re-activate";
+            }
+            else
+            {
+                ActivationStatusText.Text = "Not activated";
+                ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeWarningBrush");
+                ActivateDeviceButton.Content = "Activate this computer";
+
+                if (showErrors)
+                {
+                    ShowOverviewFeedback(
+                        "This computer is not activated",
+                        "Activate this device before running AgentBridge tools.",
+                        InfoBarSeverity.Warning,
+                        autoClose: false);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException
+                                      or TaskCanceledException
+                                      or InvalidOperationException
+                                      or System.Text.Json.JsonException)
+        {
+            await DesktopLog.WriteAsync("Activation status refresh failed.", ex);
+            ActivationStatusText.Text = "Activation unknown";
+            ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeWarningBrush");
+            ActivateDeviceButton.Content = "Activate this computer";
+
+            if (showErrors)
+            {
+                ShowOverviewFeedback(
+                    "Could not check activation",
+                    ex.Message,
+                    InfoBarSeverity.Warning,
+                    autoClose: false);
+            }
+        }
+        finally
+        {
+            _isCheckingActivationStatus = false;
+            ActivateDeviceButton.IsEnabled = !_isLinkingThisComputer;
+        }
+    }
 
     private async Task LinkThisComputerAsync()
     {
