@@ -195,9 +195,12 @@ app.MapPost("/api/device-activation/activate", async (HttpContext httpContext) =
     }
 
     request.TryGetValue("deviceName", out var requestedDeviceName);
-    request.TryGetValue("plan", out var requestedPlan);
+    request.TryGetValue("status", out var requestedStatus);
+    request.TryGetValue("activeUntilUtc", out var requestedActiveUntilUtc);
+    request.TryGetValue("paidUntil", out var requestedLegacyPaidUntil);
     var deviceName = string.IsNullOrWhiteSpace(requestedDeviceName) ? "This computer" : requestedDeviceName.Trim();
-    var plan = string.IsNullOrWhiteSpace(requestedPlan) ? "free" : requestedPlan.Trim().ToLowerInvariant();
+    var status = string.IsNullOrWhiteSpace(requestedStatus) ? "active" : requestedStatus.Trim().ToLowerInvariant();
+    var activeUntilUtc = TryParseDateTimeOffset(requestedActiveUntilUtc) ?? TryParseDateTimeOffset(requestedLegacyPaidUntil);
     request.TryGetValue("activationToken", out var requestedActivationToken);
     var activationToken = string.IsNullOrWhiteSpace(requestedActivationToken)
         ? $"act_{Guid.NewGuid():N}{Guid.NewGuid():N}"
@@ -207,8 +210,9 @@ app.MapPost("/api/device-activation/activate", async (HttpContext httpContext) =
         accountId,
         deviceId,
         deviceName,
-        plan,
-        activationToken);
+        activationToken,
+        status,
+        activeUntilUtc);
 
     return Results.Ok(record);
 }).AllowAnonymous();
@@ -233,8 +237,11 @@ app.MapGet("/api/device-activation/status/{deviceId}", (string deviceId) =>
         activated = false,
         accountId = (string?)null,
         deviceName = (string?)null,
-        plan = (string?)null,
-        activatedAt = (DateTimeOffset?)null
+        status = (string?)null,
+        activeUntilUtc = (DateTimeOffset?)null,
+        features = Array.Empty<string>(),
+        createdAtUtc = (DateTimeOffset?)null,
+        updatedAtUtc = (DateTimeOffset?)null
     });
 }).AllowAnonymous();
 
@@ -257,6 +264,9 @@ app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
 
 // Map MCP endpoints (Streamable HTTP Transport — default path: POST /)
 app.MapMcp().RequireAuthorization("McpAuthenticatedPolicy");
+
+static DateTimeOffset? TryParseDateTimeOffset(string? value) =>
+    DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
 
 app.Run();
 

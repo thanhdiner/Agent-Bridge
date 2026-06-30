@@ -30,7 +30,6 @@ internal sealed class MachineLinkService
         string accountId,
         string deviceId,
         string deviceName,
-        string plan,
         string linkValue,
         CancellationToken cancellationToken = default)
     {
@@ -39,7 +38,7 @@ internal sealed class MachineLinkService
             ["accountId"] = accountId,
             ["deviceId"] = deviceId,
             ["deviceName"] = deviceName,
-            ["plan"] = plan,
+            ["status"] = "active",
             ["activationToken"] = linkValue
         };
 
@@ -52,6 +51,24 @@ internal sealed class MachineLinkService
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         return await JsonSerializer.DeserializeAsync<MachineLinkResponse>(stream, JsonOptions, cancellationToken).ConfigureAwait(false)
                ?? throw new InvalidOperationException("Machine activation response was empty.");
+    }
+
+    public async Task<MachineLinkResponse?> GetStatusAsync(
+        string gatewayUrl,
+        string deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return null;
+
+        using var response = await _httpClient.GetAsync(
+            $"{gatewayUrl.TrimEnd('/')}/api/device-activation/status/{Uri.EscapeDataString(deviceId.Trim())}",
+            cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var result = await JsonSerializer.DeserializeAsync<MachineLinkResponse>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
+        return result is { Activated: true } ? result : null;
     }
 
     public async Task<MachineLinkResponse?> GetCurrentAsync(

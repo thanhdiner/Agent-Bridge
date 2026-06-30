@@ -9,6 +9,7 @@ using LocalMcp.Gateway.Commands;
 using LocalMcp.Gateway.Hubs;
 using LocalMcp.BuildingBlocks.Errors;
 using LocalMcp.BuildingBlocks.Serialization;
+using LocalMcp.Gateway.Licensing;
 
 namespace LocalMcp.UnitTests;
 
@@ -24,10 +25,12 @@ public sealed class CommandDispatcherTests
         _registry = new InMemoryAgentConnectionRegistry();
         _fakeHubContext = new FakeHubContext();
         _activationStore = new FakeDeviceActivationStore();
+        var licenseGate = new LicenseGate(_activationStore);
         _dispatcher = new SignalRCommandDispatcher(
             _registry,
             new TestDeviceResolver(),
             _activationStore,
+            licenseGate,
             _fakeHubContext,
             NullLogger<SignalRCommandDispatcher>.Instance
         );
@@ -210,15 +213,137 @@ public sealed class CommandDispatcherTests
         Assert.Empty(_fakeHubContext.FakeClients.FakeClient.SentMessages);
     }
 
+    [Fact]
+    public async Task SendAsync_ActiveLicense_ReadOnlyCommand_ReachesDispatch()
+    {
+        var deviceId = "active-read-device";
+        _activationStore.Activate(deviceId, activeUntilUtc: DateTimeOffset.UtcNow.AddDays(1));
+
+        var command = new ReadFileCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = "test.txt"
+        };
+
+        var result = await _dispatcher.SendAsync<ReadFileResult>(command, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Equal(ErrorCodes.AgentOffline, result.Error.Code);
+    }
+
+    [Fact]
+    public async Task SendAsync_ActiveLicense_WriteCommand_ReachesDispatch()
+    {
+        var deviceId = "active-write-device";
+        _activationStore.Activate(deviceId, activeUntilUtc: DateTimeOffset.UtcNow.AddDays(1));
+
+        var command = new WriteFileCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = "test.txt",
+            Content = "hello"
+        };
+
+        var result = await _dispatcher.SendAsync<WriteFileResult>(command, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Equal(ErrorCodes.AgentOffline, result.Error.Code);
+    }
+
+    [Fact]
+    public async Task SendAsync_ExpiredLicense_StatCommand_DoesNotDispatch()
+    {
+        var deviceId = "expired-license-device";
+        _registry.Register(deviceId, "conn-expired-license");
+        _activationStore.Activate(deviceId, activeUntilUtc: DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        var command = new StatCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = "test.txt"
+        };
+
+        var result = await _dispatcher.SendAsync<StatResult>(command, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Equal(ErrorCodes.LicenseExpired, result.Error.Code);
+        Assert.Empty(_fakeHubContext.FakeClients.FakeClient.SentMessages);
+    }
+
+    [Fact]
+    public async Task SendAsync_RevokedLicense_WriteCommand_ReturnsLicenseRevoked()
+    {
+        var deviceId = "revoked-license-device";
+        _registry.Register(deviceId, "conn-revoked-license");
+        _activationStore.Activate(
+            deviceId,
+            status: "revoked",
+            activeUntilUtc: DateTimeOffset.UtcNow.AddDays(1));
+
+        var command = new WriteFileCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = "test.txt",
+            Content = "hello"
+        };
+
+        var result = await _dispatcher.SendAsync<WriteFileResult>(command, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Equal(ErrorCodes.LicenseRevoked, result.Error.Code);
+        Assert.Empty(_fakeHubContext.FakeClients.FakeClient.SentMessages);
+    }
+
     private sealed class FakeDeviceActivationStore : IDeviceActivationStore
     {
-        private readonly HashSet<string> _activatedDeviceIds = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DeviceActivationRecord> _recordsByDeviceId = new(StringComparer.OrdinalIgnoreCase);
 
-        public void Activate(string deviceId) => _activatedDeviceIds.Add(deviceId);
+        public void Activate(string deviceId) => Activate(deviceId, activeUntilUtc: DateTimeOffset.UtcNow.AddDays(1));
+
+        public void Activate(
+            string deviceId,
+            string status = "active",
+            DateTimeOffset? activeUntilUtc = null)
+        {
+            _recordsByDeviceId[deviceId.Trim()] = new DeviceActivationRecord(
+                AccountId: "test-account",
+                DeviceId: deviceId,
+                DeviceName: "Test Device",
+                ActivationToken: "test-token",
+                Activated: true,
+                Status: status,
+                ActiveUntilUtc: activeUntilUtc,
+                Features: ["filesystem", "window", "uia", "shell", "git"],
+                CreatedAtUtc: DateTimeOffset.UtcNow,
+                UpdatedAtUtc: DateTimeOffset.UtcNow);
+        }
 
         public bool IsActivated(string deviceId) =>
             !string.IsNullOrWhiteSpace(deviceId) &&
-            _activatedDeviceIds.Contains(deviceId.Trim());
+            _recordsByDeviceId.TryGetValue(deviceId.Trim(), out var record) &&
+            record.Activated;
+
+        public DeviceActivationRecord? GetByDeviceId(string deviceId)
+        {
+            if (string.IsNullOrWhiteSpace(deviceId))
+                return null;
+
+            return _recordsByDeviceId.TryGetValue(deviceId.Trim(), out var record)
+                ? record
+                : null;
+        }
     }
 
     private sealed class TestDeviceResolver : IDeviceResolver
