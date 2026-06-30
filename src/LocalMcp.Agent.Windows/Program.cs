@@ -18,8 +18,9 @@ builder.Configuration.AddEnvironmentVariables();
 // Add services
 builder.Services.AddAgentServices(builder.Configuration);
 
-// Add Hosted worker
+// Start the worker first so the Agent can connect before the stdin control loop waits.
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService<ManagedRuntimeControlService>();
 
 var host = builder.Build();
 host.Run();

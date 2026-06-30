@@ -2,11 +2,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LocalMcp.BuildingBlocks\LocalMcp.BuildingBlocks.csproj" />
-    <ProjectReference Include="..\LocalMcp.Gateway\LocalMcp.Gateway.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\LocalMcp.Agent.Windows\LocalMcp.Agent.Windows.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
