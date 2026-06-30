@@ -4,20 +4,24 @@ namespace LocalMcp.Gateway.Connections;
 
 public sealed class InMemoryAgentConnectionRegistry : IAgentConnectionRegistry
 {
-    private readonly ConcurrentDictionary<string, string> _deviceToConnection = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, AgentDeviceInfo> _devices = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _connectionToDevice = new();
 
-    public void Register(string deviceId, string connectionId)
+    public void Register(string deviceId, string connectionId, string? displayName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
 
-        if (_deviceToConnection.TryGetValue(deviceId, out var oldConnId))
+        if (_devices.TryGetValue(deviceId, out var oldDevice))
         {
-            _connectionToDevice.TryRemove(oldConnId, out _);
+            _connectionToDevice.TryRemove(oldDevice.ConnectionId, out _);
         }
 
-        _deviceToConnection[deviceId] = connectionId;
+        _devices[deviceId] = new AgentDeviceInfo(
+            deviceId,
+            NormalizeDisplayName(displayName),
+            connectionId,
+            DateTimeOffset.UtcNow);
         _connectionToDevice[connectionId] = deviceId;
     }
 
@@ -27,14 +31,14 @@ public sealed class InMemoryAgentConnectionRegistry : IAgentConnectionRegistry
 
         if (_connectionToDevice.TryRemove(connectionId, out var deviceId))
         {
-            _deviceToConnection.TryRemove(deviceId, out _);
+            _devices.TryRemove(deviceId, out _);
         }
     }
 
     public string? GetConnectionId(string deviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
-        return _deviceToConnection.TryGetValue(deviceId, out var connectionId) ? connectionId : null;
+        return _devices.TryGetValue(deviceId, out var device) ? device.ConnectionId : null;
     }
 
     public string? GetDeviceId(string connectionId)
@@ -43,8 +47,30 @@ public sealed class InMemoryAgentConnectionRegistry : IAgentConnectionRegistry
         return _connectionToDevice.TryGetValue(connectionId, out var deviceId) ? deviceId : null;
     }
 
+    public AgentDeviceInfo? GetDevice(string deviceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        return _devices.TryGetValue(deviceId, out var device) ? device : null;
+    }
+
     public IReadOnlyCollection<string> GetActiveDevices()
     {
-        return _deviceToConnection.Keys.ToList().AsReadOnly();
+        return _devices.Keys.ToList().AsReadOnly();
+    }
+
+    public IReadOnlyCollection<AgentDeviceInfo> GetActiveDeviceInfos()
+    {
+        return _devices.Values.ToList().AsReadOnly();
+    }
+
+    private static string? NormalizeDisplayName(string? displayName)
+    {
+        if (string.IsNullOrWhiteSpace(displayName))
+            return null;
+
+        var normalized = displayName.Trim();
+        return normalized.Length > 128 || normalized.Any(char.IsControl)
+            ? null
+            : normalized;
     }
 }

@@ -543,6 +543,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             ["DOTNET_ENVIRONMENT"] = "Production",
             ["AGENTBRIDGE_MANAGED_RUNTIME"] = "1",
             ["Agent__DeviceId"] = _deviceId,
+            ["Agent__DisplayName"] = Environment.MachineName,
             ["Agent__GatewayUrl"] = _gatewayUrl,
             ["AgentSecurity__AuthenticationEnabled"] = "true",
             ["AgentSecurity__TokenEnvironmentVariable"] = InternalTokenStore.TokenEnvironmentVariable,

@@ -17,6 +17,7 @@ public static class DependencyInjection
     {
         services.AddHttpContextAccessor();
         services.AddSingleton<IAgentConnectionRegistry, InMemoryAgentConnectionRegistry>();
+        services.AddSingleton<IPreferredDeviceStore, FilePreferredDeviceStore>();
         services.AddSingleton<IDeviceResolver, DefaultDeviceResolver>();
         services.AddSingleton<ICommandDispatcher, SignalRCommandDispatcher>();
 

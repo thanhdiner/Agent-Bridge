@@ -6,6 +6,7 @@ public static class LocalConfigurationPaths
     public const string ConfigurationFileName = "config.json";
     public const string DeviceFileName = "device.json";
     public const string RuntimeTokenFileName = "runtime-token.bin";
+    public const string PreferredDeviceFileName = "preferred-device.json";
     public const string LogsDirectoryName = "logs";
 
     public static string GetApplicationDataDirectory()
@@ -24,6 +25,9 @@ public static class LocalConfigurationPaths
 
     public static string GetRuntimeTokenFilePath() =>
         Path.Combine(GetApplicationDataDirectory(), RuntimeTokenFileName);
+
+    public static string GetPreferredDeviceFilePath() =>
+        Path.Combine(GetApplicationDataDirectory(), PreferredDeviceFileName);
 
     public static string GetLogsDirectory() =>
         Path.Combine(GetApplicationDataDirectory(), LogsDirectoryName);

@@ -27,6 +27,7 @@ public sealed class AgentHub : Hub
     {
         var httpContext = Context.GetHttpContext();
         var deviceId = httpContext?.Request.Query["deviceId"].ToString();
+        var displayName = httpContext?.Request.Query["displayName"].ToString();
 
         if (string.IsNullOrWhiteSpace(deviceId))
         {
@@ -35,8 +36,8 @@ public sealed class AgentHub : Hub
             return;
         }
 
-        _logger.LogInformation("Agent connected: DeviceId = {DeviceId}, ConnectionId = {ConnectionId}", deviceId, Context.ConnectionId);
-        _registry.Register(deviceId, Context.ConnectionId);
+        _logger.LogInformation("Agent connected: DeviceId = {DeviceId}, DisplayName = {DisplayName}, ConnectionId = {ConnectionId}", deviceId, displayName, Context.ConnectionId);
+        _registry.Register(deviceId, Context.ConnectionId, displayName);
 
         await base.OnConnectedAsync();
     }
