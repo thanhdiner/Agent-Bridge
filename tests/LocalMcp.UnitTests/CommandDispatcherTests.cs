@@ -219,6 +219,22 @@ public sealed class CommandDispatcherTests
         public bool IsActivated(string deviceId) =>
             !string.IsNullOrWhiteSpace(deviceId) &&
             _activatedDeviceIds.Contains(deviceId.Trim());
+
+        public DeviceActivationRecord? GetByDeviceId(string deviceId)
+        {
+            if (IsActivated(deviceId))
+            {
+                return new DeviceActivationRecord(
+                    AccountId: "test-account",
+                    DeviceId: deviceId,
+                    DeviceName: "Test Device",
+                    ActivationToken: "test-token",
+                    Plan: "dev",
+                    Activated: true,
+                    ActivatedAt: DateTimeOffset.UtcNow);
+            }
+            return null;
+        }
     }
 
     private sealed class TestDeviceResolver : IDeviceResolver

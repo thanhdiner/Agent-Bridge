@@ -6,6 +6,7 @@ namespace LocalMcp.Gateway;
 public interface IDeviceActivationStore
 {
     bool IsActivated(string deviceId);
+    DeviceActivationRecord? GetByDeviceId(string deviceId);
 }
 
 internal sealed class DeviceActivationStore : IDeviceActivationStore
@@ -149,7 +150,7 @@ internal sealed class DeviceActivationStore : IDeviceActivationStore
     }
 }
 
-internal sealed record DeviceActivationRecord(
+public sealed record DeviceActivationRecord(
     string AccountId,
     string DeviceId,
     string DeviceName,

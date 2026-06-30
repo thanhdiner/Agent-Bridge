@@ -58,18 +58,21 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
         var deviceId = deviceResolution.DeviceId;
         command = command with { DeviceId = deviceId };
 
-        if (!_deviceActivationStore.IsActivated(deviceId))
+        _logger.LogInformation("Attempting to dispatch command {CommandId} to device {DeviceId}", commandId, deviceId);
+
+        var activation = _deviceActivationStore.GetByDeviceId(deviceId);
+        if (activation is not { Activated: true })
         {
             _logger.LogWarning("Device {DeviceId} is not activated, rejecting command {CommandId}", deviceId, commandId);
             return new CommandResult<TResult>
             {
                 CommandId = commandId,
                 Success = false,
-                Error = new CommandError(ErrorCodes.DeviceNotActivated, $"Device '{deviceId}' is not activated.")
+                Error = new CommandError(
+                    ErrorCodes.DeviceNotActivated,
+                    $"Device '{deviceId}' is not activated.")
             };
         }
-
-        _logger.LogInformation("Attempting to dispatch command {CommandId} to device {DeviceId}", commandId, deviceId);
 
         // 1. Check if agent is online
         var connectionId = _registry.GetConnectionId(deviceId);
