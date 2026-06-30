@@ -48,6 +48,8 @@ public sealed class BenchmarkTests : IAsyncDisposable
         });
 
         builder.Services.AddGatewayServices();
+
+        builder.Services.AddSingleton<LocalMcp.Gateway.IDeviceActivationStore, AlwaysActivatedDeviceActivationStore>();
         builder.Services.AddSignalR();
         builder.Services.AddMcpServer()
             .WithHttpTransport()
@@ -179,3 +181,4 @@ public sealed class BenchmarkTests : IAsyncDisposable
         }
     }
 }
+

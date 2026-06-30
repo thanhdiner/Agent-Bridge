@@ -1,4 +1,5 @@
 using System.Text.Json;
+using LocalMcp.Gateway;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using LocalMcp.Contracts.Commands;
@@ -15,15 +16,18 @@ public sealed class CommandDispatcherTests
 {
     private readonly InMemoryAgentConnectionRegistry _registry;
     private readonly FakeHubContext _fakeHubContext;
+    private readonly FakeDeviceActivationStore _activationStore;
     private readonly SignalRCommandDispatcher _dispatcher;
 
     public CommandDispatcherTests()
     {
         _registry = new InMemoryAgentConnectionRegistry();
         _fakeHubContext = new FakeHubContext();
+        _activationStore = new FakeDeviceActivationStore();
         _dispatcher = new SignalRCommandDispatcher(
             _registry,
             new TestDeviceResolver(),
+            _activationStore,
             _fakeHubContext,
             NullLogger<SignalRCommandDispatcher>.Instance
         );
@@ -32,6 +36,8 @@ public sealed class CommandDispatcherTests
     [Fact]
     public async Task SendAsync_AgentOffline_ReturnsAgentOfflineError()
     {
+        _activationStore.Activate("offline-device");
+
         var command = new ReadFileCommand
         {
             CommandId = Guid.NewGuid(),
@@ -53,6 +59,7 @@ public sealed class CommandDispatcherTests
         var deviceId = "online-device";
         var connectionId = "conn-123";
         _registry.Register(deviceId, connectionId);
+        _activationStore.Activate(deviceId);
 
         var command = new ReadFileCommand
         {
@@ -100,6 +107,7 @@ public sealed class CommandDispatcherTests
         var deviceId = "timeout-device";
         var connectionId = "conn-456";
         _registry.Register(deviceId, connectionId);
+        _activationStore.Activate(deviceId);
 
         var command = new ReadFileCommand
         {
@@ -124,6 +132,7 @@ public sealed class CommandDispatcherTests
         var deviceId = "capacity-device";
         var connectionId = "conn-789";
         _registry.Register(deviceId, connectionId);
+        _activationStore.Activate(deviceId);
 
         var tasks = new List<Task>();
         for (int i = 0; i < 1000; i++)
@@ -159,6 +168,7 @@ public sealed class CommandDispatcherTests
         var deviceId = "disconnect-device";
         var connectionId = "conn-abc";
         _registry.Register(deviceId, connectionId);
+        _activationStore.Activate(deviceId);
 
         var command = new ReadFileCommand
         {
@@ -177,6 +187,38 @@ public sealed class CommandDispatcherTests
         Assert.False(result.Success);
         Assert.NotNull(result.Error);
         Assert.Equal(ErrorCodes.AgentOffline, result.Error.Code);
+    }
+    [Fact]
+    public async Task SendAsync_DeviceNotActivated_ReturnsDeviceNotActivatedError()
+    {
+        var deviceId = "not-activated-device";
+        _registry.Register(deviceId, "conn-not-activated");
+
+        var command = new ReadFileCommand
+        {
+            CommandId = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Path = "test.txt"
+        };
+
+        var result = await _dispatcher.SendAsync<ReadFileResult>(command, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Equal(ErrorCodes.DeviceNotActivated, result.Error.Code);
+        Assert.Empty(_fakeHubContext.FakeClients.FakeClient.SentMessages);
+    }
+
+    private sealed class FakeDeviceActivationStore : IDeviceActivationStore
+    {
+        private readonly HashSet<string> _activatedDeviceIds = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Activate(string deviceId) => _activatedDeviceIds.Add(deviceId);
+
+        public bool IsActivated(string deviceId) =>
+            !string.IsNullOrWhiteSpace(deviceId) &&
+            _activatedDeviceIds.Contains(deviceId.Trim());
     }
 
     private sealed class TestDeviceResolver : IDeviceResolver
@@ -222,3 +264,6 @@ public sealed class CommandDispatcherTests
         }
     }
 }
+
+
+

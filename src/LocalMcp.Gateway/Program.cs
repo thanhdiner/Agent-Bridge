@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using LocalMcp.Gateway;
 using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Hubs;
@@ -24,7 +23,7 @@ builder.Services.AddMcpServer()
     .WithToolsFromAssembly();
 
 var app = builder.Build();
-var deviceActivationRecords = new ConcurrentDictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+var deviceActivationStore = app.Services.GetRequiredService<DeviceActivationStore>();
 
 // ── Public Exposure Guardrail ──────────────────────────────────────────────
 // This is a startup guardrail, NOT a replacement for authentication.
@@ -200,23 +199,17 @@ app.MapPost("/api/device-activation/activate", async (HttpContext httpContext) =
     var deviceName = string.IsNullOrWhiteSpace(requestedDeviceName) ? "This computer" : requestedDeviceName.Trim();
     var plan = string.IsNullOrWhiteSpace(requestedPlan) ? "free" : requestedPlan.Trim().ToLowerInvariant();
     request.TryGetValue("activationToken", out var requestedActivationToken);
-    var activatedAt = DateTimeOffset.UtcNow;
     var activationToken = string.IsNullOrWhiteSpace(requestedActivationToken)
         ? $"act_{Guid.NewGuid():N}{Guid.NewGuid():N}"
         : requestedActivationToken.Trim();
 
-    var record = new Dictionary<string, object?>
-    {
-        ["accountId"] = accountId,
-        ["deviceId"] = deviceId,
-        ["deviceName"] = deviceName,
-        ["activationToken"] = activationToken,
-        ["plan"] = plan,
-        ["activated"] = true,
-        ["activatedAt"] = activatedAt
-    };
+    var record = deviceActivationStore.Activate(
+        accountId,
+        deviceId,
+        deviceName,
+        plan,
+        activationToken);
 
-    deviceActivationRecords[deviceId] = record;
     return Results.Ok(record);
 }).AllowAnonymous();
 
@@ -228,7 +221,8 @@ app.MapGet("/api/device-activation/status/{deviceId}", (string deviceId) =>
         return Results.BadRequest(new { code = "INVALID_DEVICE_ID", message = "deviceId is required." });
     }
 
-    if (deviceActivationRecords.TryGetValue(normalizedDeviceId, out var record))
+    var record = deviceActivationStore.GetByDeviceId(normalizedDeviceId);
+    if (record is not null)
     {
         return Results.Ok(record);
     }
@@ -252,15 +246,10 @@ app.MapGet("/api/device-activation/current", (HttpContext httpContext) =>
         return Results.BadRequest(new { code = "ACTIVATION_TOKEN_REQUIRED", message = "X-AgentBridge-Activation header is required." });
     }
 
-    foreach (var record in deviceActivationRecords.Values)
-    {
-        if (record.TryGetValue("activationToken", out var token) && string.Equals(token as string, activationToken, StringComparison.Ordinal))
-        {
-            return Results.Ok(record);
-        }
-    }
-
-    return Results.Ok(new { activated = false });
+    var record = deviceActivationStore.GetByActivationToken(activationToken);
+    return record is not null
+        ? Results.Ok(record)
+        : Results.Ok(new { activated = false });
 }).AllowAnonymous();
 
 // Map SignalR Hub
@@ -273,3 +262,4 @@ app.Run();
 
 // Make the implicit Program class visible to integration tests
 public partial class Program { }
+

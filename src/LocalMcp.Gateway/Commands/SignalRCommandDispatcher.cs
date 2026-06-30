@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using LocalMcp.Gateway;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using LocalMcp.Contracts.Commands;
@@ -16,6 +17,7 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
     private const int MaxPendingCommands = 1000;
     private readonly IAgentConnectionRegistry _registry;
     private readonly IDeviceResolver _deviceResolver;
+    private readonly IDeviceActivationStore _deviceActivationStore;
     private readonly IHubContext<AgentHub> _hubContext;
     private readonly ILogger<SignalRCommandDispatcher> _logger;
 
@@ -24,11 +26,13 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
     public SignalRCommandDispatcher(
         IAgentConnectionRegistry registry,
         IDeviceResolver deviceResolver,
+        IDeviceActivationStore deviceActivationStore,
         IHubContext<AgentHub> hubContext,
         ILogger<SignalRCommandDispatcher> logger)
     {
         _registry = registry;
         _deviceResolver = deviceResolver;
+        _deviceActivationStore = deviceActivationStore;
         _hubContext = hubContext;
         _logger = logger;
     }
@@ -53,6 +57,17 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
 
         var deviceId = deviceResolution.DeviceId;
         command = command with { DeviceId = deviceId };
+
+        if (!_deviceActivationStore.IsActivated(deviceId))
+        {
+            _logger.LogWarning("Device {DeviceId} is not activated, rejecting command {CommandId}", deviceId, commandId);
+            return new CommandResult<TResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(ErrorCodes.DeviceNotActivated, $"Device '{deviceId}' is not activated.")
+            };
+        }
 
         _logger.LogInformation("Attempting to dispatch command {CommandId} to device {DeviceId}", commandId, deviceId);
 
@@ -213,3 +228,5 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
         TaskCompletionSource<CommandResult<JsonElement>> Tcs
     );
 }
+
+
