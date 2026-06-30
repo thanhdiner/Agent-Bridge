@@ -62,6 +62,7 @@ public sealed class McpHttpAuthorizationTests : IAsyncDisposable
         builder.WebHost.ConfigureKestrel(o => o.Listen(System.Net.IPAddress.Loopback, 0));
 
         builder.Services.AddGatewayServices(builder.Configuration);
+        builder.Services.AddSingleton<LocalMcp.Gateway.IDeviceActivationStore, AlwaysActivatedDeviceActivationStore>();
         builder.Services.AddSignalR();
         builder.Services.AddMcpServer()
             .WithHttpTransport()

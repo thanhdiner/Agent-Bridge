@@ -1,4 +1,5 @@
 using LocalMcp.Gateway.Connections;
+using LocalMcp.Gateway;
 using LocalMcp.Gateway.Commands;
 using LocalMcp.Gateway.Security;
 using Microsoft.Extensions.Configuration;
@@ -19,6 +20,8 @@ public static class DependencyInjection
         services.AddSingleton<IAgentConnectionRegistry, InMemoryAgentConnectionRegistry>();
         services.AddSingleton<IPreferredDeviceStore, FilePreferredDeviceStore>();
         services.AddSingleton<IDeviceResolver, DefaultDeviceResolver>();
+        services.AddSingleton<DeviceActivationStore>();
+        services.AddSingleton<IDeviceActivationStore>(sp => sp.GetRequiredService<DeviceActivationStore>());
         services.AddSingleton<ICommandDispatcher, SignalRCommandDispatcher>();
 
         var config = configuration ?? new ConfigurationBuilder().Build();
@@ -235,4 +238,6 @@ internal sealed class DevBypassAuthHandler : AuthenticationHandler<Authenticatio
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
 }
+
+
 

@@ -23,7 +23,7 @@ builder.Services.AddMcpServer()
     .WithToolsFromAssembly();
 
 var app = builder.Build();
-var deviceActivationStore = new DeviceActivationStore();
+var deviceActivationStore = app.Services.GetRequiredService<DeviceActivationStore>();
 
 // ── Public Exposure Guardrail ──────────────────────────────────────────────
 // This is a startup guardrail, NOT a replacement for authentication.
@@ -262,3 +262,4 @@ app.Run();
 
 // Make the implicit Program class visible to integration tests
 public partial class Program { }
+

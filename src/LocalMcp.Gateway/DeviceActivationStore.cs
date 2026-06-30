@@ -3,7 +3,12 @@ using LocalMcp.BuildingBlocks.Configuration;
 
 namespace LocalMcp.Gateway;
 
-internal sealed class DeviceActivationStore
+public interface IDeviceActivationStore
+{
+    bool IsActivated(string deviceId);
+}
+
+internal sealed class DeviceActivationStore : IDeviceActivationStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -61,6 +66,9 @@ internal sealed class DeviceActivationStore
                 : null;
         }
     }
+
+    public bool IsActivated(string deviceId) =>
+        GetByDeviceId(deviceId) is { Activated: true };
 
     public DeviceActivationRecord? GetByActivationToken(string activationToken)
     {
