@@ -6,6 +6,7 @@ using LocalMcp.Agent.Windows.Commands;
 using LocalMcp.Agent.Windows.PowerShell;
 using LocalMcp.Agent.Windows.ProcessControl;
 using LocalMcp.Agent.Windows.UiAutomation;
+using LocalMcp.Agent.Windows.Workspaces;
 using Microsoft.Extensions.Configuration;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -53,6 +54,23 @@ public static class DependencyInjection
                 }
                 return true;
             }, "All WritableRoots must be located within at least one of the configured AllowedRoots.")
+            .ValidateOnStart();
+
+        services.AddOptions<WorkspaceOptions>()
+            .Bind(configuration.GetSection(WorkspaceOptions.SectionName))
+            .Validate(o => o.Aliases is not null && o.Aliases.Count <= 64,
+                "Workspaces:Aliases must contain at most 64 entries.")
+            .Validate(o => o.Aliases is not null
+                && o.Aliases.Keys
+                    .Select(alias => alias.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count() == o.Aliases.Count,
+                "Workspaces:Aliases must be unique ignoring case.")
+            .Validate(o => o.Aliases is not null && o.Aliases.All(pair =>
+                WorkspaceOptions.IsValidAlias(pair.Key)
+                && pair.Value is not null
+                && IsValidWorkspaceDefinition(pair.Value)),
+                "Workspaces:Aliases contains an invalid alias or workspace definition.")
             .ValidateOnStart();
 
         services.AddOptions<AppLaunchOptions>()
@@ -106,6 +124,7 @@ public static class DependencyInjection
             }, "AgentSecurity:AuthenticationEnabled is true but the expected token is missing in environment variables.")
             .ValidateOnStart();
 
+        services.AddSingleton<IWorkspaceResolver, WorkspaceResolver>();
         services.AddSingleton<IPathPolicy, PathPolicy>();
         services.AddSingleton<IFileSystemExecutor, FileSystemExecutor>();
         services.AddSingleton<IDirectoryCopyExecutor, DirectoryCopyExecutor>();
@@ -135,10 +154,38 @@ public static class DependencyInjection
                 sp.GetRequiredService<IAppCloser>(),
                 sp.GetRequiredService<IProcessWaiter>(),
                 sp.GetRequiredService<IProcessManager>(),
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CommandHandler>>()));
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CommandHandler>>(),
+                sp.GetRequiredService<IWorkspaceResolver>()));
         services.AddSingleton<GatewayConnection>();
 
         return services;
+    }
+
+    private static bool IsValidWorkspaceDefinition(WorkspaceDefinition definition)
+    {
+        if (string.IsNullOrWhiteSpace(definition.Path)
+            || definition.Path.Length > 32_768
+            || definition.Path.Any(char.IsControl)
+            || !Path.IsPathFullyQualified(definition.Path))
+        {
+            return false;
+        }
+
+        if (definition.Description is { Length: > 256 }
+            || (definition.Description?.Any(char.IsControl) ?? false))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = Path.GetFullPath(definition.Path);
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 }
 

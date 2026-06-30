@@ -31,7 +31,7 @@ The bridge is designed around explicit boundaries:
 | Window control | Focus, move, resize, drag, click, wait for, and close top-level windows | `window_focus`, `window_move`, `window_drag`, `window_click`, `window_wait`, `window_close` |
 | Applications and processes | Resolve installed apps, launch or open them, wait for processes, list processes, and terminate an exact guarded PID | `app_resolve`, `app_launch`, `app_open`, `app_close`, `process_wait`, `process_list`, `process_kill` |
 | Text and native dialogs | Read or replace clipboard text, send guarded key chords, type text, and set paths in Open or Save dialogs | `clipboard_get`, `clipboard_set`, `ui_hotkey`, `ui_type_text`, `file_dialog_set_path` |
-| Files and Git | Read, search, patch, copy, move, delete, inspect Git state and history, and verify projects inside configured roots | `fs_read`, `fs_search_context`, `fs_batch_patch`, `git_status`, `git_diff`, `git_log`, `project_verify` |
+| Files, workspaces, and Git | Discover portable workspace aliases, resolve relative paths, read, search, patch, copy, move, delete, inspect Git state and history, and verify projects inside configured roots | `workspace_list`, `workspace_resolve`, `fs_read`, `fs_search_context`, `fs_batch_patch`, `git_status`, `git_diff`, `git_log`, `project_verify` |
 | PowerShell | Run bounded PowerShell 7 commands, start observable sessions, poll status, and cancel process trees | `powershell_exec`, `powershell_start`, `powershell_status`, `powershell_cancel` |
 
 The Gateway currently registers the complete tool surface from `src/LocalMcp.Gateway/Mcp/`. Aliases such as `ui_get_text` and `ui_hotkey` keep the public API readable while reusing the existing execution core.
@@ -88,12 +88,34 @@ $env:Agent__DeviceId = "development-machine"
 $env:Agent__GatewayUrl = "http://localhost:5227"
 $env:FileAccess__AllowedRoots__0 = "C:\AgentBridgeWorkspace"
 $env:FileAccess__WritableRoots__0 = "C:\AgentBridgeWorkspace"
+$env:Workspaces__Aliases__main__Path = "C:\AgentBridgeWorkspace"
+$env:Workspaces__Aliases__main__Writable = "true"
 $env:AppLaunch__AllowedExecutables__0 = "notepad.exe"
 
 dotnet run --project .\src\LocalMcp.Agent.Windows -c Release --no-build
 ```
 
 A successful first connection produces Agent and Gateway logs showing that the SignalR connection started and the device registered.
+
+### Desktop control center
+
+Run the WPF control center:
+
+```powershell
+dotnet run --project .\src\AgentBridge.Desktop -c Release
+```
+
+On startup, the Desktop app creates a stable machine identity, discovers or starts the local Gateway and Windows Agent, and probes their real health every three seconds. The **Overview** screen shows service state, process ownership, device ID, loopback endpoint, last check time, and log location. It also provides **Refresh**, **Open logs**, and **Restart services** actions.
+
+The **Workspaces** screen lets the user add, edit, and remove aliases with a folder picker and read-only or read/write access. It saves machine-local configuration atomically to:
+
+```text
+%LOCALAPPDATA%\AgentBridge\config.json
+```
+
+The Desktop app also creates `%LOCALAPPDATA%\AgentBridge\device.json` and writes `desktop.log`, `gateway.log`, and `agent.log` under `%LOCALAPPDATA%\AgentBridge\logs`. Saving a workspace automatically restarts a managed Windows Agent. An externally started Agent is left untouched and the UI requests a manual restart.
+
+Closing the window hides AgentBridge to the system tray while managed services continue running. Choosing **Exit** stops only processes started by that Desktop session. Existing external Gateway or Agent processes are adopted for status reporting and never terminated.
 
 > **Important:** with client authentication disabled, filesystem read and write policies can run in local development, but `dev:execute` is intentionally denied. Desktop control, screenshots, process control, application control, and PowerShell tools require authenticated access with the `dev:execute` scope.
 
@@ -133,6 +155,8 @@ $env:LOCALMCP_AGENT_TOKEN = "REPLACE_WITH_THE_SAME_TOKEN"
 
 $env:FileAccess__AllowedRoots__0 = "C:\AgentBridgeWorkspace"
 $env:FileAccess__WritableRoots__0 = "C:\AgentBridgeWorkspace"
+$env:Workspaces__Aliases__main__Path = "C:\AgentBridgeWorkspace"
+$env:Workspaces__Aliases__main__Writable = "true"
 $env:AppLaunch__AllowedExecutables__0 = "notepad.exe"
 
 dotnet run --project .\src\LocalMcp.Agent.Windows -c Release
@@ -150,9 +174,9 @@ For an internet-facing Gateway, use HTTPS, enable both authentication layers, an
 
 ## Configuration reference
 
-AgentBridge uses standard .NET configuration. Values can come from `appsettings.json`, ignored `appsettings.Development.json` files, command-line configuration, or environment variables using `__` as the section separator.
+AgentBridge uses standard .NET configuration. The Windows Agent automatically loads `%LOCALAPPDATA%\AgentBridge\config.json` after tracked app settings. Environment variables using `__` as the section separator are applied again afterward, so they remain the highest-priority machine override.
 
-`appsettings.Local.json` is ignored by Git but is not loaded automatically by the current host setup. Use environment variables or `appsettings.Development.json` unless the application is changed to load an additional file.
+The Desktop app owns workspace aliases plus their managed `AllowedRoots` and `WritableRoots`. It preserves unrelated JSON settings and manually configured roots while replacing roots previously managed by removed or edited workspaces.
 
 | Setting or variable | Required | Default | Purpose |
 |---|---:|---|---|
@@ -160,6 +184,8 @@ AgentBridge uses standard .NET configuration. Values can come from `appsettings.
 | `Agent__GatewayUrl` | Agent | none | Gateway base URL, normally `http://localhost:5227` in development |
 | `FileAccess__AllowedRoots__0` | Agent | none | First filesystem root the Agent may inspect |
 | `FileAccess__WritableRoots__0` | No | empty | First root that permits mutations; must be inside an allowed root |
+| `Workspaces__Aliases__main__Path` | No | empty | Absolute machine-local path represented by the `main` workspace alias |
+| `Workspaces__Aliases__main__Writable` | No | `false` | Allows write resolution only when the workspace is also inside `WritableRoots` |
 | `AppLaunch__AllowedExecutables__0` | No | empty | First executable allowed for direct launch |
 | `Security__AuthenticationEnabled` | No | `false` | Enables OAuth validation for MCP clients |
 | `Security__PublicExposure` | No | `false` | Declares that the Gateway is reachable beyond the local machine |
@@ -171,6 +197,32 @@ AgentBridge uses standard .NET configuration. Values can come from `appsettings.
 | `LOCALMCP_AGENT_TOKEN` | With agent auth | none | Shared Agent-to-Gateway token |
 
 The tracked Agent configuration also defines denied path segments, denied credential filenames, blocked key and certificate extensions, and size limits. Review those rules before widening access.
+
+### Portable workspace aliases
+
+Workspace aliases keep prompts and automation flows independent from drive letters. Configure aliases per machine, then discover and resolve them before calling existing absolute-path tools:
+
+```json
+{
+  "Workspaces": {
+    "Aliases": {
+      "main": {
+        "Path": "C:\\AgentBridgeWorkspace",
+        "Writable": true,
+        "Description": "Primary projects"
+      }
+    }
+  }
+}
+```
+
+A typical flow is:
+
+1. Call `workspace_list` to discover aliases available on the target device.
+2. Call `workspace_resolve` with `workspace: "main"` and `relativePath: "AgentBridge\\README.md"`.
+3. Pass the returned `absolutePath` to `fs_read`, `fs_write`, Git, PowerShell, or another existing tool.
+
+`workspace_resolve` rejects absolute input and traversal outside the selected root. Set `requireWritable: true` before mutations. Resolution does not bypass `PathPolicy`; the target operation still performs its normal read or write authorization.
 
 ## Architecture
 
@@ -285,6 +337,7 @@ Stop running Gateway and Agent processes before rebuilding their default output 
 ```text
 src/
   LocalMcp.Gateway/         MCP HTTP server, authentication, policies, SignalR hub, tool schemas
+  AgentBridge.Desktop/      WPF tray app, service supervisor, health overview, logs, workspaces
   LocalMcp.Agent.Windows/   Windows execution engine, UI Automation, Win32, filesystem, PowerShell
   LocalMcp.Contracts/       Commands and result contracts shared across the SignalR boundary
   LocalMcp.BuildingBlocks/  Shared errors and serialization

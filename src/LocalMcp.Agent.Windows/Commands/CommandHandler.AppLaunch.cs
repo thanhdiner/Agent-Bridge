@@ -5,6 +5,7 @@ using LocalMcp.Agent.Windows.PowerShell;
 using LocalMcp.Agent.Windows.ProcessControl;
 using LocalMcp.Agent.Windows.Security;
 using LocalMcp.Agent.Windows.UiAutomation;
+using LocalMcp.Agent.Windows.Workspaces;
 using LocalMcp.BuildingBlocks.Errors;
 using LocalMcp.Contracts.Commands;
 using LocalMcp.Contracts.Results;
@@ -33,7 +34,8 @@ public sealed partial class CommandHandler
         IAppCloser appCloser,
         IProcessWaiter processWaiter,
         IProcessManager processManager,
-        ILogger<CommandHandler> logger)
+        ILogger<CommandHandler> logger,
+        IWorkspaceResolver? workspaceResolver = null)
         : this(
             pathPolicy,
             fileSystemExecutor,
@@ -49,6 +51,7 @@ public sealed partial class CommandHandler
         _appCloser = appCloser;
         _processWaiter = processWaiter;
         _processManager = processManager;
+        _workspaceResolver = workspaceResolver;
     }
 
     private async Task<CommandResult<JsonElement>> HandleAppResolveAsync(

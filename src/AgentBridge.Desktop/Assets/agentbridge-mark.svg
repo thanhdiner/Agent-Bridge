@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 64" role="img" aria-label="AgentBridge">
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 13 18 28l16 15" stroke="#8B6CFF" stroke-width="7"/>
+    <path d="m62 13 16 15-16 15" stroke="#8B6CFF" stroke-width="7"/>
+    <path d="m54 10-12 36" stroke="#8B6CFF" stroke-width="7"/>
+    <path d="M16 54Q48 35 80 54" stroke="#55A6FF" stroke-width="6"/>
+  </g>
+</svg>

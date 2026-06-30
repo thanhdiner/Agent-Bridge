@@ -4,6 +4,11 @@ public static class ErrorCodes
 {
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string InvalidPath = "INVALID_PATH";
+    public const string WorkspaceNotFound = "WORKSPACE_NOT_FOUND";
+    public const string WorkspaceNotAllowed = "WORKSPACE_NOT_ALLOWED";
+    public const string WorkspaceReadOnly = "WORKSPACE_READ_ONLY";
+    public const string WorkspacePathInvalid = "WORKSPACE_PATH_INVALID";
+    public const string WorkspacePathOutsideRoot = "WORKSPACE_PATH_OUTSIDE_ROOT";
     public const string PathOutsideAllowedRoot = "PATH_OUTSIDE_ALLOWED_ROOT";
     public const string AccessDenied = "ACCESS_DENIED";
     public const string FileNotFound = "FILE_NOT_FOUND";
