@@ -23,6 +23,7 @@ public sealed class CommandDispatcherTests
         _fakeHubContext = new FakeHubContext();
         _dispatcher = new SignalRCommandDispatcher(
             _registry,
+            new TestDeviceResolver(),
             _fakeHubContext,
             NullLogger<SignalRCommandDispatcher>.Instance
         );
@@ -176,6 +177,16 @@ public sealed class CommandDispatcherTests
         Assert.False(result.Success);
         Assert.NotNull(result.Error);
         Assert.Equal(ErrorCodes.AgentOffline, result.Error.Code);
+    }
+
+    private sealed class TestDeviceResolver : IDeviceResolver
+    {
+        public DeviceResolution Resolve(string? requestedDeviceId)
+        {
+            return string.IsNullOrWhiteSpace(requestedDeviceId)
+                ? DeviceResolution.Failed("NO_ACTIVE_DEVICE", "No active device.")
+                : DeviceResolution.Resolved(requestedDeviceId.Trim());
+        }
     }
 
     private sealed class FakeHubContext : IHubContext<AgentHub>
