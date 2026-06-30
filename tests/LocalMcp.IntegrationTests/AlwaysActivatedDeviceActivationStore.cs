@@ -17,8 +17,11 @@ internal sealed class AlwaysActivatedDeviceActivationStore : IDeviceActivationSt
             DeviceId: deviceId,
             DeviceName: "Always Activated",
             ActivationToken: "always-activated-token",
-            Plan: "dev",
             Activated: true,
-            ActivatedAt: DateTimeOffset.UtcNow);
+            Status: "active",
+            ActiveUntilUtc: DateTimeOffset.UtcNow.AddDays(1),
+            Features: ["filesystem", "window", "uia", "shell", "git"],
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            UpdatedAtUtc: DateTimeOffset.UtcNow);
     }
 }

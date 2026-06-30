@@ -2,6 +2,7 @@ using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway;
 using LocalMcp.Gateway.Commands;
 using LocalMcp.Gateway.Security;
+using LocalMcp.Gateway.Licensing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -22,6 +23,7 @@ public static class DependencyInjection
         services.AddSingleton<IDeviceResolver, DefaultDeviceResolver>();
         services.AddSingleton<DeviceActivationStore>();
         services.AddSingleton<IDeviceActivationStore>(sp => sp.GetRequiredService<DeviceActivationStore>());
+        services.AddSingleton<ILicenseGate, LicenseGate>();
         services.AddSingleton<ICommandDispatcher, SignalRCommandDispatcher>();
 
         var config = configuration ?? new ConfigurationBuilder().Build();

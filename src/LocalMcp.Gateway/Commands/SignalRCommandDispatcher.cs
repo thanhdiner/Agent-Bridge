@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using LocalMcp.Gateway;
+using LocalMcp.Gateway.Licensing;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using LocalMcp.Contracts.Commands;
@@ -18,6 +19,7 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
     private readonly IAgentConnectionRegistry _registry;
     private readonly IDeviceResolver _deviceResolver;
     private readonly IDeviceActivationStore _deviceActivationStore;
+    private readonly ILicenseGate _licenseGate;
     private readonly IHubContext<AgentHub> _hubContext;
     private readonly ILogger<SignalRCommandDispatcher> _logger;
 
@@ -27,12 +29,14 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
         IAgentConnectionRegistry registry,
         IDeviceResolver deviceResolver,
         IDeviceActivationStore deviceActivationStore,
+        ILicenseGate licenseGate,
         IHubContext<AgentHub> hubContext,
         ILogger<SignalRCommandDispatcher> logger)
     {
         _registry = registry;
         _deviceResolver = deviceResolver;
         _deviceActivationStore = deviceActivationStore;
+        _licenseGate = licenseGate;
         _hubContext = hubContext;
         _logger = logger;
     }
@@ -71,6 +75,25 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
                 Error = new CommandError(
                     ErrorCodes.DeviceNotActivated,
                     $"Device '{deviceId}' is not activated.")
+            };
+        }
+
+        var license = _licenseGate.Evaluate(deviceId);
+        if (!license.Allowed)
+        {
+            _logger.LogWarning(
+                "Device {DeviceId} is not licensed to run command {CommandId}: {Reason}",
+                deviceId,
+                commandId,
+                license.Reason);
+
+            return new CommandResult<TResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(
+                    license.ErrorCode ?? ErrorCodes.LicenseMissing,
+                    license.Reason ?? "Command execution denied by license state.")
             };
         }
 

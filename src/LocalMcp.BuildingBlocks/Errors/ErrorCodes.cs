@@ -16,10 +16,14 @@ public static class ErrorCodes
     public const string BinaryFileNotSupported = "BINARY_FILE_NOT_SUPPORTED";
     public const string AgentOffline = "AGENT_OFFLINE";
     public const string DeviceNotActivated = "DEVICE_NOT_ACTIVATED";
+    public const string LicenseMissing = "LICENSE_MISSING";
+    public const string LicenseRevoked = "LICENSE_REVOKED";
+    public const string LicenseExpired = "LICENSE_EXPIRED";
     public const string CommandTimeout = "COMMAND_TIMEOUT";
     public const string CommandCancelled = "COMMAND_CANCELLED";
     public const string CommandCapacityExceeded = "COMMAND_CAPACITY_EXCEEDED";
     public const string UnsupportedCommand = "UNSUPPORTED_COMMAND";
+    public const string EntitlementDenied = "ENTITLEMENT_DENIED";
     public const string InternalError = "INTERNAL_ERROR";
     public const string DirectoryNotFound = "DIRECTORY_NOT_FOUND";
     public const string DirectoryNotEmpty = "DIRECTORY_NOT_EMPTY";

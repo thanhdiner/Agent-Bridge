@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace AgentBridge.Desktop.Services;
 
@@ -7,6 +8,9 @@ internal sealed record MachineLinkResponse(
     string DeviceId,
     string DeviceName,
     string ActivationToken,
-    string Plan,
     bool Activated,
-    DateTimeOffset ActivatedAt);
+    string? Status,
+    DateTimeOffset? ActiveUntilUtc,
+    IReadOnlyList<string>? Features,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);

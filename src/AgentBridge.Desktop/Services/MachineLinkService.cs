@@ -30,7 +30,6 @@ internal sealed class MachineLinkService
         string accountId,
         string deviceId,
         string deviceName,
-        string plan,
         string linkValue,
         CancellationToken cancellationToken = default)
     {
@@ -39,7 +38,7 @@ internal sealed class MachineLinkService
             ["accountId"] = accountId,
             ["deviceId"] = deviceId,
             ["deviceName"] = deviceName,
-            ["plan"] = plan,
+            ["status"] = "active",
             ["activationToken"] = linkValue
         };
 

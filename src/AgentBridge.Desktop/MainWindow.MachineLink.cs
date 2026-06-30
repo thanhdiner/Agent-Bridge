@@ -38,13 +38,16 @@ public partial class MainWindow
             var result = await service.GetStatusAsync(snapshot.GatewayUrl, snapshot.DeviceId);
             if (result is { Activated: true })
             {
-                ActivationStatusText.Text = $"Activated • {result.Plan}";
-                ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeSuccessBrush");
+                var licenseActive = IsLicenseActive(result);
+                ActivationStatusText.Text = licenseActive
+                    ? $"License active • Valid until: {FormatLicenseDate(result.ActiveUntilUtc)}"
+                    : "License expired • Renew to continue using AgentBridge";
+                ActivationStatusText.Foreground = GetResourceBrush(licenseActive ? "AgentBridgeSuccessBrush" : "AgentBridgeDangerBrush");
                 ActivateDeviceButton.Content = "Re-activate";
             }
             else
             {
-                ActivationStatusText.Text = "Not activated";
+                ActivationStatusText.Text = "Device not activated";
                 ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeWarningBrush");
                 ActivateDeviceButton.Content = "Activate this computer";
 
@@ -52,7 +55,7 @@ public partial class MainWindow
                 {
                     ShowOverviewFeedback(
                         "This computer is not activated",
-                        "Activate this device before running AgentBridge tools.",
+                        "Activate this device to continue.",
                         InfoBarSeverity.Warning,
                         autoClose: false);
                 }
@@ -113,16 +116,15 @@ public partial class MainWindow
                 "dev-account",
                 snapshot.DeviceId,
                 "This computer",
-                "dev",
                 linkValue);
 
-            ActivationStatusText.Text = $"Activated • {result.Plan}";
+            ActivationStatusText.Text = $"License active • Valid until: {FormatLicenseDate(result.ActiveUntilUtc)}";
             ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeSuccessBrush");
             ActivateDeviceButton.Content = "Re-activate";
 
             ShowOverviewFeedback(
                 "This computer is activated",
-                $"Device {result.DeviceId} is linked for the {result.Plan} plan.",
+                $"License active. Valid until: {FormatLicenseDate(result.ActiveUntilUtc)}.",
                 InfoBarSeverity.Success,
                 autoClose: true);
         }
@@ -148,4 +150,12 @@ public partial class MainWindow
             ActivateDeviceButton.IsEnabled = true;
         }
     }
+
+    private static bool IsLicenseActive(MachineLinkResponse response) =>
+        string.Equals(response.Status, "active", StringComparison.OrdinalIgnoreCase) &&
+        response.ActiveUntilUtc is { } activeUntilUtc &&
+        activeUntilUtc > DateTimeOffset.UtcNow;
+
+    private static string FormatLicenseDate(DateTimeOffset? activeUntilUtc) =>
+        activeUntilUtc?.UtcDateTime.ToString("yyyy-MM-dd") ?? "unknown";
 }
