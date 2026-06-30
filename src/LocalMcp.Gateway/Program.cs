@@ -199,8 +199,11 @@ app.MapPost("/api/device-activation/activate", async (HttpContext httpContext) =
     request.TryGetValue("plan", out var requestedPlan);
     var deviceName = string.IsNullOrWhiteSpace(requestedDeviceName) ? "This computer" : requestedDeviceName.Trim();
     var plan = string.IsNullOrWhiteSpace(requestedPlan) ? "free" : requestedPlan.Trim().ToLowerInvariant();
+    request.TryGetValue("activationToken", out var requestedActivationToken);
     var activatedAt = DateTimeOffset.UtcNow;
-    var activationToken = $"act_{Guid.NewGuid():N}{Guid.NewGuid():N}";
+    var activationToken = string.IsNullOrWhiteSpace(requestedActivationToken)
+        ? $"act_{Guid.NewGuid():N}{Guid.NewGuid():N}"
+        : requestedActivationToken.Trim();
 
     var record = new Dictionary<string, object?>
     {
