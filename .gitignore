@@ -23,6 +23,8 @@ appsettings.Local.json
 
 # Testing outputs
 TestResults/
+.artifacts/
+artifacts/
 
 # Scratch & diagnostic outputs (never committed)
 scratch/

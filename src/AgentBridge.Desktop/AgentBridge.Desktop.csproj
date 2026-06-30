@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalMcp.BuildingBlocks\LocalMcp.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\LocalMcp.Gateway\LocalMcp.Gateway.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\LocalMcp.Agent.Windows\LocalMcp.Agent.Windows.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\agentbridge.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Assets\agentbridge.ico" />
+    <None Remove="Assets\agentbridge-icon-512.png" />
+    <Resource Include="Assets\agentbridge.ico" />
+    <Resource Include="Assets\agentbridge-icon-512.png" />
+  </ItemGroup>
+
+</Project>

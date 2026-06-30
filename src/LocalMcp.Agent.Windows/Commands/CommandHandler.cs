@@ -68,7 +68,15 @@ public sealed partial class CommandHandler
     {
         _logger.LogInformation("Handling command {CommandId} (Type: {CommandType})", command.CommandId, command.GetType().Name);
 
-        if (command is ReadFileCommand readFileCommand)
+        if (command is WorkspaceListCommand workspaceListCommand)
+        {
+            return await HandleWorkspaceListAsync(workspaceListCommand, cancellationToken);
+        }
+        else if (command is WorkspaceResolveCommand workspaceResolveCommand)
+        {
+            return await HandleWorkspaceResolveAsync(workspaceResolveCommand, cancellationToken);
+        }
+        else if (command is ReadFileCommand readFileCommand)
         {
             return await HandleReadFileAsync(readFileCommand, cancellationToken);
         }

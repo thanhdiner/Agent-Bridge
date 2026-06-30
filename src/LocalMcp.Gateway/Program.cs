@@ -1,3 +1,4 @@
+using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Hubs;
 using LocalMcp.Gateway.Security;
 using Microsoft.Extensions.Options;
@@ -71,6 +72,35 @@ var metadataHandler = (IOptions<SecurityOptions> options) =>
 app.MapGet("/.well-known/oauth-protected-resource", metadataHandler).AllowAnonymous();
 app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAnonymous();
 // ──────────────────────────────────────────────────────────────────────────
+
+// Local supervisor health probes. The Desktop app binds the Gateway to loopback.
+app.MapGet("/healthz", () => Results.Json(new
+{
+    status = "ok",
+    timestampUtc = DateTimeOffset.UtcNow
+})).AllowAnonymous();
+
+app.MapGet("/healthz/agent/{deviceId}", (
+    string deviceId,
+    IAgentConnectionRegistry registry) =>
+{
+    var normalizedDeviceId = deviceId?.Trim() ?? string.Empty;
+    if (normalizedDeviceId.Length is < 1 or > 256 || normalizedDeviceId.Any(char.IsControl))
+    {
+        return Results.BadRequest(new
+        {
+            status = "invalid",
+            online = false
+        });
+    }
+
+    return Results.Json(new
+    {
+        status = "ok",
+        deviceId = normalizedDeviceId,
+        online = registry.GetConnectionId(normalizedDeviceId) is not null
+    });
+}).AllowAnonymous();
 
 // Map SignalR Hub
 app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");

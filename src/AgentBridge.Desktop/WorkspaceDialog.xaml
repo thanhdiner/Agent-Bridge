@@ -1,0 +1,113 @@
+<ui:FluentWindow x:Class="AgentBridge.Desktop.WorkspaceDialog"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Workspace"
+                 Icon="Assets/agentbridge.ico"
+                 Width="590"
+                 Height="630"
+                 ResizeMode="NoResize"
+                 WindowStartupLocation="CenterOwner"
+                 ShowInTaskbar="False"
+                 Background="{StaticResource AgentBridgeBackgroundBrush}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <ui:TitleBar Title="Workspace access"
+                     ShowMinimize="False"
+                     ShowMaximize="False"
+                     Background="{StaticResource AgentBridgeSidebarBrush}" />
+        <Grid Grid.Row="1" Margin="26,20,26,22">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="18" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="14" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="14" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="14" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <StackPanel>
+                <TextBlock x:Name="HeadingText" Text="Add workspace"
+                           Foreground="{StaticResource AgentBridgeTextBrush}"
+                           FontSize="23" FontWeight="SemiBold" />
+                <TextBlock Text="Give one local folder a stable name and permission level."
+                           Margin="0,4,0,0"
+                           Foreground="{StaticResource AgentBridgeMutedBrush}" />
+            </StackPanel>
+            <StackPanel Grid.Row="2">
+                <TextBlock Text="Alias" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBox x:Name="AliasTextBox"
+                         AutomationProperties.AutomationId="WorkspaceAliasTextBox"
+                         MaxLength="64" />
+                <TextBlock Text="Examples: main, work, obsidian"
+                           Margin="0,4,0,0"
+                           Foreground="{StaticResource AgentBridgeSubtleBrush}"
+                           FontSize="10.5" />
+            </StackPanel>
+            <StackPanel Grid.Row="4">
+                <TextBlock Text="Folder" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="FolderTextBox"
+                             AutomationProperties.AutomationId="WorkspaceFolderTextBox" />
+                    <ui:Button Grid.Column="2" Content="Browse"
+                               Icon="{ui:SymbolIcon FolderOpenVertical16}"
+                               Appearance="Secondary"
+                               Click="Browse_Click" />
+                </Grid>
+            </StackPanel>
+            <StackPanel Grid.Row="6">
+                <TextBlock Text="Description" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBox x:Name="DescriptionTextBox"
+                         AutomationProperties.AutomationId="WorkspaceDescriptionTextBox"
+                         MaxLength="256" Height="58"
+                         AcceptsReturn="True" TextWrapping="Wrap" />
+            </StackPanel>
+            <Border Grid.Row="8"
+                    Background="{StaticResource AgentBridgeSurfaceBrush}"
+                    BorderBrush="{StaticResource AgentBridgeBorderBrush}"
+                    BorderThickness="1" CornerRadius="9" Padding="13,11">
+                <StackPanel>
+                    <ui:ToggleSwitch x:Name="WritableCheckBox"
+                                     AutomationProperties.AutomationId="WorkspaceWritableCheckBox"
+                                     Content="Allow read and write access"
+                                     FontWeight="SemiBold" />
+                    <TextBlock Text="Turn this off when the agent only needs to inspect files."
+                               Margin="0,3,0,0"
+                               Foreground="{StaticResource AgentBridgeMutedBrush}"
+                               FontSize="10.5" />
+                </StackPanel>
+            </Border>
+            <ui:InfoBar x:Name="ValidationInfoBar" Grid.Row="9"
+                        Margin="0,10,0,0" IsOpen="False"
+                        IsClosable="False" Severity="Error" />
+            <StackPanel Grid.Row="10"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Margin="0,16,0,0">
+                <ui:Button Content="Cancel" Appearance="Secondary"
+                           Click="Cancel_Click" Margin="0,0,8,0" />
+                <ui:Button Content="Save workspace"
+                           Icon="{ui:SymbolIcon Save16}"
+                           Appearance="Primary"
+                           Background="{StaticResource AgentBridgeAccentBrush}"
+                           Foreground="White"
+                           BorderBrush="{StaticResource AgentBridgeAccentBrush}"
+                           MouseOverBackground="#9A8FFF"
+                           PressedBackground="#7667E8"
+                           Click="Save_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</ui:FluentWindow>

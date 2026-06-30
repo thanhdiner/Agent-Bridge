@@ -18,9 +18,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\LocalMcp.Gateway\LocalMcp.Gateway.csproj" />
     <ProjectReference Include="..\..\src\LocalMcp.Agent.Windows\LocalMcp.Agent.Windows.csproj" />
+    <ProjectReference Include="..\..\src\LocalMcp.BuildingBlocks\LocalMcp.BuildingBlocks.csproj" />
   </ItemGroup>
 
 </Project>

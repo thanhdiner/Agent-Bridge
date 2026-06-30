@@ -1,0 +1,26 @@
+<Application x:Class="AgentBridge.Desktop.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+            <SolidColorBrush x:Key="AgentBridgeBackgroundBrush" Color="#0D0E12" />
+            <SolidColorBrush x:Key="AgentBridgeSidebarBrush" Color="#111217" />
+            <SolidColorBrush x:Key="AgentBridgeSurfaceBrush" Color="#15161C" />
+            <SolidColorBrush x:Key="AgentBridgeBorderBrush" Color="#262832" />
+            <SolidColorBrush x:Key="AgentBridgeAccentBrush" Color="#8A7CFF" />
+            <SolidColorBrush x:Key="AgentBridgeAccentSoftBrush" Color="#28243E" />
+            <SolidColorBrush x:Key="AgentBridgeTextBrush" Color="#F4F4F7" />
+            <SolidColorBrush x:Key="AgentBridgeMutedBrush" Color="#9296A3" />
+            <SolidColorBrush x:Key="AgentBridgeSubtleBrush" Color="#676B78" />
+            <SolidColorBrush x:Key="AgentBridgeSuccessBrush" Color="#69D89D" />
+            <SolidColorBrush x:Key="AgentBridgeWarningBrush" Color="#F2B84B" />
+            <SolidColorBrush x:Key="AgentBridgeDangerBrush" Color="#FF7285" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
