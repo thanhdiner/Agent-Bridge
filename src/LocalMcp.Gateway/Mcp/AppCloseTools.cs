@@ -40,7 +40,7 @@ public sealed class AppCloseTools
         OpenWorld = false),
      Description("Closes a Windows application by process id or exact process name. Graceful close is attempted first; force=true allows process termination as fallback. Multiple same-name processes require allMatches=true. Requires dev:execute scope.")]
     public async Task<CallToolResult> CloseAppAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
         [Description("Optional exact Windows process id. Use with processName as a PID-reuse guard")] int? processId = null,
         [Description("Optional exact process name, with or without .exe, such as notepad or chrome")] string? processName = null,
         [Description("Close every process with the exact processName when more than one matches (default: false)")] bool allMatches = false,
@@ -50,8 +50,6 @@ public sealed class AppCloseTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
 
         var normalizedProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName;
         if (!processId.HasValue && normalizedProcessName is null)
@@ -69,7 +67,7 @@ public sealed class AppCloseTools
         var command = new AppCloseCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             ProcessId = processId,
             ProcessName = normalizedProcessName,
