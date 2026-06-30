@@ -41,8 +41,11 @@ public sealed partial class GatewayConnection : IAsyncDisposable
             throw new InvalidOperationException("DeviceId is missing.");
         }
 
-        var hubUrl = $"{_agentOptions.GatewayUrl.TrimEnd('/')}/hubs/agent?deviceId={Uri.EscapeDataString(_agentOptions.DeviceId)}";
-        _logger.LogInformation("Initializing SignalR connection to Gateway at {GatewayUrl} for device {DeviceId}", _agentOptions.GatewayUrl, _agentOptions.DeviceId);
+        var displayName = string.IsNullOrWhiteSpace(_agentOptions.DisplayName)
+            ? Environment.MachineName
+            : _agentOptions.DisplayName.Trim();
+        var hubUrl = $"{_agentOptions.GatewayUrl.TrimEnd('/')}/hubs/agent?deviceId={Uri.EscapeDataString(_agentOptions.DeviceId)}&displayName={Uri.EscapeDataString(displayName)}";
+        _logger.LogInformation("Initializing SignalR connection to Gateway at {GatewayUrl} for device {DeviceId} ({DisplayName})", _agentOptions.GatewayUrl, _agentOptions.DeviceId, displayName);
 
         string? agentToken = null;
         if (_agentSecurityOptions.AuthenticationEnabled)

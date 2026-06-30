@@ -316,17 +316,32 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Text="DEVICE ID"
+                        <TextBlock Text="DEFAULT DEVICE"
                                    Foreground="{StaticResource AgentBridgeSubtleBrush}"
                                    FontSize="10.5"
                                    FontWeight="SemiBold" />
-                        <TextBlock x:Name="DeviceIdText"
-                                   Grid.Column="1"
-                                   Text="Preparing…"
-                                   Foreground="{StaticResource AgentBridgeTextBrush}"
-                                   FontFamily="Cascadia Mono"
-                                   FontSize="11.5"
-                                   TextTrimming="CharacterEllipsis" />
+                        <StackPanel Grid.Column="1">
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox x:Name="DefaultDeviceComboBox"
+                                          Width="280"
+                                          DisplayMemberPath="Label"
+                                          SelectedValuePath="DeviceId"
+                                          SelectionChanged="DefaultDeviceComboBox_SelectionChanged"
+                                          AutomationProperties.AutomationId="DefaultDeviceComboBox" />
+                                <ui:Button x:Name="RefreshDevicesButton"
+                                           Content="Refresh devices"
+                                           Appearance="Transparent"
+                                           Margin="8,0,0,0"
+                                           Click="RefreshDevices_Click" />
+                            </StackPanel>
+                            <TextBlock x:Name="DeviceIdText"
+                                       Text="This computer: preparing…"
+                                       Margin="0,6,0,0"
+                                       Foreground="{StaticResource AgentBridgeSubtleBrush}"
+                                       FontFamily="Cascadia Mono"
+                                       FontSize="10.5"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
 
                         <TextBlock Grid.Row="2"
                                    Text="GATEWAY ENDPOINT"

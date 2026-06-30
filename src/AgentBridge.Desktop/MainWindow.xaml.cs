@@ -18,9 +18,13 @@ public partial class MainWindow : FluentWindow
 {
     private readonly ServiceSupervisor _supervisor;
     private readonly UpdateService _updateService = new();
+    private readonly DeviceSelectionService _deviceSelectionService = new();
     private readonly LocalWorkspaceConfigurationStore _store = new();
     private readonly ObservableCollection<WorkspaceConfigurationEntry> _workspaces = [];
+    private readonly ObservableCollection<DeviceChoice> _deviceChoices = [];
     private bool _isCheckingForUpdates;
+    private bool _isRefreshingDevices;
+    private bool _ignoreDeviceSelection;
     private readonly DispatcherTimer _feedbackTimer = new()
     {
         Interval = TimeSpan.FromSeconds(4)
@@ -31,6 +35,7 @@ public partial class MainWindow : FluentWindow
         _supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
         InitializeComponent();
         WorkspaceList.ItemsSource = _workspaces;
+        DefaultDeviceComboBox.ItemsSource = _deviceChoices;
         ConfigPathText.Text = _store.ConfigurationPath;
         LogsDirectoryText.Text = _supervisor.Current.LogsDirectory;
         Loaded += MainWindow_Loaded;
@@ -45,6 +50,7 @@ public partial class MainWindow : FluentWindow
     {
         Loaded -= MainWindow_Loaded;
         await ReloadAsync();
+        await RefreshDeviceSelectionAsync(showErrors: false);
         _ = CheckForUpdatesAsync(isManual: false);
     }
 
@@ -137,6 +143,113 @@ public partial class MainWindow : FluentWindow
 
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e) =>
         await CheckForUpdatesAsync(isManual: true);
+
+    private async void RefreshDevices_Click(object sender, RoutedEventArgs e) =>
+        await RefreshDeviceSelectionAsync(showErrors: true);
+
+    private async void DefaultDeviceComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_ignoreDeviceSelection || DefaultDeviceComboBox.SelectedItem is not DeviceChoice choice)
+            return;
+
+        try
+        {
+            SetServiceButtonsEnabled(false);
+            await _deviceSelectionService.SetDefaultDeviceAsync(_supervisor.Current.GatewayUrl, choice.DeviceId);
+            await RefreshDeviceSelectionAsync(showErrors: false);
+            ShowOverviewFeedback(
+                "Default device selected",
+                $"AgentBridge will use {choice.Label} when tools do not specify a device.",
+                InfoBarSeverity.Success,
+                autoClose: true);
+        }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException
+                                      or TaskCanceledException
+                                      or InvalidOperationException)
+        {
+            await DesktopLog.WriteAsync("Default device selection failed.", ex);
+            ShowOverviewFeedback(
+                "Could not select device",
+                ex.Message,
+                InfoBarSeverity.Error,
+                autoClose: false);
+        }
+        finally
+        {
+            SetServiceButtonsEnabled(true);
+        }
+    }
+
+    private async Task RefreshDeviceSelectionAsync(bool showErrors)
+    {
+        if (_isRefreshingDevices)
+            return;
+
+        _isRefreshingDevices = true;
+        RefreshDevicesButton.IsEnabled = false;
+
+        try
+        {
+            var response = await _deviceSelectionService.GetDevicesAsync(_supervisor.Current.GatewayUrl);
+            var currentDeviceId = _supervisor.Current.DeviceId;
+            var preferredDeviceId = response.PreferredDeviceId;
+
+            _ignoreDeviceSelection = true;
+            _deviceChoices.Clear();
+            foreach (var device in response.Devices)
+            {
+                var isThisComputer = string.Equals(device.DeviceId, currentDeviceId, StringComparison.OrdinalIgnoreCase);
+                var label = isThisComputer
+                    ? "This computer"
+                    : string.IsNullOrWhiteSpace(device.Label) ? device.DeviceId : device.Label;
+                if (!isThisComputer && !string.IsNullOrWhiteSpace(device.DisplayName) && !string.Equals(label, device.DisplayName, StringComparison.Ordinal))
+                    label = device.DisplayName;
+
+                _deviceChoices.Add(new DeviceChoice
+                {
+                    DeviceId = device.DeviceId,
+                    Label = label,
+                    Online = device.Online,
+                    Preferred = device.Preferred
+                });
+            }
+
+            DefaultDeviceComboBox.SelectedValue = !string.IsNullOrWhiteSpace(preferredDeviceId)
+                ? preferredDeviceId
+                : _deviceChoices.Count == 1 ? _deviceChoices[0].DeviceId : null;
+            _ignoreDeviceSelection = false;
+
+            if (_deviceChoices.Count > 1 && string.IsNullOrWhiteSpace(preferredDeviceId) && showErrors)
+            {
+                ShowOverviewFeedback(
+                    "Choose a default device",
+                    "Multiple desktop agents are online. Pick the one AgentBridge should use by default.",
+                    InfoBarSeverity.Informational,
+                    autoClose: false);
+            }
+        }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException
+                                      or TaskCanceledException
+                                      or System.Text.Json.JsonException
+                                      or InvalidOperationException)
+        {
+            await DesktopLog.WriteAsync("Device list refresh failed.", ex);
+            if (showErrors)
+            {
+                ShowOverviewFeedback(
+                    "Could not load devices",
+                    ex.Message,
+                    InfoBarSeverity.Error,
+                    autoClose: false);
+            }
+        }
+        finally
+        {
+            _ignoreDeviceSelection = false;
+            _isRefreshingDevices = false;
+            RefreshDevicesButton.IsEnabled = true;
+        }
+    }
 
     private async Task CheckForUpdatesAsync(bool isManual)
     {
@@ -407,6 +520,7 @@ public partial class MainWindow : FluentWindow
         RefreshServicesButton.IsEnabled = enabled;
         OpenLogsButton.IsEnabled = enabled;
         CheckUpdatesButton.IsEnabled = enabled && !_isCheckingForUpdates;
+        RefreshDevicesButton.IsEnabled = enabled && !_isRefreshingDevices;
     }
 
     private void UpdateEmptyState()
@@ -446,7 +560,9 @@ public partial class MainWindow : FluentWindow
         AgentStatusDot.Fill = agentBrush;
         AgentStatusText.Foreground = agentBrush;
 
-        DeviceIdText.Text = snapshot.DeviceId;
+        DeviceIdText.Text = string.IsNullOrWhiteSpace(snapshot.DeviceId)
+            ? "This computer: preparing…"
+            : $"This computer: {snapshot.DeviceId}";
         GatewayUrlText.Text = snapshot.GatewayUrl;
         LogsDirectoryText.Text = snapshot.LogsDirectory;
         LastCheckedText.Text = snapshot.UpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");

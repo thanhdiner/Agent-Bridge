@@ -106,6 +106,75 @@ app.MapGet("/healthz/agent/{deviceId}", (
     });
 }).AllowAnonymous();
 
+app.MapGet("/api/devices", (
+    IAgentConnectionRegistry registry,
+    IPreferredDeviceStore preferredDeviceStore) =>
+{
+    var preferredDeviceId = preferredDeviceStore.GetPreferredDeviceId();
+    var devices = registry.GetActiveDeviceInfos()
+        .OrderBy(device => string.IsNullOrWhiteSpace(device.DisplayName) ? device.DeviceId : device.DisplayName, StringComparer.OrdinalIgnoreCase)
+        .Select(device => new
+        {
+            deviceId = device.DeviceId,
+            displayName = device.DisplayName,
+            label = string.IsNullOrWhiteSpace(device.DisplayName) ? device.DeviceId : device.DisplayName,
+            online = true,
+            preferred = string.Equals(preferredDeviceId, device.DeviceId, StringComparison.OrdinalIgnoreCase),
+            connectedAtUtc = device.ConnectedAtUtc
+        })
+        .ToArray();
+
+    return Results.Json(new
+    {
+        count = devices.Length,
+        preferredDeviceId,
+        devices
+    });
+}).AllowAnonymous();
+
+app.MapPut("/api/devices/preferred/{deviceId}", (
+    string deviceId,
+    IAgentConnectionRegistry registry,
+    IPreferredDeviceStore preferredDeviceStore) =>
+{
+    var normalizedDeviceId = deviceId?.Trim() ?? string.Empty;
+    if (normalizedDeviceId.Length is < 1 or > 256 || normalizedDeviceId.Any(char.IsControl))
+    {
+        return Results.BadRequest(new
+        {
+            error = "INVALID_DEVICE_ID"
+        });
+    }
+
+    var device = registry.GetDevice(normalizedDeviceId);
+    if (device is null)
+    {
+        return Results.NotFound(new
+        {
+            error = "DEVICE_NOT_ONLINE"
+        });
+    }
+
+    preferredDeviceStore.SetPreferredDeviceId(normalizedDeviceId);
+    return Results.Json(new
+    {
+        preferredDeviceId = normalizedDeviceId,
+        displayName = device.DisplayName,
+        label = string.IsNullOrWhiteSpace(device.DisplayName) ? device.DeviceId : device.DisplayName,
+        online = true
+    });
+}).AllowAnonymous();
+
+app.MapDelete("/api/devices/preferred", (IPreferredDeviceStore preferredDeviceStore) =>
+{
+    preferredDeviceStore.ClearPreferredDeviceId();
+    return Results.Json(new
+    {
+        preferredDeviceId = (string?)null,
+        online = false
+    });
+}).AllowAnonymous();
+
 // Map SignalR Hub
 app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
 
