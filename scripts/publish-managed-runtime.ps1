@@ -6,13 +6,34 @@ param(
     [ValidateSet('win-x64', 'win-arm64')]
     [string]$Runtime = 'win-x64',
 
-    [switch]$SelfContained
+    [switch]$SelfContained,
+
+    [string]$OutputRoot
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$outputRoot = Join-Path $repositoryRoot 'artifacts\publish\AgentBridge'
+$artifactsRoot = Join-Path $repositoryRoot 'artifacts'
+
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    $outputRoot = Join-Path $artifactsRoot 'publish\AgentBridge'
+}
+elseif ([System.IO.Path]::IsPathRooted($OutputRoot)) {
+    $outputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+}
+else {
+    $outputRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot $OutputRoot))
+}
+
+$outputRoot = [System.IO.Path]::GetFullPath($outputRoot)
+$artifactsRoot = [System.IO.Path]::GetFullPath($artifactsRoot)
+$artifactsRootWithSeparator = $artifactsRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+
+if (!$outputRoot.StartsWith($artifactsRootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputRoot must stay under the repository artifacts directory. Refusing to delete or publish outside: $outputRoot"
+}
+
 $gatewayOutput = Join-Path $outputRoot 'services\gateway'
 $agentOutput = Join-Path $outputRoot 'services\agent'
 
