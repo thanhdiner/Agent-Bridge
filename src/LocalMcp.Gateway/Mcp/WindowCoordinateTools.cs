@@ -35,7 +35,7 @@ public sealed partial class WindowCoordinateTools
     [McpServerTool(Name = "window_click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Clicks one point relative to a Windows window after validation. Requires dev:execute scope.")]
     public async Task<CallToolResult> ClickWindowAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
         [Description("The target native window handle")] string windowHandle,
         [Description("Zero-based horizontal coordinate relative to the window")] int x,
         [Description("Zero-based vertical coordinate relative to the window")] int y,
@@ -46,8 +46,6 @@ public sealed partial class WindowCoordinateTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (string.IsNullOrWhiteSpace(windowHandle) || windowHandle.Length > 32 || windowHandle.Any(char.IsControl))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (x is < 0 or > 100000 || y is < 0 or > 100000)
@@ -66,7 +64,7 @@ public sealed partial class WindowCoordinateTools
         var command = new WindowClickCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             X = x,

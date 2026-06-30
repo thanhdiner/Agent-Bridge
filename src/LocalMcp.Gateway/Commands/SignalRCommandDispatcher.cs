@@ -15,6 +15,7 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
 {
     private const int MaxPendingCommands = 1000;
     private readonly IAgentConnectionRegistry _registry;
+    private readonly IDeviceResolver _deviceResolver;
     private readonly IHubContext<AgentHub> _hubContext;
     private readonly ILogger<SignalRCommandDispatcher> _logger;
 
@@ -22,10 +23,12 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
 
     public SignalRCommandDispatcher(
         IAgentConnectionRegistry registry,
+        IDeviceResolver deviceResolver,
         IHubContext<AgentHub> hubContext,
         ILogger<SignalRCommandDispatcher> logger)
     {
         _registry = registry;
+        _deviceResolver = deviceResolver;
         _hubContext = hubContext;
         _logger = logger;
     }
@@ -34,8 +37,22 @@ public sealed class SignalRCommandDispatcher : ICommandDispatcher
         AgentCommand command,
         CancellationToken cancellationToken = default)
     {
-        var deviceId = command.DeviceId;
         var commandId = command.CommandId;
+        var deviceResolution = _deviceResolver.Resolve(command.DeviceId);
+        if (!deviceResolution.Success || string.IsNullOrWhiteSpace(deviceResolution.DeviceId))
+        {
+            return new CommandResult<TResult>
+            {
+                CommandId = commandId,
+                Success = false,
+                Error = new CommandError(
+                    deviceResolution.ErrorCode ?? ErrorCodes.InvalidRequest,
+                    deviceResolution.ErrorMessage ?? "No active device could be resolved.")
+            };
+        }
+
+        var deviceId = deviceResolution.DeviceId;
+        command = command with { DeviceId = deviceId };
 
         _logger.LogInformation("Attempting to dispatch command {CommandId} to device {DeviceId}", commandId, deviceId);
 

@@ -40,7 +40,7 @@ public sealed class UiClickTools
         OpenWorld = false),
      Description("Activates one Windows UI Automation control selected by automationId or exact name. Requires dev:execute scope.")]
     public async Task<CallToolResult> ClickUiAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
         [Description("The target native window handle")] string windowHandle,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
         [Description("Exact control name; either automationId or name is required")] string? name = null,
@@ -50,8 +50,6 @@ public sealed class UiClickTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId) && string.IsNullOrWhiteSpace(name))
@@ -64,7 +62,7 @@ public sealed class UiClickTools
         var command = new UiClickCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             AutomationId = automationId,
