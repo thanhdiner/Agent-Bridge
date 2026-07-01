@@ -194,10 +194,8 @@ internal sealed class DeviceActivationStore : IDeviceActivationStore
             Features = NormalizeFeatures(record.Features),
             CreatedAtUtc = createdAtUtc,
             UpdatedAtUtc = record.UpdatedAtUtc == default ? now : record.UpdatedAtUtc,
-            LegacyLicenseKind = null,
             LegacyLicenseStatus = null,
             LegacyPaidUntil = null,
-            LegacyUpdatesUntil = null,
             LegacyPlan = null,
             LegacyActivatedAt = null
         };
@@ -215,9 +213,7 @@ public sealed record DeviceActivationRecord(
     [property: JsonPropertyName("features")] IReadOnlyList<string>? Features = null,
     [property: JsonPropertyName("createdAtUtc")] DateTimeOffset CreatedAtUtc = default,
     [property: JsonPropertyName("updatedAtUtc")] DateTimeOffset UpdatedAtUtc = default,
-    [property: JsonPropertyName("licenseKind")] string? LegacyLicenseKind = null,
     [property: JsonPropertyName("licenseStatus")] string? LegacyLicenseStatus = null,
     [property: JsonPropertyName("paidUntil")] DateTimeOffset? LegacyPaidUntil = null,
-    [property: JsonPropertyName("updatesUntil")] DateTimeOffset? LegacyUpdatesUntil = null,
     [property: JsonPropertyName("plan")] string? LegacyPlan = null,
     [property: JsonPropertyName("activatedAt")] DateTimeOffset? LegacyActivatedAt = null);
