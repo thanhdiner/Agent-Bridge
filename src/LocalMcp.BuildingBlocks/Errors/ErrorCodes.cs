@@ -23,7 +23,6 @@ public static class ErrorCodes
     public const string CommandCancelled = "COMMAND_CANCELLED";
     public const string CommandCapacityExceeded = "COMMAND_CAPACITY_EXCEEDED";
     public const string UnsupportedCommand = "UNSUPPORTED_COMMAND";
-    public const string EntitlementDenied = "ENTITLEMENT_DENIED";
     public const string InternalError = "INTERNAL_ERROR";
     public const string DirectoryNotFound = "DIRECTORY_NOT_FOUND";
     public const string DirectoryNotEmpty = "DIRECTORY_NOT_EMPTY";

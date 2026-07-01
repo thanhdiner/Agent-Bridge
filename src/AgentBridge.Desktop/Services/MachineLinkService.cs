@@ -71,21 +71,4 @@ internal sealed class MachineLinkService
         return result is { Activated: true } ? result : null;
     }
 
-    public async Task<MachineLinkResponse?> GetCurrentAsync(
-        string gatewayUrl,
-        string linkValue,
-        CancellationToken cancellationToken = default)
-    {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"{gatewayUrl.TrimEnd('/')}/api/device-activation/current");
-        request.Headers.TryAddWithoutValidation("X-AgentBridge-Activation", linkValue);
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        var result = await JsonSerializer.DeserializeAsync<MachineLinkResponse>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
-        return result is { Activated: true } ? result : null;
-    }
 }
