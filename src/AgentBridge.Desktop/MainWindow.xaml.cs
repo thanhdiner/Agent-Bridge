@@ -87,19 +87,22 @@ public partial class MainWindow : FluentWindow
             SetServiceButtonsEnabled(false);
             ShowOverviewFeedback(
                 "Restarting services",
-                "Gateway and Windows Agent are being restarted.",
+                "Gateway, Windows Agent, and Tunnel are being restarted.",
                 InfoBarSeverity.Informational,
                 autoClose: false);
             await _supervisor.RestartAsync();
             ApplySupervisorSnapshot(_supervisor.Current);
+            var allServicesHealthy = _supervisor.Current.Gateway.IsHealthy
+                && _supervisor.Current.Agent.IsHealthy
+                && _supervisor.Current.Tunnel.IsHealthy;
             ShowOverviewFeedback(
-                _supervisor.Current.Gateway.IsHealthy && _supervisor.Current.Agent.IsHealthy
+                allServicesHealthy
                     ? "Services restarted"
                     : "Restart needs attention",
-                _supervisor.Current.Gateway.IsHealthy && _supervisor.Current.Agent.IsHealthy
-                    ? "Gateway is healthy and the Windows Agent is connected."
+                allServicesHealthy
+                    ? "Gateway is healthy, the Windows Agent is connected, and the Tunnel is running."
                     : "Open the logs to inspect the failed service.",
-                _supervisor.Current.Gateway.IsHealthy && _supervisor.Current.Agent.IsHealthy
+                allServicesHealthy
                     ? InfoBarSeverity.Success
                     : InfoBarSeverity.Warning,
                 autoClose: true);
@@ -554,13 +557,19 @@ public partial class MainWindow : FluentWindow
         AgentStatusText.Text = snapshot.Agent.Summary;
         AgentDetailText.Text = snapshot.Agent.Detail;
         AgentMetaText.Text = BuildProcessMeta(snapshot.Agent);
+        TunnelStatusText.Text = snapshot.Tunnel.Summary;
+        TunnelDetailText.Text = snapshot.Tunnel.Detail;
+        TunnelMetaText.Text = BuildProcessMeta(snapshot.Tunnel);
 
         var gatewayBrush = GetStatusBrush(snapshot.Gateway.State);
         var agentBrush = GetStatusBrush(snapshot.Agent.State);
+        var tunnelBrush = GetStatusBrush(snapshot.Tunnel.State);
         GatewayStatusDot.Fill = gatewayBrush;
         GatewayStatusText.Foreground = gatewayBrush;
         AgentStatusDot.Fill = agentBrush;
         AgentStatusText.Foreground = agentBrush;
+        TunnelStatusDot.Fill = tunnelBrush;
+        TunnelStatusText.Foreground = tunnelBrush;
 
         DeviceIdText.Text = string.IsNullOrWhiteSpace(snapshot.DeviceId)
             ? "This computer: preparing…"
@@ -570,18 +579,20 @@ public partial class MainWindow : FluentWindow
         LastCheckedText.Text = snapshot.UpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 
         if (snapshot.Gateway.State == ManagedServiceState.External
-            || snapshot.Agent.State == ManagedServiceState.External)
+            || snapshot.Agent.State == ManagedServiceState.External
+            || snapshot.Tunnel.State == ManagedServiceState.External)
         {
             OverallStatusText.Text = "External services detected";
             OverallStatusDot.Fill = GetResourceBrush("AgentBridgeWarningBrush");
         }
-        else if (snapshot.Gateway.IsHealthy && snapshot.Agent.IsHealthy)
+        else if (snapshot.Gateway.IsHealthy && snapshot.Agent.IsHealthy && snapshot.Tunnel.IsHealthy)
         {
             OverallStatusText.Text = "All systems operational";
             OverallStatusDot.Fill = GetResourceBrush("AgentBridgeSuccessBrush");
         }
         else if (snapshot.Gateway.State == ManagedServiceState.Error
-                 || snapshot.Agent.State == ManagedServiceState.Error)
+                 || snapshot.Agent.State == ManagedServiceState.Error
+                 || snapshot.Tunnel.State == ManagedServiceState.Error)
         {
             OverallStatusText.Text = "Attention needed";
             OverallStatusDot.Fill = GetResourceBrush("AgentBridgeDangerBrush");

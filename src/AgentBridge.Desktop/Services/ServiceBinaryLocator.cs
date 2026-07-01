@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 
 namespace AgentBridge.Desktop.Services;
 
@@ -23,6 +24,38 @@ public sealed class ServiceBinaryLocator
         "AGENTBRIDGE_AGENT_PATH",
         "agent",
         "LocalMcp.Agent.Windows");
+
+    public LaunchTarget? ResolveCloudflared(string tunnelName)
+    {
+        var configured = Environment.GetEnvironmentVariable("AGENTBRIDGE_CLOUDFLARED_PATH");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var configuredTarget = CreateExecutableTarget(
+                Path.GetFullPath(configured),
+                $"tunnel run {QuoteArgument(tunnelName)}");
+            if (configuredTarget is not null)
+                return configuredTarget;
+        }
+
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(_baseDirectory, "tools", "cloudflared", "cloudflared.exe"),
+                     Path.Combine(_baseDirectory, "cloudflared.exe")
+                 })
+        {
+            var packagedTarget = CreateExecutableTarget(
+                candidate,
+                $"tunnel run {QuoteArgument(tunnelName)}");
+            if (packagedTarget is not null)
+                return packagedTarget;
+        }
+
+        var pathTarget = FindOnPath("cloudflared.exe")
+            ?? FindOnPath("cloudflared");
+        return pathTarget is null
+            ? null
+            : CreateExecutableTarget(pathTarget, $"tunnel run {QuoteArgument(tunnelName)}");
+    }
 
     private LaunchTarget? Resolve(
         string environmentVariable,
@@ -101,6 +134,37 @@ public sealed class ServiceBinaryLocator
                 directory,
                 fullPath);
     }
+
+    private static LaunchTarget? CreateExecutableTarget(string path, string arguments)
+    {
+        if (!File.Exists(path))
+            return null;
+
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath)
+            ?? throw new InvalidOperationException("Executable has no parent directory.");
+
+        return new LaunchTarget(
+            fullPath,
+            arguments,
+            directory,
+            $"{fullPath} {arguments}");
+    }
+
+    private static string? FindOnPath(string fileName)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        return path
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(directory => Path.Combine(directory, fileName))
+            .FirstOrDefault(File.Exists);
+    }
+
+    private static string QuoteArgument(string value) =>
+        $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
 
     private static string? FindRepositoryRoot(string startDirectory)
     {

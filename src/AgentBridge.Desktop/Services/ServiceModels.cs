@@ -22,6 +22,7 @@ public sealed record ManagedServiceStatus(
 public sealed record SupervisorSnapshot(
     ManagedServiceStatus Gateway,
     ManagedServiceStatus Agent,
+    ManagedServiceStatus Tunnel,
     string DeviceId,
     string GatewayUrl,
     string LogsDirectory,
@@ -39,6 +40,13 @@ public sealed record SupervisorSnapshot(
             ManagedServiceState.Stopped,
             "Stopped",
             "Windows Agent has not started yet.",
+            null,
+            false,
+            false),
+        new ManagedServiceStatus(
+            ManagedServiceState.Stopped,
+            "Stopped",
+            "Cloudflare Tunnel has not started yet.",
             null,
             false,
             false),
