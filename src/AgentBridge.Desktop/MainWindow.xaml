@@ -148,7 +148,7 @@
                                    FontFamily="Segoe UI Variable Display"
                                    FontSize="27"
                                    FontWeight="SemiBold" />
-                        <TextBlock Text="Gateway and Windows Agent are managed from one place."
+                        <TextBlock Text="Gateway, Windows Agent, and Tunnel are managed from one place."
                                    Margin="0,4,0,0"
                                    Foreground="{StaticResource AgentBridgeMutedBrush}"
                                    FontSize="13" />
@@ -183,6 +183,8 @@
 
                 <Grid Grid.Row="4">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="12" />
                         <ColumnDefinition Width="*" />
@@ -286,6 +288,59 @@
                                            FontSize="11"
                                            TextWrapping="Wrap" />
                                 <TextBlock x:Name="AgentMetaText"
+                                           Text="No process yet"
+                                           Margin="0,7,0,0"
+                                           Foreground="{StaticResource AgentBridgeSubtleBrush}"
+                                           FontSize="10.5" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="4"
+                            Background="{StaticResource AgentBridgeSurfaceBrush}"
+                            BorderBrush="{StaticResource AgentBridgeBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="11"
+                            Padding="17">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="42" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="36"
+                                    Height="36"
+                                    CornerRadius="10"
+                                    Background="{StaticResource AgentBridgeAccentSoftBrush}"
+                                    VerticalAlignment="Top">
+                                <ui:SymbolIcon Symbol="Cloud24"
+                                               Foreground="{StaticResource AgentBridgeAccentBrush}"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                <TextBlock Text="Tunnel"
+                                           Foreground="{StaticResource AgentBridgeTextBrush}"
+                                           FontSize="14"
+                                           FontWeight="SemiBold" />
+                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                    <Ellipse x:Name="TunnelStatusDot"
+                                             Width="7"
+                                             Height="7"
+                                             Fill="{StaticResource AgentBridgeWarningBrush}"
+                                             Margin="0,0,6,0" />
+                                    <TextBlock x:Name="TunnelStatusText"
+                                               Text="Starting"
+                                               Foreground="{StaticResource AgentBridgeWarningBrush}"
+                                               FontSize="11.5"
+                                               FontWeight="SemiBold" />
+                                </StackPanel>
+                                <TextBlock x:Name="TunnelDetailText"
+                                           Text="Tunnel waiting for Gateway"
+                                           Margin="0,7,0,0"
+                                           Foreground="{StaticResource AgentBridgeMutedBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap" />
+                                <TextBlock x:Name="TunnelMetaText"
                                            Text="No process yet"
                                            Margin="0,7,0,0"
                                            Foreground="{StaticResource AgentBridgeSubtleBrush}"

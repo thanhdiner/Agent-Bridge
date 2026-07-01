@@ -131,7 +131,7 @@ public partial class App : System.Windows.Application
         _trayIcon?.ShowBalloonTip(
             1800,
             "AgentBridge is still running",
-            "Gateway and Windows Agent continue running in the background.",
+            "Gateway, Windows Agent, and Tunnel continue running in the background.",
             Forms.ToolTipIcon.Info);
     }
 
