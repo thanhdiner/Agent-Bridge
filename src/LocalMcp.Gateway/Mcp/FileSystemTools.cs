@@ -15,7 +15,7 @@ using LocalMcp.Gateway.Commands;
 namespace LocalMcp.Gateway.Mcp;
 
 [McpServerToolType]
-public sealed class FileSystemTools
+public sealed partial class FileSystemTools
 {
     private readonly ICommandDispatcher _dispatcher;
     private readonly IAuthorizationService _authorizationService;

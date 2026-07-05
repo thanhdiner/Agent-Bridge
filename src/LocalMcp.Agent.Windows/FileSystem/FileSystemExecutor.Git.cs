@@ -1137,6 +1137,32 @@ public sealed partial class FileSystemExecutor
         }
     }
 
+    public Task<CommandResult<GitPushResult>> GitPublishAsync(
+        string path,
+        string? remote,
+        string? branch,
+        bool setUpstream,
+        int timeoutSeconds,
+        int maxOutputBytes,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        return GitPublishCoreAsync(path, remote, branch, setUpstream, timeoutSeconds, maxOutputBytes, commandId, cancellationToken);
+    }
+
+    private Task<CommandResult<GitPushResult>> GitPublishCoreAsync(
+        string path,
+        string? remote,
+        string? branch,
+        bool setUpstream,
+        int timeoutSeconds,
+        int maxOutputBytes,
+        Guid commandId,
+        CancellationToken cancellationToken)
+    {
+        return GitPublishCoreRealAsync(path, remote, branch, setUpstream, timeoutSeconds, maxOutputBytes, commandId, cancellationToken);
+    }
+
     public async Task<CommandResult<GitRefreshIndexResult>> GitRefreshIndexAsync(
         string path,
         string pathSpec,

@@ -9,6 +9,15 @@ public static class AgentCommandTimeouts
         if (command is GitLogCommand or GitShowCommand)
             return TimeSpan.FromSeconds(90);
 
+        if (command is GitPushCommand gitPushCommand)
+        {
+            var requestedGitPushSeconds = Math.Clamp(
+                gitPushCommand.TimeoutSeconds,
+                10,
+                900);
+            return TimeSpan.FromSeconds(requestedGitPushSeconds + 15);
+        }
+
         if (command is PowerShellExecuteCommand powerShellCommand)
         {
             var requestedPowerShellSeconds = Math.Clamp(
