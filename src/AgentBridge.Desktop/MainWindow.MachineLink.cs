@@ -40,8 +40,8 @@ public partial class MainWindow
             {
                 var licenseActive = IsLicenseActive(result);
                 ActivationStatusText.Text = licenseActive
-                    ? $"License active • Valid until: {FormatLicenseDate(result.ActiveUntilUtc)}"
-                    : "License expired • Renew to continue using AgentBridge";
+                    ? $"Access active • Until: {FormatLicenseDate(result.ActiveUntilUtc)}"
+                    : "Access expired • Re-activate to continue";
                 ActivationStatusText.Foreground = GetResourceBrush(licenseActive ? "AgentBridgeSuccessBrush" : "AgentBridgeDangerBrush");
                 ActivateDeviceButton.Content = "Re-activate";
             }
@@ -118,13 +118,13 @@ public partial class MainWindow
                 "This computer",
                 linkValue);
 
-            ActivationStatusText.Text = $"License active • Valid until: {FormatLicenseDate(result.ActiveUntilUtc)}";
+            ActivationStatusText.Text = $"Access active • Until: {FormatLicenseDate(result.ActiveUntilUtc)}";
             ActivationStatusText.Foreground = GetResourceBrush("AgentBridgeSuccessBrush");
             ActivateDeviceButton.Content = "Re-activate";
 
             ShowOverviewFeedback(
                 "This computer is activated",
-                $"License active. Valid until: {FormatLicenseDate(result.ActiveUntilUtc)}.",
+                $"Access active. Valid until: {FormatLicenseDate(result.ActiveUntilUtc)}.",
                 InfoBarSeverity.Success,
                 autoClose: true);
         }

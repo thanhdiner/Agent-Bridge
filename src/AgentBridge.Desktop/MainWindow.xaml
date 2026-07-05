@@ -4,10 +4,10 @@
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="AgentBridge"
                  Icon="Assets/agentbridge.ico"
-                 Width="980"
-                 Height="660"
-                 MinWidth="840"
-                 MinHeight="540"
+                 Width="1080"
+                 Height="700"
+                 MinWidth="980"
+                 MinHeight="620"
                  WindowStartupLocation="CenterScreen"
                  Background="{StaticResource AgentBridgeBackgroundBrush}">
     <ui:FluentWindow.Resources>
@@ -95,36 +95,36 @@
                                    Click="WorkspacesNav_Click" />
                     </StackPanel>
 
-                    <Border Grid.Row="4"
-                            Background="#121318"
-                            BorderBrush="{StaticResource AgentBridgeBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="9"
-                            Padding="11">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal">
-                                <Ellipse Width="7"
-                                         Height="7"
-                                         Fill="{StaticResource AgentBridgeWarningBrush}"
-                                         Margin="0,0,7,0" />
-                                <TextBlock Text="Local configuration"
-                                           Foreground="{StaticResource AgentBridgeTextBrush}"
-                                           FontWeight="SemiBold"
-                                           FontSize="11" />
-                            </StackPanel>
-                            <TextBlock Text="Restart the Agent after changing workspace access."
-                                       Margin="0,7,0,0"
+                    <StackPanel Grid.Row="4"
+                                Margin="2,0,2,0">
+                        <Border Height="1"
+                                Background="{StaticResource AgentBridgeBorderBrush}"
+                                Opacity="0.65"
+                                Margin="0,0,0,12" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Settings20"
+                                           Width="14"
+                                           Height="14"
+                                           Foreground="{StaticResource AgentBridgeMutedBrush}"
+                                           Margin="0,0,7,0" />
+                            <TextBlock Text="Local config"
                                        Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                       FontSize="10.5"
-                                       TextWrapping="Wrap" />
+                                       FontWeight="SemiBold"
+                                       FontSize="11" />
                         </StackPanel>
-                    </Border>
+                        <TextBlock Text="Agent restart applies workspace changes."
+                                   Margin="21,5,0,0"
+                                   Foreground="{StaticResource AgentBridgeSubtleBrush}"
+                                   FontSize="10.5"
+                                   LineHeight="15"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
                 </Grid>
             </Border>
 
             <Grid x:Name="OverviewPage"
                   Grid.Column="1"
-                  Margin="28,24,28,22">
+                  Margin="24,22,24,18">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="14" />
@@ -438,44 +438,47 @@
                 </Border>
 
                 <Grid Grid.Row="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="8" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <TextBlock Text="Managed services continue running while AgentBridge is hidden to tray."
                                Foreground="{StaticResource AgentBridgeSubtleBrush}"
                                FontSize="10.5"
-                               VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                               TextTrimming="CharacterEllipsis" />
+                    <WrapPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" ItemHeight="38">
                         <TextBlock x:Name="ActivationStatusText"
                                    Text="Not activated"
                                    Foreground="{StaticResource AgentBridgeWarningBrush}"
                                    FontSize="11.5"
                                    FontWeight="SemiBold"
                                    VerticalAlignment="Center"
-                                   Margin="0,0,8,0" />
+                                   Margin="0,0,14,8" />
                         <ui:Button x:Name="ActivateDeviceButton"
                                    Content="Activate this computer"
                                    Appearance="Secondary"
+                                   Margin="0,0,10,8"
                                    AutomationProperties.AutomationId="ActivateDeviceButton"
                                    Click="ActivateDevice_Click" />
                         <ui:Button x:Name="CheckUpdatesButton"
                                    Content="Check updates"
                                    Appearance="Transparent"
+                                   Margin="0,0,10,8"
                                    AutomationProperties.AutomationId="CheckUpdatesButton"
                                    Click="CheckUpdates_Click" />
                         <ui:Button x:Name="RefreshServicesButton"
                                    Content="Refresh"
                                    Icon="{ui:SymbolIcon ArrowSync16}"
                                    Appearance="Transparent"
-                                   Margin="8,0,0,0"
+                                   Margin="0,0,10,8"
                                    AutomationProperties.AutomationId="RefreshServicesButton"
                                    Click="RefreshServices_Click" />
                         <ui:Button x:Name="OpenLogsButton"
                                    Content="Open logs"
                                    Icon="{ui:SymbolIcon FolderOpenVertical16}"
                                    Appearance="Secondary"
-                                   Margin="8,0,0,0"
+                                   Margin="0,0,10,8"
                                    AutomationProperties.AutomationId="OpenLogsButton"
                                    Click="OpenLogs_Click" />
                         <ui:Button x:Name="RestartServicesButton"
@@ -485,18 +488,18 @@
                                    Background="{StaticResource AgentBridgeAccentBrush}"
                                    Foreground="White"
                                    BorderBrush="{StaticResource AgentBridgeAccentBrush}"
-                                   MouseOverBackground="#9A8FFF"
-                                   PressedBackground="#7667E8"
-                                   Margin="8,0,0,0"
+                                   MouseOverBackground="#FF8A33"
+                                   PressedBackground="#D96513"
+                                   Margin="0,0,0,8"
                                    AutomationProperties.AutomationId="RestartServicesButton"
                                    Click="RestartServices_Click" />
-                    </StackPanel>
+                    </WrapPanel>
                 </Grid>
             </Grid>
 
             <Grid x:Name="WorkspacePage"
                   Grid.Column="1"
-                  Margin="28,24,28,22"
+                  Margin="24,22,24,18"
                   Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -531,8 +534,8 @@
                                Background="{StaticResource AgentBridgeAccentBrush}"
                                Foreground="White"
                                BorderBrush="{StaticResource AgentBridgeAccentBrush}"
-                               MouseOverBackground="#9A8FFF"
-                               PressedBackground="#7667E8"
+                               MouseOverBackground="#FF8A33"
+                               PressedBackground="#D96513"
                                AutomationProperties.AutomationId="AddWorkspaceButton"
                                Click="AddWorkspace_Click"
                                VerticalAlignment="Center" />
@@ -601,7 +604,7 @@
                                             </StackPanel>
 
                                             <Border Grid.Column="2"
-                                                    Background="#1A1B21"
+                                                    Background="{StaticResource AgentBridgeSidebarBrush}"
                                                     BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="7"

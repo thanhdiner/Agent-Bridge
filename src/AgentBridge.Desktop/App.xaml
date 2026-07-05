@@ -9,18 +9,18 @@
                 <ui:ThemesDictionary Theme="Dark" />
                 <ui:ControlsDictionary />
             </ResourceDictionary.MergedDictionaries>
-            <SolidColorBrush x:Key="AgentBridgeBackgroundBrush" Color="#0D0E12" />
-            <SolidColorBrush x:Key="AgentBridgeSidebarBrush" Color="#111217" />
-            <SolidColorBrush x:Key="AgentBridgeSurfaceBrush" Color="#15161C" />
-            <SolidColorBrush x:Key="AgentBridgeBorderBrush" Color="#262832" />
-            <SolidColorBrush x:Key="AgentBridgeAccentBrush" Color="#8A7CFF" />
-            <SolidColorBrush x:Key="AgentBridgeAccentSoftBrush" Color="#28243E" />
-            <SolidColorBrush x:Key="AgentBridgeTextBrush" Color="#F4F4F7" />
-            <SolidColorBrush x:Key="AgentBridgeMutedBrush" Color="#9296A3" />
-            <SolidColorBrush x:Key="AgentBridgeSubtleBrush" Color="#676B78" />
-            <SolidColorBrush x:Key="AgentBridgeSuccessBrush" Color="#69D89D" />
-            <SolidColorBrush x:Key="AgentBridgeWarningBrush" Color="#F2B84B" />
-            <SolidColorBrush x:Key="AgentBridgeDangerBrush" Color="#FF7285" />
+            <SolidColorBrush x:Key="AgentBridgeBackgroundBrush" Color="#151515" />
+            <SolidColorBrush x:Key="AgentBridgeSidebarBrush" Color="#1F1F1F" />
+            <SolidColorBrush x:Key="AgentBridgeSurfaceBrush" Color="#202020" />
+            <SolidColorBrush x:Key="AgentBridgeBorderBrush" Color="#333333" />
+            <SolidColorBrush x:Key="AgentBridgeAccentBrush" Color="#F47C20" />
+            <SolidColorBrush x:Key="AgentBridgeAccentSoftBrush" Color="#2A2A2A" />
+            <SolidColorBrush x:Key="AgentBridgeTextBrush" Color="#F2F2F2" />
+            <SolidColorBrush x:Key="AgentBridgeMutedBrush" Color="#A3A3A3" />
+            <SolidColorBrush x:Key="AgentBridgeSubtleBrush" Color="#737373" />
+            <SolidColorBrush x:Key="AgentBridgeSuccessBrush" Color="#6EE7A8" />
+            <SolidColorBrush x:Key="AgentBridgeWarningBrush" Color="#F59E0B" />
+            <SolidColorBrush x:Key="AgentBridgeDangerBrush" Color="#FF6B7A" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

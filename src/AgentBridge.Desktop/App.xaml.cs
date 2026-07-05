@@ -37,7 +37,7 @@ public partial class App : System.Windows.Application
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         ApplicationAccentColorManager.Apply(
-            System.Windows.Media.Color.FromRgb(0x8A, 0x7C, 0xFF),
+            System.Windows.Media.Color.FromRgb(0xF4, 0x7C, 0x20),
             ApplicationTheme.Dark,
             systemGlassColor: false,
             systemAccentColor: false);

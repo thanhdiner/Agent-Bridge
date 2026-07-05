@@ -34,6 +34,8 @@ public partial class MainWindow : FluentWindow
     {
         _supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
         InitializeComponent();
+        InitializeToolVisibilityUi();
+        InitializeRuntimeUi();
         WorkspaceList.ItemsSource = _workspaces;
         DefaultDeviceComboBox.ItemsSource = _deviceChoices;
         ConfigPathText.Text = _store.ConfigurationPath;
@@ -68,16 +70,32 @@ public partial class MainWindow : FluentWindow
     {
         OverviewPage.Visibility = Visibility.Visible;
         WorkspacePage.Visibility = Visibility.Collapsed;
+        if (_toolPage is not null)
+            _toolPage.Visibility = Visibility.Collapsed;
+        if (_runtimePage is not null)
+            _runtimePage.Visibility = Visibility.Collapsed;
         OverviewNavButton.Appearance = ControlAppearance.Primary;
         WorkspacesNavButton.Appearance = ControlAppearance.Transparent;
+        if (_toolsNavButton is not null)
+            _toolsNavButton.Appearance = ControlAppearance.Transparent;
+        if (_runtimeNavButton is not null)
+            _runtimeNavButton.Appearance = ControlAppearance.Transparent;
     }
 
     private void ShowWorkspaces()
     {
         OverviewPage.Visibility = Visibility.Collapsed;
         WorkspacePage.Visibility = Visibility.Visible;
+        if (_toolPage is not null)
+            _toolPage.Visibility = Visibility.Collapsed;
+        if (_runtimePage is not null)
+            _runtimePage.Visibility = Visibility.Collapsed;
         OverviewNavButton.Appearance = ControlAppearance.Transparent;
         WorkspacesNavButton.Appearance = ControlAppearance.Primary;
+        if (_toolsNavButton is not null)
+            _toolsNavButton.Appearance = ControlAppearance.Transparent;
+        if (_runtimeNavButton is not null)
+            _runtimeNavButton.Appearance = ControlAppearance.Transparent;
     }
 
     private async void RestartServices_Click(object sender, RoutedEventArgs e)
@@ -551,13 +569,13 @@ public partial class MainWindow : FluentWindow
 
     private void ApplySupervisorSnapshot(SupervisorSnapshot snapshot)
     {
-        GatewayStatusText.Text = snapshot.Gateway.Summary;
+        GatewayStatusText.Text = BuildServiceSummary(snapshot.Gateway, "Online");
         GatewayDetailText.Text = snapshot.Gateway.Detail;
         GatewayMetaText.Text = BuildProcessMeta(snapshot.Gateway);
-        AgentStatusText.Text = snapshot.Agent.Summary;
+        AgentStatusText.Text = BuildServiceSummary(snapshot.Agent, "Connected");
         AgentDetailText.Text = snapshot.Agent.Detail;
         AgentMetaText.Text = BuildProcessMeta(snapshot.Agent);
-        TunnelStatusText.Text = snapshot.Tunnel.Summary;
+        TunnelStatusText.Text = BuildServiceSummary(snapshot.Tunnel, "Running");
         TunnelDetailText.Text = snapshot.Tunnel.Detail;
         TunnelMetaText.Text = BuildProcessMeta(snapshot.Tunnel);
 
@@ -578,17 +596,17 @@ public partial class MainWindow : FluentWindow
         LogsDirectoryText.Text = snapshot.LogsDirectory;
         LastCheckedText.Text = snapshot.UpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 
-        if (snapshot.Gateway.State == ManagedServiceState.External
-            || snapshot.Agent.State == ManagedServiceState.External
-            || snapshot.Tunnel.State == ManagedServiceState.External)
-        {
-            OverallStatusText.Text = "External services detected";
-            OverallStatusDot.Fill = GetResourceBrush("AgentBridgeWarningBrush");
-        }
-        else if (snapshot.Gateway.IsHealthy && snapshot.Agent.IsHealthy && snapshot.Tunnel.IsHealthy)
+        if (snapshot.Gateway.IsHealthy && snapshot.Agent.IsHealthy && snapshot.Tunnel.IsHealthy)
         {
             OverallStatusText.Text = "All systems operational";
             OverallStatusDot.Fill = GetResourceBrush("AgentBridgeSuccessBrush");
+        }
+        else if (snapshot.Gateway.State == ManagedServiceState.External
+                 || snapshot.Agent.State == ManagedServiceState.External
+                 || snapshot.Tunnel.State == ManagedServiceState.External)
+        {
+            OverallStatusText.Text = "External services detected";
+            OverallStatusDot.Fill = GetResourceBrush("AgentBridgeWarningBrush");
         }
         else if (snapshot.Gateway.State == ManagedServiceState.Error
                  || snapshot.Agent.State == ManagedServiceState.Error
@@ -602,14 +620,24 @@ public partial class MainWindow : FluentWindow
             OverallStatusText.Text = "Starting services";
             OverallStatusDot.Fill = GetResourceBrush("AgentBridgeWarningBrush");
         }
+
+        UpdateSupervisorDependentPages();
     }
+
+    private void UpdateSupervisorDependentPages()
+    {
+        UpdateRuntimeProcessPageIfVisible();
+    }
+
+    private static string BuildServiceSummary(ManagedServiceStatus status, string healthySummary) =>
+        status.IsHealthy ? healthySummary : status.Summary;
 
     private static string BuildProcessMeta(ManagedServiceStatus status)
     {
         if (status.ProcessId is int processId)
         {
             return status.IsManaged
-                ? $"PID {processId} • Managed by AgentBridge"
+                ? $"Managed • PID {processId}"
                 : $"PID {processId}";
         }
 
@@ -669,5 +697,9 @@ public partial class MainWindow : FluentWindow
         _feedbackTimer.Stop();
         FeedbackInfoBar.IsOpen = false;
         OverviewInfoBar.IsOpen = false;
+        if (_toolInfoBar is not null)
+            _toolInfoBar.IsOpen = false;
+        if (_runtimeInfoBar is not null)
+            _runtimeInfoBar.IsOpen = false;
     }
 }

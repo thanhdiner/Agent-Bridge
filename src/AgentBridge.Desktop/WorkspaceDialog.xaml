@@ -104,8 +104,8 @@
                            Background="{StaticResource AgentBridgeAccentBrush}"
                            Foreground="White"
                            BorderBrush="{StaticResource AgentBridgeAccentBrush}"
-                           MouseOverBackground="#9A8FFF"
-                           PressedBackground="#7667E8"
+                           MouseOverBackground="#FF8A33"
+                           PressedBackground="#D96513"
                            Click="Save_Click" />
             </StackPanel>
         </Grid>

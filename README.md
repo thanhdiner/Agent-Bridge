@@ -33,8 +33,11 @@ The bridge is designed around explicit boundaries:
 | Text and native dialogs | Read or replace clipboard text, send guarded key chords, type text, and set paths in Open or Save dialogs | `clipboard_get`, `clipboard_set`, `ui_hotkey`, `ui_type_text`, `file_dialog_set_path` |
 | Files, workspaces, and Git | Discover portable workspace aliases, resolve relative paths, read, search, patch, copy, move, delete, inspect Git state and history, and verify projects inside configured roots | `workspace_list`, `workspace_resolve`, `fs_read`, `fs_search_context`, `fs_batch_patch`, `git_status`, `git_diff`, `git_log`, `project_verify` |
 | PowerShell | Run bounded PowerShell 7 commands, start observable sessions, poll status, and cancel process trees | `powershell_exec`, `powershell_start`, `powershell_status`, `powershell_cancel` |
+| Chrome DevTools MCP | Attach to the currently opened Chrome profile through `chrome-devtools-mcp --autoConnect`, cache the discovered tools, and reuse one persistent MCP session | `chrome-devtools.*` |
 
 The Gateway currently registers the complete tool surface from `src/LocalMcp.Gateway/Mcp/`. Aliases such as `ui_get_text` and `ui_hotkey` keep the public API readable while reusing the existing execution core.
+
+Chrome DevTools tools are proxied from the external `chrome-devtools` MCP server and are namespaced as `chrome-devtools.<tool>` to avoid conflicts with local AgentBridge tools.
 
 ## Requirements
 
@@ -77,6 +80,54 @@ dotnet run --project .\src\LocalMcp.Gateway -c Release --no-build
 ```
 
 The default development profile listens on `http://localhost:5227`.
+
+### ChatGPT custom connectors
+
+AgentBridge exposes tools through two MCP connection shards so each ChatGPT refresh receives a smaller `tools/list` response. Add both custom connectors in ChatGPT:
+
+| Connector name | URL |
+|---|---|
+| AgentBridge A | `http://localhost:5227/mcp/a` |
+| AgentBridge B | `http://localhost:5227/mcp/b` |
+
+Use the Desktop app's **Tools** screen to assign enabled tools to Connection A, Connection B, or None. Each connection can expose up to 150 enabled tools; the combined total across both connections can be higher.
+
+### Chrome DevTools MCP for the current Chrome profile
+
+AgentBridge includes an external MCP client for Chrome DevTools. The default configuration starts one persistent `chrome-devtools-mcp` process and connects with `--autoConnect`:
+
+```json
+{
+  "ExternalMcp": {
+    "Servers": {
+      "chrome-devtools": {
+        "Command": "cmd",
+        "Args": ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--autoConnect"]
+      }
+    }
+  }
+}
+```
+
+Setup:
+
+1. Open Chrome with the target profile.
+2. Go to `chrome://inspect/#remote-debugging`.
+3. Enable **Allow remote debugging for this browser instance**.
+4. Start the Gateway.
+5. When Chrome shows the remote debugging permission dialog, click **Allow**.
+
+After permission is allowed, AgentBridge keeps the same MCP session alive and reuses it for Chrome actions. It does not spawn `chrome-devtools-mcp` per tool call and does not reconnect per action. If the MCP process crashes or disconnects, AgentBridge restarts it on the next Chrome tool call; Chrome may ask for permission again.
+
+Health check:
+
+```powershell
+Invoke-RestMethod http://localhost:5227/healthz/chrome-devtools
+```
+
+The health check verifies that Node and `npx` are available, starts the configured Chrome DevTools MCP server if needed, initializes MCP, and runs `list_tools`. It reports clear setup errors for missing Node or `npx`, Chrome not running, remote debugging not enabled, permission denial, timeout, and MCP process crashes.
+
+Security note: `--autoConnect` can access tabs and data in the current Chrome profile. This is the default because it is useful for working with your active browser session. A safer isolated-profile mode can be added later for workflows that do not need current-profile tabs, cookies, or logged-in state.
 
 ### 4. Start the Windows Agent
 
@@ -345,6 +396,17 @@ pwsh --version
 ```
 
 Also confirm the Agent is not running elevated.
+
+### Chrome DevTools tools do not appear or fail to connect
+
+Confirm Node.js and `npx` are on PATH:
+
+```powershell
+node --version
+npx --version
+```
+
+Then open Chrome with the target profile, visit `chrome://inspect/#remote-debugging`, enable **Allow remote debugging for this browser instance**, start the Gateway, and accept Chrome's permission prompt. Use `http://localhost:5227/healthz/chrome-devtools` for a structured status report. If AgentBridge reports that the MCP server restarted, Chrome may show the permission prompt again.
 
 ### A UI control cannot be found
 

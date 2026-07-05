@@ -32,6 +32,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
     private readonly SemaphoreSlim _gatewayLogGate = new(1, 1);
     private readonly SemaphoreSlim _agentLogGate = new(1, 1);
     private readonly SemaphoreSlim _tunnelLogGate = new(1, 1);
+    private readonly ChildProcessJob _childProcessJob = ChildProcessJob.Create($"AgentBridge.Desktop.Children.{Environment.ProcessId}");
     private readonly string _logsDirectory;
     private readonly string _gatewayUrl;
     private readonly string _tunnelName;
@@ -251,6 +252,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         _gatewayLogGate.Dispose();
         _agentLogGate.Dispose();
         _tunnelLogGate.Dispose();
+        _childProcessJob.Dispose();
     }
 
     private async Task MonitorLoopAsync(CancellationToken cancellationToken)
@@ -736,6 +738,15 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 
         if (!process.Start())
             throw new InvalidOperationException($"Failed to start {target.DisplayPath}.");
+
+        if (!_childProcessJob.TryAssign(process, out var assignmentError))
+        {
+            _ = AppendServiceLogAsync(
+                logPath,
+                "WARN",
+                $"Could not attach PID {process.Id} to AgentBridge child process job: {assignmentError}",
+                logGate);
+        }
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();

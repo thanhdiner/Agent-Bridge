@@ -1,14 +1,19 @@
 using LocalMcp.Gateway;
 using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Hubs;
+using LocalMcp.Gateway.Mcp;
 using LocalMcp.Gateway.Security;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add Gateway services
 builder.Services.AddGatewayServices(builder.Configuration);
 builder.Services.AddHostedService<ManagedRuntimeControlService>();
+builder.Services.AddHttpContextAccessor();
+// Visibility manager.
 
 // Add SignalR
 builder.Services.AddSignalR(options =>
@@ -20,7 +25,104 @@ builder.Services.AddSignalR(options =>
 // Configure MCP Server
 builder.Services.AddMcpServer()
     .WithHttpTransport()
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly()
+    .WithListToolsHandler(async (context, cancellationToken) =>
+    {
+        await Task.CompletedTask;
+        var toolCollection = context.Server.ServerOptions!.ToolCollection!;
+        var services = context.Server.Services ?? throw new InvalidOperationException("MCP server services are unavailable.");
+        var localToolCache = services.GetRequiredService<LocalToolPrimitiveCache>();
+        var localPrimitives = toolCollection.ToArray();
+        if (localPrimitives.Length > 0)
+        {
+            localToolCache.Remember(localPrimitives);
+        }
+
+        var localTools = localToolCache.ListProtocolTools();
+        var router = services.GetRequiredService<IExternalMcpRouter>();
+        var visibilityStore = services.GetRequiredService<ToolVisibilityStore>();
+        var connection = ResolveMcpConnection(services);
+        var externalSnapshot = router.GetCatalogSnapshot();
+        var externalTools = externalSnapshot.Tools.ToList();
+        var filteredTools = McpShardRuntime.ExportToolsForConnection(localTools, externalTools, visibilityStore, connection);
+        var visibleLocalToolCount = filteredTools.Count(tool => !router.IsExternalToolName(tool.Name));
+        var visibleExternalToolCount = filteredTools.Count(tool => router.IsExternalToolName(tool.Name));
+        var logger = services.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("LocalMcp.Gateway.Mcp.CompositeTools");
+
+        visibilityStore.RememberCatalog(localTools, externalTools, externalSnapshot.Servers);
+        ToolRuntimeHelpers.SuppressSdkLocalToolAppend(toolCollection, logger);
+
+        logger.LogInformation(
+            "Exporting MCP tools for connection {Connection}: local={LocalToolCount}, externalServers={ExternalServerCount}, external={ExternalToolCount}, totalAvailable={TotalToolCount}, shardExported={ShardExportedToolCount}, localVisible={VisibleLocalToolCount}, externalVisible={VisibleExternalToolCount}",
+            connection,
+            localTools.Count,
+            externalSnapshot.Servers.Count,
+            externalTools.Count,
+            localTools.Count + externalTools.Count,
+            filteredTools.Count,
+            visibleLocalToolCount,
+            visibleExternalToolCount);
+
+        return new ListToolsResult
+        {
+            Tools = filteredTools.ToList()
+        };
+    })
+    .WithCallToolHandler(async (context, cancellationToken) =>
+    {
+        var services = context.Server.Services ?? throw new InvalidOperationException("MCP server services are unavailable.");
+        var router = services.GetRequiredService<IExternalMcpRouter>();
+        var requestedName = context.Params.Name;
+        if (string.IsNullOrWhiteSpace(requestedName))
+        {
+            return new CallToolResult
+            {
+                IsError = true,
+                Content = [new TextContentBlock { Text = "Error [INVALID_REQUEST]: Tool name is required." }]
+            };
+        }
+
+        async Task<CallToolResult> InvokeLocalToolAsync(CallToolRequestParams request, CancellationToken token)
+        {
+            var localToolCache = services.GetRequiredService<LocalToolPrimitiveCache>();
+            if (localToolCache.TryGetPrimitive(request.Name, out var cachedLocalTool) && cachedLocalTool is not null)
+            {
+                return await ToolRuntimeHelpers.InvokeLocalPrimitiveAsync(cachedLocalTool, context, token);
+            }
+
+            if (context.Server.ServerOptions!.ToolCollection!.TryGetPrimitive(request.Name, out var localTool))
+            {
+                if (localTool is not null)
+                {
+                    localToolCache.Remember(new object[] { localTool });
+                    return await ToolRuntimeHelpers.InvokeLocalPrimitiveAsync(localTool, context, token);
+                }
+            }
+
+            return new CallToolResult
+            {
+                IsError = true,
+                Content =
+                [
+                    new TextContentBlock
+                    {
+                        Text = $"Error [UNKNOWN_TOOL]: Tool '{request.Name}' is not registered as a local or external MCP tool."
+                    }
+                ]
+            };
+        }
+
+        var visibilityStore = services.GetRequiredService<ToolVisibilityStore>();
+        var connection = ResolveMcpConnection(services);
+        return await McpShardRuntime.CallToolAsync(
+            context.Params,
+            connection,
+            visibilityStore,
+            router,
+            InvokeLocalToolAsync,
+            cancellationToken);
+    });
 
 var app = builder.Build();
 var deviceActivationStore = app.Services.GetRequiredService<DeviceActivationStore>();
@@ -105,6 +207,57 @@ app.MapGet("/healthz/agent/{deviceId}", (
         deviceId = normalizedDeviceId,
         online = registry.GetConnectionId(normalizedDeviceId) is not null
     });
+}).AllowAnonymous();
+
+app.MapGet("/healthz/chrome-devtools", async (
+    IExternalMcpRouter router,
+    CancellationToken cancellationToken) =>
+{
+    var report = await router.CheckHealthAsync(cancellationToken);
+    return Results.Json(report);
+}).AllowAnonymous();
+
+app.MapGet("/api/tools/visibility", async (
+    ToolVisibilityStore visibilityStore,
+    LocalToolPrimitiveCache localToolCache,
+    IExternalMcpRouter router,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    await Task.CompletedTask;
+    var logger = loggerFactory.CreateLogger("LocalMcp.Gateway.Mcp.ToolVisibility");
+    var localTools = localToolCache.ListProtocolTools();
+    if (localTools.Count == 0)
+        localTools = LocalToolCatalog.DiscoverFromAssembly(typeof(Program).Assembly);
+    var externalSnapshot = router.GetCatalogSnapshot();
+    visibilityStore.RememberCatalog(localTools, externalSnapshot.Tools, externalSnapshot.Servers);
+    logger.LogInformation(
+        "Tool Visibility catalog refreshed: local={LocalToolCount}, externalServers={ExternalServerCount}, external={ExternalToolCount}, totalAvailable={TotalAvailableToolCount}",
+        localTools.Count,
+        externalSnapshot.Servers.Count,
+        externalSnapshot.Tools.Count,
+        localTools.Count + externalSnapshot.Tools.Count);
+    return Results.Json(visibilityStore.GetSnapshot());
+}).AllowAnonymous();
+
+app.MapPut("/api/tools/visibility", async (
+    ToolVisibilityUpdateRequest request,
+    ToolVisibilityStore visibilityStore,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var snapshot = await visibilityStore.SaveAsync(request, cancellationToken);
+        return Results.Json(snapshot);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new
+        {
+            error = "TOOL_CONNECTION_LIMIT_EXCEEDED",
+            message = ex.Message
+        });
+    }
 }).AllowAnonymous();
 
 app.MapGet("/api/devices", (
@@ -262,14 +415,30 @@ app.MapGet("/api/device-activation/current", (HttpContext httpContext) =>
 // Map SignalR Hub
 app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
 
-// Map MCP endpoints (Streamable HTTP Transport — default path: POST /)
-app.MapMcp().RequireAuthorization("McpAuthenticatedPolicy");
+// Map MCP endpoints (Streamable HTTP Transport)
+// Keep the legacy MCP path as Connection A so older ChatGPT connectors fail less abruptly.
+app.MapMcp("/mcp").RequireAuthorization("McpAuthenticatedPolicy");
+app.MapMcp("/mcp/a").RequireAuthorization("McpAuthenticatedPolicy");
+app.MapMcp("/mcp/b").RequireAuthorization("McpAuthenticatedPolicy");
 
 static DateTimeOffset? TryParseDateTimeOffset(string? value) =>
     DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+
+static string ResolveMcpConnection(IServiceProvider services)
+{
+    var path = services.GetRequiredService<IHttpContextAccessor>().HttpContext?.Request.Path.Value ?? string.Empty;
+    return path.StartsWith("/mcp/b", StringComparison.OrdinalIgnoreCase)
+        ? ToolVisibilityStore.ConnectionB
+        : ToolVisibilityStore.ConnectionA;
+}
 
 app.Run();
 
 // Make the implicit Program class visible to integration tests
 public partial class Program { }
+
+
+
+
+
 
