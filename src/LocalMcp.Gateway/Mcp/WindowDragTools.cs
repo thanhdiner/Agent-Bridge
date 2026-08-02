@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
 using LocalMcp.Contracts.Commands;
@@ -13,7 +14,7 @@ public sealed partial class WindowCoordinateTools
     [McpServerTool(Name = "window_drag", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Drags between two validated points relative to a Windows window. Requires dev:execute scope.")]
     public async Task<CallToolResult> DragWindowAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle")] string windowHandle,
         [Description("Horizontal start coordinate relative to the window")] int startX,
         [Description("Vertical start coordinate relative to the window")] int startY,
@@ -27,8 +28,6 @@ public sealed partial class WindowCoordinateTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (string.IsNullOrWhiteSpace(windowHandle) || windowHandle.Length > 32 || windowHandle.Any(char.IsControl))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (startX is < 0 or > 100000 || startY is < 0 or > 100000)
@@ -54,7 +53,7 @@ public sealed partial class WindowCoordinateTools
         var command = new WindowDragCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             StartX = startX,
@@ -89,3 +88,4 @@ public sealed partial class WindowCoordinateTools
         }
     }
 }
+

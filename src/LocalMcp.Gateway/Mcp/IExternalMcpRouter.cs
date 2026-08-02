@@ -14,6 +14,10 @@ public interface IExternalMcpRouter
 
     Task<ExternalMcpCatalogSnapshot> RefreshCatalogAsync(CancellationToken cancellationToken);
 
+    Task<ExternalMcpCatalogSnapshot> WarmupServerAsync(string serverName, CancellationToken cancellationToken);
+
+    Task<ExternalMcpCatalogSnapshot> RestartServerAsync(string serverName, CancellationToken cancellationToken);
+
     ExternalMcpCatalogSnapshot GetCatalogSnapshot();
 
     Task<CallToolResult> CallToolAsync(CallToolRequestParams request, CancellationToken cancellationToken);

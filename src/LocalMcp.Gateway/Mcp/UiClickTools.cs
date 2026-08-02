@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class UiClickTools
         OpenWorld = false),
      Description("Activates one Windows UI Automation control selected by automationId or exact name. Requires dev:execute scope.")]
     public async Task<CallToolResult> ClickUiAsync(
-        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle")] string windowHandle,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
         [Description("Exact control name; either automationId or name is required")] string? name = null,
@@ -118,3 +119,4 @@ public sealed class UiClickTools
             IsError = true
         };
 }
+

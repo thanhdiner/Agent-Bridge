@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -43,7 +44,7 @@ public sealed class ProcessWaitTools
         OpenWorld = false),
      Description("Waits until a Windows process appears or disappears. Select by PID, process name, or both. Requires dev:execute scope.")]
     public async Task<CallToolResult> WaitProcessAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Optional exact process ID greater than zero")] int? processId = null,
         [Description("Optional exact process name, case-insensitive; .exe suffix is ignored")] string? processName = null,
         [Description("Zero-based index when multiple live processes match processName (default: 0, hard limit: 1000)")] int occurrenceIndex = 0,
@@ -53,8 +54,6 @@ public sealed class ProcessWaitTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!processId.HasValue && string.IsNullOrWhiteSpace(processName))
             return Error("INVALID_REQUEST", "processId or processName is required.");
         if (processId is <= 0)
@@ -78,7 +77,7 @@ public sealed class ProcessWaitTools
         var command = new ProcessWaitCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             ProcessId = processId,
             ProcessName = processName,
@@ -130,3 +129,4 @@ public sealed class ProcessWaitTools
         IsError = true
     };
 }
+

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class UiSelectTools
         OpenWorld = false),
      Description("Selects, adds, or removes one Windows UI Automation selection item, scrolls it into view when supported, and verifies the resulting selected state. Requires dev:execute scope.")]
     public async Task<CallToolResult> SelectAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Selection action: select, add, or remove (default: select)")] string action = UiSelectActions.Select,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
@@ -51,8 +52,6 @@ public sealed class UiSelectTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId) && string.IsNullOrWhiteSpace(name))
@@ -67,7 +66,7 @@ public sealed class UiSelectTools
         var command = new UiSelectCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             Action = normalizedAction,
@@ -123,3 +122,4 @@ public sealed class UiSelectTools
         IsError = true
     };
 }
+

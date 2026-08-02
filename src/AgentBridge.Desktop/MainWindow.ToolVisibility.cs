@@ -89,6 +89,7 @@ public partial class MainWindow
         };
         AutomationProperties.SetAutomationId(_toolsNavButton, "ToolsNavButton");
         _toolsNavButton.Click += ToolsNav_Click;
+        ApplyNavButtonStyle(_toolsNavButton, false);
         navPanel.Children.Add(_toolsNavButton);
 
         _toolPage = CreateToolVisibilityPage();
@@ -158,7 +159,7 @@ public partial class MainWindow
             Background = GetResourceBrush("AgentBridgeSurfaceBrush"),
             BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9),
+            CornerRadius = new CornerRadius(5),
             Padding = new Thickness(11, 7, 11, 7),
             Child = statusStack
         };
@@ -180,7 +181,7 @@ public partial class MainWindow
             Background = GetResourceBrush("AgentBridgeSurfaceBrush"),
             BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(11),
+            CornerRadius = new CornerRadius(6),
             Padding = new Thickness(17)
         };
         Grid.SetRow(toolPanelBorder, 4);
@@ -311,12 +312,10 @@ public partial class MainWindow
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Collapsed;
 
-        OverviewNavButton.Appearance = UiControlAppearance.Transparent;
-        WorkspacesNavButton.Appearance = UiControlAppearance.Transparent;
-        if (_toolsNavButton is not null)
-            _toolsNavButton.Appearance = UiControlAppearance.Primary;
-        if (_runtimeNavButton is not null)
-            _runtimeNavButton.Appearance = UiControlAppearance.Transparent;
+        ApplyNavButtonStyle(OverviewNavButton, false);
+        ApplyNavButtonStyle(WorkspacesNavButton, false);
+        ApplyNavButtonStyle(_toolsNavButton, true);
+        ApplyNavButtonStyle(_runtimeNavButton, false);
     }
 
     private async void ToolRefresh_Click(object sender, RoutedEventArgs e) =>
@@ -365,6 +364,94 @@ public partial class MainWindow
 
     private async void ToolApplyRestart_Click(object sender, RoutedEventArgs e) =>
         await ApplyToolVisibilityAsync(restartServices: true);
+
+    private async Task ExecuteExternalMcpServerActionAsync(string serverName, string action)
+    {
+        try
+        {
+            SetToolVisibilityBusy(true);
+            var gatewayUrl = string.IsNullOrWhiteSpace(_supervisor.Current.GatewayUrl)
+                ? "http://127.0.0.1:5227"
+                : _supervisor.Current.GatewayUrl.TrimEnd('/');
+            var endpoint = $"{gatewayUrl}/api/external-mcp/{Uri.EscapeDataString(serverName)}/{action}";
+            using var response = await _toolVisibilityHttpClient.PostAsync(endpoint, content: null);
+            if (!response.IsSuccessStatusCode)
+            {
+                var message = await ReadToolVisibilityErrorMessageAsync(
+                    response,
+                    $"Gateway rejected {action} for {serverName} with HTTP {(int)response.StatusCode}.");
+                throw new InvalidOperationException(message);
+            }
+
+            var serverStatus = await ReadExternalServerActionResponseAsync(response);
+            await RefreshToolVisibilityAsync(showErrors: true);
+
+            var normalizedStatus = NormalizeExternalServerStatus(serverStatus?.Status);
+            if (normalizedStatus is "failed" or "stale_cached")
+            {
+                ShowToolVisibilityFeedback(
+                    $"Could not {action} {serverName}",
+                    serverStatus?.Message ?? $"{serverName} did not return a healthy tools/list catalog.",
+                    normalizedStatus == "failed" ? UiInfoBarSeverity.Error : UiInfoBarSeverity.Warning,
+                    autoClose: false);
+                return;
+            }
+
+            ShowToolVisibilityFeedback(
+                action == "restart" ? "External MCP server restarted" : "External MCP server discovered",
+                serverStatus?.Message ?? $"{serverName} returned an updated catalog status.",
+                UiInfoBarSeverity.Success,
+                autoClose: true);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            await DesktopLog.WriteAsync($"External MCP server {action} failed.", ex);
+            ShowToolVisibilityFeedback(
+                $"Could not {action} {serverName}",
+                ex.Message,
+                UiInfoBarSeverity.Error,
+                autoClose: false);
+        }
+        finally
+        {
+            SetToolVisibilityBusy(false);
+        }
+    }
+
+    private static async Task<string> ReadToolVisibilityErrorMessageAsync(HttpResponseMessage response, string fallback)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(body))
+            return fallback;
+
+        try
+        {
+            var error = JsonSerializer.Deserialize<ToolVisibilityErrorResponse>(body, ToolVisibilityJsonOptions);
+            return string.IsNullOrWhiteSpace(error?.Message)
+                ? fallback
+                : error.Message;
+        }
+        catch (JsonException)
+        {
+            return body.Trim();
+        }
+    }
+
+    private static async Task<ToolVisibilityExternalServer?> ReadExternalServerActionResponseAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<ToolVisibilityExternalServer>(body, ToolVisibilityJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private async Task RefreshToolVisibilityAsync(bool showErrors)
     {
@@ -423,7 +510,7 @@ public partial class MainWindow
         {
             BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(14),
             Background = GetResourceBrush("AgentBridgeSidebarBrush"),
             Child = new TextBlock
@@ -484,7 +571,7 @@ public partial class MainWindow
             {
                 BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
+                CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(12),
                 Margin = new Thickness(0, 0, 0, 10),
                 Background = GetResourceBrush("AgentBridgeSidebarBrush")
@@ -664,7 +751,7 @@ public partial class MainWindow
         {
             BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(12),
             Margin = new Thickness(0, 0, 0, 10),
             Background = GetResourceBrush("AgentBridgeSidebarBrush")
@@ -676,8 +763,9 @@ public partial class MainWindow
             Visibility = Visibility.Collapsed,
             Margin = new Thickness(28, 7, 0, 0)
         };
-        var okCount = servers.Count(server => string.Equals(server.Status, "ok", StringComparison.OrdinalIgnoreCase));
-        var errorCount = servers.Count - okCount;
+        var runningCount = servers.Count(server => NormalizeExternalServerStatus(server.Status) == "running");
+        var staleCount = servers.Count(server => NormalizeExternalServerStatus(server.Status) == "stale_cached");
+        var failedCount = servers.Count(server => NormalizeExternalServerStatus(server.Status) == "failed");
         var header = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -693,9 +781,9 @@ public partial class MainWindow
             Padding = new Thickness(0),
             Margin = new Thickness(0, 0, 4, 0)
         };
-        var title = errorCount == 0
-            ? $"External MCP servers: {okCount} ok"
-            : $"External MCP servers: {okCount} ok, {errorCount} error";
+        var title = failedCount == 0
+            ? $"External MCP servers: {runningCount} running, {staleCount} cached"
+            : $"External MCP servers: {runningCount} running, {staleCount} cached, {failedCount} failed";
         header.Children.Add(expandButton);
         header.Children.Add(new TextBlock
         {
@@ -716,22 +804,78 @@ public partial class MainWindow
 
         foreach (var server in servers.OrderBy(server => server.Name, StringComparer.OrdinalIgnoreCase))
         {
-            var statusBrush = string.Equals(server.Status, "ok", StringComparison.OrdinalIgnoreCase)
-                ? "AgentBridgeSuccessBrush"
-                : "AgentBridgeDangerBrush";
-            details.Children.Add(new TextBlock
+            var displayStatus = NormalizeExternalServerStatus(server.Status);
+            var statusBrush = ResolveExternalServerStatusBrush(displayStatus);
+            var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            row.Children.Add(new TextBlock
             {
-                Text = $"{server.Name}: {server.Status}, {server.ToolCount} tools - {server.Message}",
+                Text = $"{server.Name}: {displayStatus}, {server.ToolCount} tools - {server.Message}",
                 Foreground = GetResourceBrush(statusBrush),
                 FontSize = 11,
-                Margin = new Thickness(0, 4, 0, 0),
                 TextWrapping = TextWrapping.Wrap
             });
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(10, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            var canAct = displayStatus != "disabled";
+            var discoverButton = CreateToolButton("Discover", async (_, _) => await ExecuteExternalMcpServerActionAsync(server.Name, "discover"), UiControlAppearance.Secondary);
+            var restartButton = CreateToolButton("Restart", async (_, _) => await ExecuteExternalMcpServerActionAsync(server.Name, "restart"), UiControlAppearance.Secondary);
+            discoverButton.IsEnabled = canAct;
+            restartButton.IsEnabled = canAct;
+            discoverButton.ToolTip = canAct ? $"Run tools/list for {server.Name}" : "Enable this server in external MCP configuration first.";
+            restartButton.ToolTip = canAct ? $"Restart {server.Name} and run tools/list" : "Enable this server in external MCP configuration first.";
+            actions.Children.Add(discoverButton);
+            actions.Children.Add(restartButton);
+            Grid.SetColumn(actions, 1);
+            row.Children.Add(actions);
+            details.Children.Add(row);
         }
         stack.Children.Add(details);
 
         border.Child = stack;
         return border;
+    }
+
+    private static string NormalizeExternalServerStatus(string? status)
+    {
+        if (string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase))
+            return "running";
+
+        if (string.Equals(status, "error", StringComparison.OrdinalIgnoreCase))
+            return "failed";
+
+        if (string.Equals(status, "cached", StringComparison.OrdinalIgnoreCase))
+            return "stale_cached";
+
+        if (string.Equals(status, "offline", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase))
+            return "not_discovered";
+
+        return string.IsNullOrWhiteSpace(status)
+            ? "not_discovered"
+            : status.Trim().ToLowerInvariant();
+    }
+
+    private static string ResolveExternalServerStatusBrush(string? status)
+    {
+        var normalized = NormalizeExternalServerStatus(status);
+        if (normalized == "running")
+            return "AgentBridgeSuccessBrush";
+
+        if (normalized == "failed")
+            return "AgentBridgeDangerBrush";
+
+        if (normalized == "disabled")
+            return "AgentBridgeMutedBrush";
+
+        return "AgentBridgeWarningBrush";
     }
 
     private TextBlock CreateToolLabel(string text, string brushKey) => new()

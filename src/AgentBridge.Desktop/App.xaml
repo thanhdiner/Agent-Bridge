@@ -9,18 +9,115 @@
                 <ui:ThemesDictionary Theme="Dark" />
                 <ui:ControlsDictionary />
             </ResourceDictionary.MergedDictionaries>
-            <SolidColorBrush x:Key="AgentBridgeBackgroundBrush" Color="#151515" />
-            <SolidColorBrush x:Key="AgentBridgeSidebarBrush" Color="#1F1F1F" />
-            <SolidColorBrush x:Key="AgentBridgeSurfaceBrush" Color="#202020" />
-            <SolidColorBrush x:Key="AgentBridgeBorderBrush" Color="#333333" />
+            <SolidColorBrush x:Key="AgentBridgeBackgroundBrush" Color="#121212" />
+            <SolidColorBrush x:Key="AgentBridgeSidebarBrush" Color="#1A1A1A" />
+            <SolidColorBrush x:Key="AgentBridgeSurfaceBrush" Color="#121212" />
+            <SolidColorBrush x:Key="AgentBridgeBorderBrush" Color="#282828" />
             <SolidColorBrush x:Key="AgentBridgeAccentBrush" Color="#F47C20" />
-            <SolidColorBrush x:Key="AgentBridgeAccentSoftBrush" Color="#2A2A2A" />
-            <SolidColorBrush x:Key="AgentBridgeTextBrush" Color="#F2F2F2" />
-            <SolidColorBrush x:Key="AgentBridgeMutedBrush" Color="#A3A3A3" />
-            <SolidColorBrush x:Key="AgentBridgeSubtleBrush" Color="#737373" />
-            <SolidColorBrush x:Key="AgentBridgeSuccessBrush" Color="#6EE7A8" />
+            <SolidColorBrush x:Key="AgentBridgeAccentSoftBrush" Color="#181818" />
+            <SolidColorBrush x:Key="SystemAccentColorPrimaryBrush" Color="#1E1E1E" />
+            <SolidColorBrush x:Key="SystemAccentColorSecondaryBrush" Color="#242424" />
+            <SolidColorBrush x:Key="SystemAccentColorTertiaryBrush" Color="#2A2A2A" />
+
+            <!-- WPF UI Internal Color Overrides -->
+            <Color x:Key="CardBackgroundFillColorDefault">#121212</Color>
+            <Color x:Key="CardBackgroundFillColorSecondary">#121212</Color>
+            <Color x:Key="CardBackgroundFillColorTertiary">#121212</Color>
+            <Color x:Key="LayerFillColorDefault">#121212</Color>
+            <Color x:Key="LayerFillColorAlt">#121212</Color>
+            <Color x:Key="LayerOnAcrylicFillColorDefault">#121212</Color>
+            <Color x:Key="SolidBackgroundFillColorBase">#121212</Color>
+            <Color x:Key="SolidBackgroundFillColorSecondary">#121212</Color>
+            <Color x:Key="SolidBackgroundFillColorTertiary">#121212</Color>
+            <Color x:Key="ControlFillColorDefault">#121212</Color>
+            <Color x:Key="ControlFillColorSecondary">#181818</Color>
+            <Color x:Key="ControlFillColorTertiary">#202020</Color>
+            <Color x:Key="SubtleFillColorSecondary">#181818</Color>
+            <Color x:Key="SubtleFillColorTertiary">#202020</Color>
+            <Color x:Key="CardStrokeColorDefault">#282828</Color>
+            <Color x:Key="CardStrokeColorDefaultSolid">#282828</Color>
+
+            <!-- WPF UI Internal Brush Overrides -->
+            <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#121212" />
+            <SolidColorBrush x:Key="CardBackgroundFillColorSecondaryBrush" Color="#121212" />
+            <SolidColorBrush x:Key="CardBackgroundFillColorTertiaryBrush" Color="#121212" />
+            <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="#121212" />
+            <SolidColorBrush x:Key="LayerFillColorAltBrush" Color="#121212" />
+            <SolidColorBrush x:Key="LayerOnAcrylicFillColorDefaultBrush" Color="#121212" />
+            <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#121212" />
+            <SolidColorBrush x:Key="SolidBackgroundFillColorSecondaryBrush" Color="#121212" />
+            <SolidColorBrush x:Key="SolidBackgroundFillColorTertiaryBrush" Color="#121212" />
+            <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#121212" />
+            <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#181818" />
+            <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#202020" />
+            <SolidColorBrush x:Key="SubtleFillColorSecondaryBrush" Color="#181818" />
+            <SolidColorBrush x:Key="SubtleFillColorTertiaryBrush" Color="#202020" />
+            <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#282828" />
+            <SolidColorBrush x:Key="AgentBridgeTextBrush" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="AgentBridgeMutedBrush" Color="#E4E4E7" />
+            <SolidColorBrush x:Key="AgentBridgeSubtleBrush" Color="#C4C4CC" />
+            <SolidColorBrush x:Key="AgentBridgeSuccessBrush" Color="#A7F3D0" />
             <SolidColorBrush x:Key="AgentBridgeWarningBrush" Color="#F59E0B" />
             <SolidColorBrush x:Key="AgentBridgeDangerBrush" Color="#FF6B7A" />
+
+            <!-- Instant Display Styles: Disable Fade/Slide Animations -->
+            <Style TargetType="Popup">
+                <Setter Property="PopupAnimation" Value="None" />
+            </Style>
+
+            <!-- Global Crisp Inter Typography -->
+            <Style TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Inter, Segoe UI, sans-serif" />
+                <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+                <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
+            </Style>
+
+            <!-- Custom ComboBoxItem with Orange Pill Indicator (attachment_3d26d0_image.png) -->
+            <Style TargetType="ComboBoxItem">
+                <Setter Property="FontFamily" Value="Inter, Segoe UI, sans-serif" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="#F2F2F2" />
+                <Setter Property="Padding" Value="10,8,10,8" />
+                <Setter Property="Margin" Value="2,2" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ComboBoxItem">
+                            <Border x:Name="ItemBorder"
+                                    Background="#1A1A1A"
+                                    BorderThickness="0"
+                                    CornerRadius="3"
+                                    Padding="{TemplateBinding Padding}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border x:Name="ActivePill"
+                                            Grid.Column="0"
+                                            Width="3"
+                                            Height="14"
+                                            CornerRadius="1"
+                                            Background="#F47C20"
+                                            Margin="0,0,8,0"
+                                            Visibility="Collapsed" />
+                                    <ContentPresenter Grid.Column="1"
+                                                      VerticalAlignment="Center"
+                                                      HorizontalAlignment="Left" />
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ItemBorder" Property="Background" Value="#262626" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="ItemBorder" Property="Background" Value="#2D2D2D" />
+                                    <Setter TargetName="ActivePill" Property="Visibility" Value="Visible" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

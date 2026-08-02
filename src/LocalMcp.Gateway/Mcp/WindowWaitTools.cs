@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -42,7 +43,7 @@ public sealed class WindowWaitTools
         OpenWorld = false),
      Description("Waits until a top-level Windows window appears, disappears, becomes foreground, or matches a title. Select by handle, PID, process name, class name, exact title, or title substring. Requires dev:execute scope.")]
     public async Task<CallToolResult> WaitWindowAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Optional native window handle as a decimal string or 0x-prefixed hexadecimal string")] string? windowHandle = null,
         [Description("Optional exact process ID greater than zero")] int? processId = null,
         [Description("Optional exact process name, case-insensitive; .exe suffix is ignored")] string? processName = null,
@@ -58,8 +59,6 @@ public sealed class WindowWaitTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
 
         var hasSelector = !string.IsNullOrWhiteSpace(windowHandle)
             || processId.HasValue
@@ -96,7 +95,7 @@ public sealed class WindowWaitTools
         var command = new WindowWaitCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             ProcessId = processId,
@@ -164,3 +163,4 @@ public sealed class WindowWaitTools
             IsError = true
         };
 }
+

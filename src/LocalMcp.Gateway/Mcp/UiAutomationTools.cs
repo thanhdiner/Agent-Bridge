@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class UiAutomationTools
         OpenWorld = false),
      Description("Lists bounded top-level Windows windows and returns title, process name, PID, native handle, class name, bounds, visibility, enabled, minimized, maximized, foreground, and cloaked states. Foreground window is returned first. Requires dev:execute scope.")]
     public async Task<CallToolResult> ListWindowsAsync(
-        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Whether to include invisible or cloaked top-level windows (default: false)")] bool includeInvisible = false,
         [Description("Whether to include windows with an empty title (default: false)")] bool includeUntitled = false,
         [Description("Maximum windows returned (default: 100, hard limit: 500)")] int maxWindows = 100)
@@ -94,7 +95,7 @@ public sealed class UiAutomationTools
         OpenWorld = false),
      Description("Searches a bounded Windows UI Automation tree for matching controls. automationId and controlType are exact case-insensitive matches; nameContains is a case-insensitive substring. Returns compact control metadata, supported patterns, and occurrenceIndex for follow-up UI actions. Requires dev:execute scope.")]
     public async Task<CallToolResult> FindUiAsync(
-        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Optional exact automationId match")] string? automationId = null,
         [Description("Optional case-insensitive substring of the control name")] string? nameContains = null,
@@ -164,7 +165,7 @@ public sealed class UiAutomationTools
         OpenWorld = false),
      Description("Reads a bounded Windows UI Automation control tree for one live window handle. Returns each control's name, automationId, controlType, bounds, enabled state, and a bounded value when supported. Password values are always redacted. Requires dev:execute scope.")]
     public async Task<CallToolResult> GetUiTreeAsync(
-        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Maximum descendant depth from the window root (default: 6, hard limit: 20)")] int maxDepth = 6,
         [Description("Maximum total controls returned including the root (default: 500, hard limit: 1000)")] int maxNodes = 500)
@@ -235,3 +236,4 @@ public sealed class UiAutomationTools
             IsError = true
         };
 }
+

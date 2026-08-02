@@ -5,6 +5,12 @@ public sealed class ExternalMcpOptions
     public const string SectionName = "ExternalMcp";
 
     public Dictionary<string, ExternalMcpServerOptions> Servers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public string? CatalogCachePath { get; set; }
+
+    public int MaxConcurrentWarmups { get; set; } = 2;
+
+    public int FailureCooldownSeconds { get; set; } = 60;
 }
 
 public sealed class ExternalMcpServerOptions

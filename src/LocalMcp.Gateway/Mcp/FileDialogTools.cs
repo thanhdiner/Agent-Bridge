@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class FileDialogTools
         OpenWorld = false),
      Description("Sets a path in a Windows Open or Save file dialog using UI Automation, verifies the field, and can optionally press Enter. Automatically locates the standard file-name edit control or accepts an explicit selector. Requires dev:execute scope.")]
     public async Task<CallToolResult> SetPathAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The native file dialog window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("File or directory path to place in the dialog. Maximum 32767 characters.")] string path,
         [Description("Optional exact automationId for a non-standard dialog file-name field")] string? automationId = null,
@@ -52,8 +53,6 @@ public sealed class FileDialogTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(path))
@@ -77,7 +76,7 @@ public sealed class FileDialogTools
         var command = new FileDialogSetPathCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             Path = path,
@@ -131,3 +130,4 @@ public sealed class FileDialogTools
         IsError = true
     };
 }
+

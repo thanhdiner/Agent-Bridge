@@ -14,19 +14,34 @@ public sealed class ExternalMcpServerSession : IAsyncDisposable
     private McpClient? _client;
     private IReadOnlyList<Tool>? _cachedTools;
     private bool _restartMayNeedPermission;
+    private int _consecutiveCatalogFailures;
+    private DateTimeOffset? _catalogCooldownUntilUtc;
 
     public ExternalMcpServerSession(
         string name,
         ExternalMcpServerOptions options,
+        int failureCooldownSeconds,
         ILoggerFactory loggerFactory)
     {
         Name = name;
         _options = options;
+        FailureCooldownSeconds = Math.Max(1, failureCooldownSeconds);
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<ExternalMcpServerSession>();
     }
 
     public string Name { get; }
+
+    public bool InitializeOnStartup => _options.InitializeOnStartup;
+
+    public int FailureCooldownSeconds { get; }
+
+    public bool IsRunning => _client is not null && _cachedTools is not null;
+
+    public bool CanRefreshCatalog(DateTimeOffset nowUtc, bool force) =>
+        force ||
+        _catalogCooldownUntilUtc is null ||
+        _catalogCooldownUntilUtc <= nowUtc;
 
     public async Task<IReadOnlyList<Tool>> ListToolsAsync(CancellationToken cancellationToken)
     {
@@ -62,6 +77,59 @@ public sealed class ExternalMcpServerSession : IAsyncDisposable
             _logger.LogWarning(ex, "{ServerName} tool call failed", Name);
             return Error("MCP_TOOL_FAILED", ClassifyFailure(ex));
         }
+    }
+
+    public async Task RestartAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _restartMayNeedPermission = true;
+            _consecutiveCatalogFailures = 0;
+            _catalogCooldownUntilUtc = null;
+            if (_client is not null)
+            {
+                await _client.DisposeAsync();
+            }
+
+            _client = null;
+            _cachedTools = null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public ExternalMcpServerCatalogStatus GetCatalogStatus(int cachedToolCount)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (IsRunning)
+            return new ExternalMcpServerCatalogStatus(Name, "running", "External MCP server is running.", cachedToolCount);
+
+        if (_catalogCooldownUntilUtc is not null && _catalogCooldownUntilUtc > nowUtc)
+        {
+            var seconds = Math.Max(1, (int)Math.Ceiling((_catalogCooldownUntilUtc.Value - nowUtc).TotalSeconds));
+            return cachedToolCount > 0
+                ? new ExternalMcpServerCatalogStatus(Name, "stale_cached", $"tools/list failed; using cached catalog. Retry available in {seconds}s.", cachedToolCount)
+                : new ExternalMcpServerCatalogStatus(Name, "failed", $"External MCP server is in cooldown for {seconds}s.", 0);
+        }
+
+        return cachedToolCount > 0
+            ? new ExternalMcpServerCatalogStatus(Name, "stale_cached", "Using cached external MCP catalog; server has not been started in this gateway process.", cachedToolCount)
+            : new ExternalMcpServerCatalogStatus(Name, "not_discovered", "External MCP server is configured but tools/list has not succeeded yet.", 0);
+    }
+
+    public void NoteCatalogSuccess()
+    {
+        _consecutiveCatalogFailures = 0;
+        _catalogCooldownUntilUtc = null;
+    }
+
+    public void NoteCatalogFailure()
+    {
+        _consecutiveCatalogFailures++;
+        _catalogCooldownUntilUtc = DateTimeOffset.UtcNow.AddSeconds(FailureCooldownSeconds);
     }
 
     public async Task<ExternalMcpServerHealth> CheckHealthAsync(CancellationToken cancellationToken)
@@ -134,7 +202,7 @@ public sealed class ExternalMcpServerSession : IAsyncDisposable
 
             ValidateConfiguration();
 
-            using var timeout = CreateTimeout(Math.Min(_options.InitializeTimeoutSeconds, 5), cancellationToken);
+            using var timeout = CreateTimeout(_options.InitializeTimeoutSeconds, cancellationToken);
             var transport = new StdioClientTransport(
                 new StdioClientTransportOptions
                 {

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,21 +41,19 @@ public sealed class AppResolveTools
         OpenWorld = false),
      Description("Resolves a short Windows application id such as chrome, vscode, or obsidian to a GUI executable. Uses a lazy in-memory and JSON cache, then App Paths, common install locations, and Start Menu shortcuts on cache miss. Does not launch the app. Requires dev:execute scope.")]
     public async Task<CallToolResult> ResolveAppAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Short application id or name, not a path, such as chrome or visual studio code")] string appId,
         [Description("Bypass the cached entry and rediscover only this application id (default: false)")] bool refresh = false)
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (string.IsNullOrWhiteSpace(appId))
             return Error("INVALID_REQUEST", "appId parameter is required.");
 
         var command = new AppResolveCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             AppId = appId,
             Refresh = refresh
@@ -103,3 +102,4 @@ public sealed class AppResolveTools
             IsError = true
         };
 }
+

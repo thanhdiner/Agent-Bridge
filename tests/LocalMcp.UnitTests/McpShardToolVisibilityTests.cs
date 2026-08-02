@@ -1,5 +1,6 @@
 using LocalMcp.Gateway.Mcp;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
 using NSubstitute;
 
@@ -170,15 +171,81 @@ public sealed class McpShardToolVisibilityTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public void ExternalMcpRouterSnapshotUsesConfiguredServersAsRegistry()
+    {
+        using var temp = new TempToolVisibilityConfig();
+        var router = CreateRouter(
+            temp,
+            new Dictionary<string, ExternalMcpServerOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["enabled-server"] = new ExternalMcpServerOptions { Enabled = true, Command = "cmd", Args = ["/c", "echo", "unused"] },
+                ["disabled-server"] = new ExternalMcpServerOptions { Enabled = false, Command = "cmd", Args = ["/c", "echo", "unused"] }
+            });
+
+        var snapshot = router.GetCatalogSnapshot();
+
+        Assert.Contains(snapshot.Servers, server => server.Name == "enabled-server" && server.Status == "not_discovered" && server.ToolCount == 0);
+        Assert.Contains(snapshot.Servers, server => server.Name == "disabled-server" && server.Status == "disabled" && server.ToolCount == 0);
+        Assert.Empty(snapshot.Tools);
+    }
+
+    [Fact]
+    public void ExternalMcpRouterLoadsEnabledCachedCatalogAsStale()
+    {
+        using var temp = new TempToolVisibilityConfig();
+        var cachePath = temp.ExternalCatalogPath;
+        var cache = new ExternalMcpCatalogCache(
+            Options.Create(new ExternalMcpOptions { CatalogCachePath = cachePath }),
+            NullLogger<ExternalMcpCatalogCache>.Instance);
+        cache.Save(new ExternalMcpCatalogSnapshot(
+            [Tool("enabled-server.search"), Tool("disabled-server.hidden")],
+            []));
+
+        var router = CreateRouter(
+            temp,
+            new Dictionary<string, ExternalMcpServerOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["enabled-server"] = new ExternalMcpServerOptions { Enabled = true, Command = "cmd", Args = ["/c", "echo", "unused"] },
+                ["disabled-server"] = new ExternalMcpServerOptions { Enabled = false, Command = "cmd", Args = ["/c", "echo", "unused"] }
+            });
+
+        var snapshot = router.GetCatalogSnapshot();
+
+        Assert.Contains(snapshot.Tools, tool => tool.Name == "enabled-server.search");
+        Assert.DoesNotContain(snapshot.Tools, tool => tool.Name == "disabled-server.hidden");
+        Assert.Contains(snapshot.Servers, server => server.Name == "enabled-server" && server.Status == "stale_cached" && server.ToolCount == 1);
+        Assert.Contains(snapshot.Servers, server => server.Name == "disabled-server" && server.Status == "disabled" && server.ToolCount == 0);
+    }
+
     private static Tool Tool(string name) => new()
     {
         Name = name,
         Title = name
     };
 
+    private static ExternalMcpRouter CreateRouter(
+        TempToolVisibilityConfig temp,
+        Dictionary<string, ExternalMcpServerOptions> servers)
+    {
+        var options = Options.Create(new ExternalMcpOptions
+        {
+            Servers = servers,
+            CatalogCachePath = temp.ExternalCatalogPath
+        });
+        var cache = new ExternalMcpCatalogCache(options, NullLogger<ExternalMcpCatalogCache>.Instance);
+        return new ExternalMcpRouter(
+            options,
+            cache,
+            NullLoggerFactory.Instance,
+            NullLogger<ExternalMcpRouter>.Instance);
+    }
+
     private sealed class TempToolVisibilityConfig : IDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "AgentBridgeTests", Guid.NewGuid().ToString("N"));
+
+        public string ExternalCatalogPath => Path.Combine(_directory, "external-mcp-catalog.json");
 
         public ToolVisibilityStore CreateStore()
         {

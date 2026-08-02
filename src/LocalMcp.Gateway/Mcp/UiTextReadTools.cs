@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class UiTextReadTools
         OpenWorld = false),
      Description("Reads bounded text from one Windows UI Automation control. This is the Phase 4 alias of ui_text_read and supports document, visible, or selection scopes. Password text is always redacted. Requires dev:execute scope.")]
     public Task<CallToolResult> GetTextAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Text scope: document, visible, or selection (default: document)")] string scope = UiTextReadScopes.Document,
         [Description("Optional exact automationId selector")] string? automationId = null,
@@ -72,7 +73,7 @@ public sealed class UiTextReadTools
         OpenWorld = false),
      Description("Reads a bounded document, visible text, or selected text range from one Windows UI Automation control. Supports line paging, TextPattern/TextPattern2, and safe Value or Legacy fallback for document scope. Password text is always redacted. Requires dev:execute scope.")]
     public async Task<CallToolResult> ReadAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Text scope: document, visible, or selection (default: document)")] string scope = UiTextReadScopes.Document,
         [Description("Optional exact automationId selector")] string? automationId = null,
@@ -86,8 +87,6 @@ public sealed class UiTextReadTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (!UiTextReadScopes.TryNormalize(scope, out var normalizedScope))
@@ -112,7 +111,7 @@ public sealed class UiTextReadTools
         var command = new UiTextReadCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             Scope = normalizedScope,
@@ -171,3 +170,4 @@ public sealed class UiTextReadTools
         IsError = true
     };
 }
+

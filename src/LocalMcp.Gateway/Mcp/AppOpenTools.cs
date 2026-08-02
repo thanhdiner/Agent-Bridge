@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class AppOpenTools
         OpenWorld = true),
      Description("Resolves a short Windows application id, focuses an existing matching window when possible, otherwise launches the trusted GUI executable directly. Supports built-in aliases such as youtube. Does not elevate. Requires dev:execute scope.")]
     public async Task<CallToolResult> OpenAppAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Short application id or name, such as chrome, vscode, obsidian, or antigravity")] string appId,
         [Description("Optional argument array passed directly to the application (maximum 64 entries)")] List<string>? arguments = null,
         [Description("Bypass the cached entry and rediscover only this application id (default: false)")] bool refresh = false,
@@ -52,15 +53,13 @@ public sealed class AppOpenTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (string.IsNullOrWhiteSpace(appId))
             return Error("INVALID_REQUEST", "appId parameter is required.");
 
         var command = new AppOpenCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             AppId = appId,
             Arguments = arguments ?? [],
@@ -115,3 +114,4 @@ public sealed class AppOpenTools
             IsError = true
         };
 }
+

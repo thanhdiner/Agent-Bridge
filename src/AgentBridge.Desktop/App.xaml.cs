@@ -24,7 +24,9 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
-        if (!SingleInstanceGuard.TryAcquire(out _singleInstanceGuard))
+        if (!SingleInstanceGuard.TryAcquire(
+                () => Dispatcher.BeginInvoke(ShowMainWindow),
+                out _singleInstanceGuard))
         {
             await DesktopLog.WriteAsync(
                 "A second AgentBridge Desktop launch was blocked by the single-instance guard.");
@@ -41,6 +43,52 @@ public partial class App : System.Windows.Application
             ApplicationTheme.Dark,
             systemGlassColor: false,
             systemAccentColor: false);
+
+        var c12 = System.Windows.Media.Color.FromRgb(0x12, 0x12, 0x12);
+        var c1a = System.Windows.Media.Color.FromRgb(0x1A, 0x1A, 0x1A);
+        var c18 = System.Windows.Media.Color.FromRgb(0x18, 0x18, 0x18);
+        var c20 = System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20);
+        var c28 = System.Windows.Media.Color.FromRgb(0x28, 0x28, 0x28);
+
+        // WPF UI Color Keys
+        Resources["CardBackgroundFillColorDefault"] = c12;
+        Resources["CardBackgroundFillColorSecondary"] = c12;
+        Resources["CardBackgroundFillColorTertiary"] = c12;
+        Resources["LayerFillColorDefault"] = c12;
+        Resources["LayerFillColorAlt"] = c12;
+        Resources["LayerOnAcrylicFillColorDefault"] = c12;
+        Resources["SolidBackgroundFillColorBase"] = c12;
+        Resources["SolidBackgroundFillColorSecondary"] = c12;
+        Resources["SolidBackgroundFillColorTertiary"] = c12;
+        Resources["ControlFillColorDefault"] = c12;
+        Resources["ControlFillColorSecondary"] = c18;
+        Resources["ControlFillColorTertiary"] = c20;
+        Resources["SubtleFillColorSecondary"] = c18;
+        Resources["SubtleFillColorTertiary"] = c20;
+        Resources["CardStrokeColorDefault"] = c28;
+        Resources["CardStrokeColorDefaultSolid"] = c28;
+
+        // WPF UI Brush Keys
+        Resources["AgentBridgeBackgroundBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["AgentBridgeSidebarBrush"] = new System.Windows.Media.SolidColorBrush(c1a);
+        Resources["AgentBridgeSurfaceBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["AgentBridgeAccentSoftBrush"] = new System.Windows.Media.SolidColorBrush(c18);
+        Resources["AgentBridgeBorderBrush"] = new System.Windows.Media.SolidColorBrush(c28);
+        Resources["CardBackgroundFillColorDefaultBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["CardBackgroundFillColorSecondaryBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["CardBackgroundFillColorTertiaryBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["LayerFillColorDefaultBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["LayerFillColorAltBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["LayerOnAcrylicFillColorDefaultBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["SolidBackgroundFillColorBaseBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["SolidBackgroundFillColorSecondaryBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["SolidBackgroundFillColorTertiaryBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["ControlFillColorDefaultBrush"] = new System.Windows.Media.SolidColorBrush(c12);
+        Resources["ControlFillColorSecondaryBrush"] = new System.Windows.Media.SolidColorBrush(c18);
+        Resources["ControlFillColorTertiaryBrush"] = new System.Windows.Media.SolidColorBrush(c20);
+        Resources["SubtleFillColorSecondaryBrush"] = new System.Windows.Media.SolidColorBrush(c18);
+        Resources["SubtleFillColorTertiaryBrush"] = new System.Windows.Media.SolidColorBrush(c20);
+        Resources["CardStrokeColorDefaultBrush"] = new System.Windows.Media.SolidColorBrush(c28);
 
         _mainWindow = new MainWindow(_supervisor);
         _mainWindow.Closing += OnMainWindowClosing;
@@ -133,6 +181,30 @@ public partial class App : System.Windows.Application
             "AgentBridge is still running",
             "Gateway, Windows Agent, and Tunnel continue running in the background.",
             Forms.ToolTipIcon.Info);
+
+        TrimMemory();
+    }
+
+    private static void TrimMemory()
+    {
+        try
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            _ = NativeMethods.EmptyWorkingSet(process.Handle);
+        }
+        catch
+        {
+        }
+    }
+
+    private static class NativeMethods
+    {
+        [System.Runtime.InteropServices.DllImport("psapi.dll", SetLastError = true)]
+        public static extern bool EmptyWorkingSet(IntPtr hProcess);
     }
 
     private void ShowMainWindow()
@@ -142,11 +214,16 @@ public partial class App : System.Windows.Application
             if (_mainWindow is null)
                 return;
 
-            _mainWindow.Show();
+            _mainWindow.ShowInTaskbar = true;
+            _mainWindow.Visibility = Visibility.Visible;
             if (_mainWindow.WindowState == WindowState.Minimized)
                 _mainWindow.WindowState = WindowState.Normal;
 
+            _mainWindow.Show();
             _mainWindow.Activate();
+            _mainWindow.Topmost = true;
+            _mainWindow.Topmost = false;
+            _mainWindow.Focus();
         });
     }
 

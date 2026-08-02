@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class ProcessTools
         OpenWorld = false),
      Description("Lists live Windows processes with bounded metadata and optional name filtering. Requires dev:execute scope.")]
     public async Task<CallToolResult> ListAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Optional case-insensitive substring filter for the process name")] string? nameContains = null,
         [Description("Whether to include processes without a top-level window (default: true)")] bool includeWindowless = true,
         [Description("Maximum processes returned (default: 200, hard limit: 1000)")] int maxResults = 200)
@@ -57,7 +58,7 @@ public sealed class ProcessTools
             new ProcessListCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 NameContains = nameContains,
                 IncludeWindowless = includeWindowless,
@@ -74,7 +75,7 @@ public sealed class ProcessTools
         OpenWorld = false),
      Description("Immediately terminates one exact Windows process by PID. Supports an expected process-name guard against PID reuse and refuses protected system or agent processes. Requires dev:execute scope.")]
     public async Task<CallToolResult> KillAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Exact process ID to terminate")] int processId,
         [Description("Optional exact process name guard, with or without .exe, to prevent killing a reused PID")] string? expectedProcessName = null,
         [Description("Whether to terminate the entire child process tree (default: true)")] bool entireProcessTree = true,
@@ -99,7 +100,7 @@ public sealed class ProcessTools
             new ProcessKillCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 ProcessId = processId,
                 ExpectedProcessName = expectedProcessName,
@@ -109,12 +110,10 @@ public sealed class ProcessTools
             "process_kill");
     }
 
-    private async Task<CallToolResult?> ValidateAuthorizationAndDeviceAsync(string deviceId)
+    private async Task<CallToolResult?> ValidateAuthorizationAndDeviceAsync(string? deviceId)
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         return null;
     }
 
@@ -156,3 +155,5 @@ public sealed class ProcessTools
         IsError = true
     };
 }
+
+

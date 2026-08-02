@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -35,7 +36,7 @@ public sealed partial class WindowCoordinateTools
     [McpServerTool(Name = "window_click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Clicks one point relative to a Windows window after validation. Requires dev:execute scope.")]
     public async Task<CallToolResult> ClickWindowAsync(
-        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle")] string windowHandle,
         [Description("Zero-based horizontal coordinate relative to the window")] int x,
         [Description("Zero-based vertical coordinate relative to the window")] int y,
@@ -112,3 +113,4 @@ public sealed partial class WindowCoordinateTools
             IsError = true
         };
 }
+

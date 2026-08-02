@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddSingleton<ILicenseGate, LicenseGate>();
         services.AddSingleton<ICommandDispatcher, SignalRCommandDispatcher>();
         services.AddSingleton<IExternalMcpRouter, ExternalMcpRouter>();
+        services.AddSingleton<ExternalMcpCatalogCache>();
         services.AddSingleton<ToolVisibilityStore>();
         services.AddSingleton<LocalToolPrimitiveCache>();
         services.AddHostedService<ExternalMcpCatalogWarmupService>();

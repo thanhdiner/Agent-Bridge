@@ -10,7 +10,10 @@ public sealed class ExternalMcpRouter : IExternalMcpRouter, IAsyncDisposable
     private static readonly TimeSpan RefreshGateImmediateTimeout = TimeSpan.Zero;
     private readonly object _catalogGate = new();
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SemaphoreSlim _serverStartupGate;
+    private readonly Dictionary<string, ExternalMcpServerOptions> _serverOptions;
     private readonly Dictionary<string, ExternalMcpServerSession> _sessions;
+    private readonly ExternalMcpCatalogCache _catalogCache;
     private readonly ILogger<ExternalMcpRouter> _logger;
     private ExternalMcpCatalogSnapshot _catalogSnapshot = new(
         Array.Empty<Tool>(),
@@ -18,26 +21,37 @@ public sealed class ExternalMcpRouter : IExternalMcpRouter, IAsyncDisposable
 
     public ExternalMcpRouter(
         IOptions<ExternalMcpOptions> options,
+        ExternalMcpCatalogCache catalogCache,
         ILoggerFactory loggerFactory,
         ILogger<ExternalMcpRouter> logger)
     {
         _logger = logger;
-        _sessions = options.Value.Servers
-            .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && pair.Value.Enabled)
+        _catalogCache = catalogCache;
+        var externalMcpOptions = options.Value;
+        _serverStartupGate = new SemaphoreSlim(Math.Max(1, externalMcpOptions.MaxConcurrentWarmups), Math.Max(1, externalMcpOptions.MaxConcurrentWarmups));
+        _serverOptions = options.Value.Servers
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
             .ToDictionary(
                 pair => pair.Key.Trim(),
-                pair => new ExternalMcpServerSession(pair.Key.Trim(), pair.Value, loggerFactory),
+                pair => pair.Value,
+                StringComparer.OrdinalIgnoreCase);
+        _sessions = _serverOptions
+            .Where(pair => pair.Value.Enabled)
+            .ToDictionary(
+                pair => pair.Key,
+                pair => new ExternalMcpServerSession(pair.Key, pair.Value, externalMcpOptions.FailureCooldownSeconds, loggerFactory),
                 StringComparer.OrdinalIgnoreCase);
 
-        var initialStatuses = _sessions.Keys
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-            .Select(name => new ExternalMcpServerCatalogStatus(name, "pending", "External MCP catalog warmup has not finished yet.", 0))
+        var cachedSnapshot = _catalogCache.Load();
+        var cachedTools = cachedSnapshot.Tools
+            .Where(tool => _sessions.ContainsKey(ResolveServerName(tool.Name)))
             .ToArray();
+        var initialStatuses = BuildStatuses(cachedTools);
 
-        _catalogSnapshot = new ExternalMcpCatalogSnapshot(Array.Empty<Tool>(), initialStatuses);
+        _catalogSnapshot = new ExternalMcpCatalogSnapshot(cachedTools, initialStatuses);
     }
 
-    public int ServerCount => _sessions.Count;
+    public int ServerCount => _serverOptions.Count;
 
     public Task<IReadOnlyList<Tool>> ListToolsAsync(CancellationToken cancellationToken) =>
         ListToolsAsync(_ => true, cancellationToken);
@@ -54,6 +68,14 @@ public sealed class ExternalMcpRouter : IExternalMcpRouter, IAsyncDisposable
 
     public async Task<ExternalMcpCatalogSnapshot> RefreshCatalogAsync(CancellationToken cancellationToken)
     {
+        var startupSessions = _sessions.Values
+            .Where(session => session.InitializeOnStartup)
+            .ToArray();
+        if (startupSessions.Length == 0)
+        {
+            return GetCatalogSnapshot();
+        }
+
         var entered = await _refreshGate.WaitAsync(RefreshGateImmediateTimeout, cancellationToken);
         if (!entered)
         {
@@ -61,30 +83,32 @@ public sealed class ExternalMcpRouter : IExternalMcpRouter, IAsyncDisposable
         }
         try
         {
-            var results = await Task.WhenAll(_sessions.Values.Select(session => RefreshServerCatalogAsync(session, cancellationToken)));
-            var tools = results
-                .SelectMany(result => result.Tools)
-                .OrderBy(tool => ResolveServerName(tool.Name), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(tool => ResolveToolName(tool.Name), StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var statuses = results
-                .Select(result => result.Status)
-                .OrderBy(status => status.Name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-
-            var snapshot = new ExternalMcpCatalogSnapshot(tools, statuses);
-
-            lock (_catalogGate)
-            {
-                _catalogSnapshot = snapshot;
-            }
-
-            return snapshot;
+            var results = await Task.WhenAll(startupSessions.Select(session => RefreshServerCatalogAsync(session, force: false, cancellationToken)));
+            return ApplyCatalogResults(results);
         }
         finally
         {
             _refreshGate.Release();
         }
+    }
+
+    public async Task<ExternalMcpCatalogSnapshot> WarmupServerAsync(string serverName, CancellationToken cancellationToken)
+    {
+        if (!_sessions.TryGetValue(serverName.Trim(), out var session))
+            throw CreateUnknownOrDisabledServerException(serverName);
+
+        var result = await RefreshServerCatalogAsync(session, force: true, cancellationToken);
+        return ApplyCatalogResults([result]);
+    }
+
+    public async Task<ExternalMcpCatalogSnapshot> RestartServerAsync(string serverName, CancellationToken cancellationToken)
+    {
+        if (!_sessions.TryGetValue(serverName.Trim(), out var session))
+            throw CreateUnknownOrDisabledServerException(serverName);
+
+        await session.RestartAsync(cancellationToken);
+        var result = await RefreshServerCatalogAsync(session, force: true, cancellationToken);
+        return ApplyCatalogResults([result]);
     }
 
     public ExternalMcpCatalogSnapshot GetCatalogSnapshot()
@@ -139,15 +163,21 @@ public sealed class ExternalMcpRouter : IExternalMcpRouter, IAsyncDisposable
 
     public async Task<ExternalMcpHealthReport> CheckHealthAsync(CancellationToken cancellationToken)
     {
-        var health = new List<ExternalMcpServerHealth>();
-        foreach (var session in _sessions.Values)
-        {
-            health.Add(await session.CheckHealthAsync(cancellationToken));
-        }
+        await Task.CompletedTask;
+        _ = cancellationToken;
+        var snapshot = GetCatalogSnapshot();
+        var health = snapshot.Servers
+            .Select(server => new ExternalMcpServerHealth(
+                server.Name,
+                server.Status,
+                server.Message,
+                server.ToolCount,
+                PermissionMayBeRequestedAgain: false))
+            .ToArray();
 
-        var status = health.Count > 0 && health.All(item => item.Status == "ok")
-            ? "ok"
-            : "degraded";
+        var status = health.Any(item => item.Status == "failed")
+            ? "degraded"
+            : "ok";
 
         return new ExternalMcpHealthReport(status, health);
     }
@@ -155,6 +185,7 @@ public sealed class ExternalMcpRouter : IExternalMcpRouter, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _refreshGate.Dispose();
+        _serverStartupGate.Dispose();
         foreach (var session in _sessions.Values)
         {
             await session.DisposeAsync();
@@ -163,23 +194,126 @@ public sealed class ExternalMcpRouter : IExternalMcpRouter, IAsyncDisposable
 
     private async Task<ExternalMcpServerCatalogResult> RefreshServerCatalogAsync(
         ExternalMcpServerSession session,
+        bool force,
         CancellationToken cancellationToken)
     {
+        var cachedTools = GetCatalogSnapshot().Tools
+            .Where(tool => string.Equals(ResolveServerName(tool.Name), session.Name, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (!session.CanRefreshCatalog(DateTimeOffset.UtcNow, force))
+        {
+            return new ExternalMcpServerCatalogResult(cachedTools, session.GetCatalogStatus(cachedTools.Length));
+        }
+
+        SetServerStatus(new ExternalMcpServerCatalogStatus(
+            session.Name,
+            "discovering",
+            "Discovering external MCP tools with tools/list.",
+            cachedTools.Length));
+
+        await _serverStartupGate.WaitAsync(cancellationToken);
         try
         {
             var serverTools = await session.ListToolsAsync(cancellationToken);
             var namespacedTools = serverTools.Select(tool => PrefixTool(session.Name, tool)).ToArray();
-            var status = new ExternalMcpServerCatalogStatus(session.Name, "ok", "tools/list succeeded.", namespacedTools.Length);
+            session.NoteCatalogSuccess();
+            var status = new ExternalMcpServerCatalogStatus(session.Name, "running", "tools/list succeeded.", namespacedTools.Length);
             _logger.LogInformation("External MCP server {ServerName} tools/list returned {ToolCount} tools", session.Name, namespacedTools.Length);
             return new ExternalMcpServerCatalogResult(namespacedTools, status);
         }
         catch (Exception ex)
         {
             var message = ClassifyFailure(ex);
-            var status = new ExternalMcpServerCatalogStatus(session.Name, "error", message, 0);
+            session.NoteCatalogFailure();
+            var status = cachedTools.Length > 0
+                ? new ExternalMcpServerCatalogStatus(session.Name, "stale_cached", $"{message} Using cached tools from the last successful tools/list.", cachedTools.Length)
+                : new ExternalMcpServerCatalogStatus(session.Name, "failed", message, 0);
             _logger.LogWarning(ex, "External MCP server {ServerName} tools/list failed: {Message}", session.Name, message);
-            return new ExternalMcpServerCatalogResult(Array.Empty<Tool>(), status);
+            return new ExternalMcpServerCatalogResult(cachedTools, status);
         }
+        finally
+        {
+            _serverStartupGate.Release();
+        }
+    }
+
+    private ExternalMcpCatalogSnapshot ApplyCatalogResults(IReadOnlyList<ExternalMcpServerCatalogResult> results)
+    {
+        ExternalMcpCatalogSnapshot snapshot;
+        lock (_catalogGate)
+        {
+            var refreshedServers = results
+                .Select(result => result.Status.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var tools = _catalogSnapshot.Tools
+                .Where(tool => !refreshedServers.Contains(ResolveServerName(tool.Name)))
+                .Concat(results.SelectMany(result => result.Tools))
+                .Where(tool => _sessions.ContainsKey(ResolveServerName(tool.Name)))
+                .GroupBy(tool => tool.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(tool => ResolveServerName(tool.Name), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(tool => ResolveToolName(tool.Name), StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var statusesByName = BuildStatuses(tools)
+                .ToDictionary(status => status.Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var result in results)
+                statusesByName[result.Status.Name] = result.Status;
+
+            var statuses = statusesByName.Values
+                .OrderBy(status => status.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            snapshot = new ExternalMcpCatalogSnapshot(tools, statuses);
+            _catalogSnapshot = snapshot;
+        }
+
+        _catalogCache.Save(snapshot);
+        return snapshot;
+    }
+
+    private ExternalMcpServerCatalogStatus[] BuildStatuses(IReadOnlyList<Tool> tools)
+    {
+        return _serverOptions
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair =>
+            {
+                var serverName = pair.Key;
+                var cachedToolCount = tools.Count(tool =>
+                    string.Equals(ResolveServerName(tool.Name), serverName, StringComparison.OrdinalIgnoreCase));
+                if (!pair.Value.Enabled)
+                    return new ExternalMcpServerCatalogStatus(serverName, "disabled", "External MCP server is disabled in configuration.", 0);
+
+                return _sessions.TryGetValue(serverName, out var session)
+                    ? session.GetCatalogStatus(cachedToolCount)
+                    : new ExternalMcpServerCatalogStatus(serverName, "failed", "External MCP server is enabled but no session was created.", cachedToolCount);
+            })
+            .ToArray();
+    }
+
+    private void SetServerStatus(ExternalMcpServerCatalogStatus status)
+    {
+        lock (_catalogGate)
+        {
+            var statusesByName = _catalogSnapshot.Servers
+                .ToDictionary(server => server.Name, StringComparer.OrdinalIgnoreCase);
+            statusesByName[status.Name] = status;
+            _catalogSnapshot = new ExternalMcpCatalogSnapshot(
+                _catalogSnapshot.Tools,
+                statusesByName.Values
+                    .OrderBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
+        }
+    }
+
+    private InvalidOperationException CreateUnknownOrDisabledServerException(string serverName)
+    {
+        var normalized = serverName.Trim();
+        return _serverOptions.TryGetValue(normalized, out var options) && !options.Enabled
+            ? new InvalidOperationException($"External MCP server '{normalized}' is disabled.")
+            : new InvalidOperationException($"External MCP server '{normalized}' is not configured.");
     }
 
     private static Tool PrefixTool(string serverName, Tool tool)

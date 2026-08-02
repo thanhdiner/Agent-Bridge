@@ -62,6 +62,7 @@ public partial class MainWindow
         };
         AutomationProperties.SetAutomationId(_runtimeNavButton, "RuntimeNavButton");
         _runtimeNavButton.Click += RuntimeNav_Click;
+        ApplyNavButtonStyle(_runtimeNavButton, false);
         navPanel.Children.Add(_runtimeNavButton);
 
         _runtimePage = CreateRuntimePage();
@@ -119,7 +120,7 @@ public partial class MainWindow
             Background = GetResourceBrush("AgentBridgeSurfaceBrush"),
             BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9),
+            CornerRadius = new CornerRadius(5),
             Padding = new Thickness(11, 7, 11, 7),
             Child = _runtimeStatusText
         };
@@ -141,7 +142,7 @@ public partial class MainWindow
             Background = GetResourceBrush("AgentBridgeSurfaceBrush"),
             BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(11),
+            CornerRadius = new CornerRadius(6),
             Padding = new Thickness(17)
         };
         Grid.SetRow(panelBorder, 4);
@@ -213,12 +214,10 @@ public partial class MainWindow
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Visible;
 
-        OverviewNavButton.Appearance = UiControlAppearance.Transparent;
-        WorkspacesNavButton.Appearance = UiControlAppearance.Transparent;
-        if (_toolsNavButton is not null)
-            _toolsNavButton.Appearance = UiControlAppearance.Transparent;
-        if (_runtimeNavButton is not null)
-            _runtimeNavButton.Appearance = UiControlAppearance.Primary;
+        ApplyNavButtonStyle(OverviewNavButton, false);
+        ApplyNavButtonStyle(WorkspacesNavButton, false);
+        ApplyNavButtonStyle(_toolsNavButton, false);
+        ApplyNavButtonStyle(_runtimeNavButton, true);
     }
 
     private void RuntimeRefresh_Click(object sender, RoutedEventArgs e) => BeginRuntimeRefresh(showLoading: true);
@@ -359,7 +358,7 @@ public partial class MainWindow
         {
             BorderBrush = GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(14),
             Background = GetResourceBrush("AgentBridgeSidebarBrush"),
             Child = new TextBlock
@@ -593,7 +592,7 @@ public partial class MainWindow
             Background = row.IsStaleTunnel ? GetResourceBrush("AgentBridgeAccentSoftBrush") : GetResourceBrush("AgentBridgeSidebarBrush"),
             BorderBrush = row.IsStaleTunnel ? GetResourceBrush("AgentBridgeWarningBrush") : GetResourceBrush("AgentBridgeBorderBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(12),
             Margin = new Thickness(Math.Min(row.Depth, 6) * 18, 0, 0, 8)
         };

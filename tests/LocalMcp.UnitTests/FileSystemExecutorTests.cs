@@ -90,6 +90,37 @@ public sealed class FileSystemExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadFileAsync_UnchangedFile_ReusesCachedResult()
+    {
+        var filePath = Path.Combine(_tempDir, "cached.txt");
+        await File.WriteAllTextAsync(filePath, "cached content", new UTF8Encoding(false));
+
+        var first = await _executor.ReadFileAsync(filePath, Guid.NewGuid(), CancellationToken.None);
+        var second = await _executor.ReadFileAsync(filePath, Guid.NewGuid(), CancellationToken.None);
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.Same(first.Data, second.Data);
+    }
+
+    [Fact]
+    public async Task ReadFileAsync_ChangedFile_InvalidatesCache()
+    {
+        var filePath = Path.Combine(_tempDir, "changed.txt");
+        await File.WriteAllTextAsync(filePath, "before", new UTF8Encoding(false));
+        var first = await _executor.ReadFileAsync(filePath, Guid.NewGuid(), CancellationToken.None);
+
+        await Task.Delay(20);
+        await File.WriteAllTextAsync(filePath, "after change", new UTF8Encoding(false));
+        var second = await _executor.ReadFileAsync(filePath, Guid.NewGuid(), CancellationToken.None);
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.NotSame(first.Data, second.Data);
+        Assert.Equal("after change", second.Data!.Content);
+    }
+
+    [Fact]
     public async Task ReadFileAsync_BinaryFile_ReturnsBinaryFileNotSupported()
     {
         var filePath = Path.Combine(_tempDir, "binary.dat");

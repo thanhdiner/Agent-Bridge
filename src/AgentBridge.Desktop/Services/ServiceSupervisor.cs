@@ -1060,6 +1060,9 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             : normalized;
     }
 
+    private const long MaxServiceLogBytes = 10 * 1024 * 1024;
+    private const int ServiceLogBackupCount = 3;
+
     private static async Task AppendServiceLogAsync(
         string path,
         string channel,
@@ -1072,6 +1075,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             await gate.WaitAsync();
             try
             {
+                RotateServiceLogIfNeeded(path);
                 await File.AppendAllTextAsync(
                     path,
                     $"{DateTimeOffset.UtcNow:O} [{channel}] {message}{Environment.NewLine}");
@@ -1084,6 +1088,25 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         catch
         {
         }
+    }
+
+    private static void RotateServiceLogIfNeeded(string path)
+    {
+        if (!File.Exists(path) || new FileInfo(path).Length < MaxServiceLogBytes)
+            return;
+
+        var oldest = $"{path}.{ServiceLogBackupCount}";
+        if (File.Exists(oldest))
+            File.Delete(oldest);
+
+        for (var index = ServiceLogBackupCount - 1; index >= 1; index--)
+        {
+            var source = $"{path}.{index}";
+            if (File.Exists(source))
+                File.Move(source, $"{path}.{index + 1}", overwrite: true);
+        }
+
+        File.Move(path, $"{path}.1", overwrite: true);
     }
 
     private void Publish(SupervisorSnapshot snapshot)

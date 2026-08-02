@@ -437,6 +437,16 @@ public sealed class ToolVisibilityStore
     {
         var lower = name.ToLowerInvariant();
 
+        if (lower is
+            "extension_dev_workflow" or
+            "browser_extension_inspect" or
+            "dom_event_trace" or
+            "process_tree_supervisor" or
+            "dev_session_run" or
+            "visual_regression_compare" or
+            "repo_task_checkpoint")
+            return "Developer Workflows";
+
         if (lower.StartsWith("chrome-devtools.", StringComparison.Ordinal) ||
             lower.StartsWith("playwright.", StringComparison.Ordinal) ||
             lower.StartsWith("puppeteer.", StringComparison.Ordinal))
@@ -502,6 +512,14 @@ public sealed class ToolVisibilityStore
     private static string ResolveRisk(string name)
     {
         var lower = name.ToLowerInvariant();
+        if (lower is
+            "extension_dev_workflow" or
+            "process_tree_supervisor" or
+            "dev_session_run" or
+            "visual_regression_compare" or
+            "repo_task_checkpoint")
+            return "dangerous";
+
         var dangerousFragments = new[]
         {
             "delete",

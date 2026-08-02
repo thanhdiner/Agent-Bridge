@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -41,7 +42,7 @@ public sealed class UiValueTools
         OpenWorld = false),
      Description("Reads one Windows UI Automation control value selected by automationId or exact name. Password values are always redacted. Requires dev:execute scope.")]
     public async Task<CallToolResult> GetValueAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
         [Description("Exact control name; either automationId or name is required")] string? name = null,
@@ -63,7 +64,7 @@ public sealed class UiValueTools
             new UiGetValueCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 WindowHandle = windowHandle,
                 AutomationId = automationId,
@@ -83,7 +84,7 @@ public sealed class UiValueTools
         OpenWorld = false),
      Description("Writes one Windows UI Automation control value selected by automationId or exact name. Empty value clears the control; append adds to its current readable value. Password values are never returned. Requires dev:execute scope.")]
     public async Task<CallToolResult> SetValueAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("The value to write. Use an empty string to clear the control. Maximum 65536 characters")] string value,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
@@ -111,7 +112,7 @@ public sealed class UiValueTools
             new UiSetValueCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 WindowHandle = windowHandle,
                 Value = value,
@@ -126,7 +127,7 @@ public sealed class UiValueTools
     }
 
     private async Task<CallToolResult?> ValidateSelectorAsync(
-        string deviceId,
+        string? deviceId,
         string windowHandle,
         string? automationId,
         string? name,
@@ -135,8 +136,6 @@ public sealed class UiValueTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId) && string.IsNullOrWhiteSpace(name))
@@ -201,3 +200,5 @@ public sealed class UiValueTools
             IsError = true
         };
 }
+
+

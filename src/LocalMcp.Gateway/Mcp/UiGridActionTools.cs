@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class UiGridActionTools
         OpenWorld = false),
      Description("Selects, adds, removes, or activates one Windows UI Automation grid item by zero-based row and column. Realizes virtualized items, scrolls them into view when supported, and verifies selection state changes. Requires dev:execute scope.")]
     public async Task<CallToolResult> SelectAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Action: select, add, remove, or activate (default: select)")] string action = UiGridSelectActions.Select,
         [Description("Optional exact automationId selector for the grid")] string? automationId = null,
@@ -53,8 +54,6 @@ public sealed class UiGridActionTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (!UiGridSelectActions.TryNormalize(action, out var normalizedAction))
@@ -77,7 +76,7 @@ public sealed class UiGridActionTools
         var command = new UiGridSelectCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             Action = normalizedAction,
@@ -135,3 +134,4 @@ public sealed class UiGridActionTools
         IsError = true
     };
 }
+

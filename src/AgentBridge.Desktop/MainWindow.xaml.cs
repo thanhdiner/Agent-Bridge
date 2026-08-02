@@ -62,6 +62,35 @@ public partial class MainWindow : FluentWindow
         _supervisor.SnapshotChanged -= OnSupervisorSnapshotChanged;
     }
 
+    private static readonly System.Windows.Media.Brush ActiveNavBackground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF4, 0x7C, 0x20));
+    private static readonly System.Windows.Media.Brush ActiveNavForeground = System.Windows.Media.Brushes.White;
+    private static readonly System.Windows.Media.Brush ActiveNavHoverBackground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE0, 0x6B, 0x12));
+    private static readonly System.Windows.Media.Brush InactiveNavHoverBackground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x24, 0x24, 0x24));
+    private static readonly System.Windows.Media.Brush InactiveNavForeground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xD4, 0xD4, 0xD8));
+
+    public void ApplyNavButtonStyle(Wpf.Ui.Controls.Button? button, bool isActive)
+    {
+        if (button is null)
+            return;
+
+        if (isActive)
+        {
+            button.Appearance = ControlAppearance.Primary;
+            button.Background = ActiveNavBackground;
+            button.Foreground = ActiveNavForeground;
+            button.BorderBrush = System.Windows.Media.Brushes.Transparent;
+            button.MouseOverBackground = ActiveNavHoverBackground;
+        }
+        else
+        {
+            button.Appearance = ControlAppearance.Transparent;
+            button.Background = System.Windows.Media.Brushes.Transparent;
+            button.Foreground = InactiveNavForeground;
+            button.BorderBrush = System.Windows.Media.Brushes.Transparent;
+            button.MouseOverBackground = InactiveNavHoverBackground;
+        }
+    }
+
     private void OverviewNav_Click(object sender, RoutedEventArgs e) => ShowOverview();
 
     private void WorkspacesNav_Click(object sender, RoutedEventArgs e) => ShowWorkspaces();
@@ -74,12 +103,11 @@ public partial class MainWindow : FluentWindow
             _toolPage.Visibility = Visibility.Collapsed;
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Collapsed;
-        OverviewNavButton.Appearance = ControlAppearance.Primary;
-        WorkspacesNavButton.Appearance = ControlAppearance.Transparent;
-        if (_toolsNavButton is not null)
-            _toolsNavButton.Appearance = ControlAppearance.Transparent;
-        if (_runtimeNavButton is not null)
-            _runtimeNavButton.Appearance = ControlAppearance.Transparent;
+
+        ApplyNavButtonStyle(OverviewNavButton, true);
+        ApplyNavButtonStyle(WorkspacesNavButton, false);
+        ApplyNavButtonStyle(_toolsNavButton, false);
+        ApplyNavButtonStyle(_runtimeNavButton, false);
     }
 
     private void ShowWorkspaces()
@@ -90,12 +118,11 @@ public partial class MainWindow : FluentWindow
             _toolPage.Visibility = Visibility.Collapsed;
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Collapsed;
-        OverviewNavButton.Appearance = ControlAppearance.Transparent;
-        WorkspacesNavButton.Appearance = ControlAppearance.Primary;
-        if (_toolsNavButton is not null)
-            _toolsNavButton.Appearance = ControlAppearance.Transparent;
-        if (_runtimeNavButton is not null)
-            _runtimeNavButton.Appearance = ControlAppearance.Transparent;
+
+        ApplyNavButtonStyle(OverviewNavButton, false);
+        ApplyNavButtonStyle(WorkspacesNavButton, true);
+        ApplyNavButtonStyle(_toolsNavButton, false);
+        ApplyNavButtonStyle(_runtimeNavButton, false);
     }
 
     private async void RestartServices_Click(object sender, RoutedEventArgs e)
@@ -579,15 +606,9 @@ public partial class MainWindow : FluentWindow
         TunnelDetailText.Text = snapshot.Tunnel.Detail;
         TunnelMetaText.Text = BuildProcessMeta(snapshot.Tunnel);
 
-        var gatewayBrush = GetStatusBrush(snapshot.Gateway.State);
-        var agentBrush = GetStatusBrush(snapshot.Agent.State);
-        var tunnelBrush = GetStatusBrush(snapshot.Tunnel.State);
-        GatewayStatusDot.Fill = gatewayBrush;
-        GatewayStatusText.Foreground = gatewayBrush;
-        AgentStatusDot.Fill = agentBrush;
-        AgentStatusText.Foreground = agentBrush;
-        TunnelStatusDot.Fill = tunnelBrush;
-        TunnelStatusText.Foreground = tunnelBrush;
+        ApplyStatusBadge(GatewayStatusBadge, GatewayStatusDot, GatewayStatusText, snapshot.Gateway.State);
+        ApplyStatusBadge(AgentStatusBadge, AgentStatusDot, AgentStatusText, snapshot.Agent.State);
+        ApplyStatusBadge(TunnelStatusBadge, TunnelStatusDot, TunnelStatusText, snapshot.Tunnel.State);
 
         DeviceIdText.Text = string.IsNullOrWhiteSpace(snapshot.DeviceId)
             ? "This computer: preparing…"
@@ -599,26 +620,26 @@ public partial class MainWindow : FluentWindow
         if (snapshot.Gateway.IsHealthy && snapshot.Agent.IsHealthy && snapshot.Tunnel.IsHealthy)
         {
             OverallStatusText.Text = "All systems operational";
-            OverallStatusDot.Fill = GetResourceBrush("AgentBridgeSuccessBrush");
+            ApplyStatusBadge(OverallStatusBorder, OverallStatusDot, OverallStatusText, ManagedServiceState.Running);
         }
         else if (snapshot.Gateway.State == ManagedServiceState.External
                  || snapshot.Agent.State == ManagedServiceState.External
                  || snapshot.Tunnel.State == ManagedServiceState.External)
         {
             OverallStatusText.Text = "External services detected";
-            OverallStatusDot.Fill = GetResourceBrush("AgentBridgeWarningBrush");
+            ApplyStatusBadge(OverallStatusBorder, OverallStatusDot, OverallStatusText, ManagedServiceState.Starting);
         }
         else if (snapshot.Gateway.State == ManagedServiceState.Error
                  || snapshot.Agent.State == ManagedServiceState.Error
                  || snapshot.Tunnel.State == ManagedServiceState.Error)
         {
             OverallStatusText.Text = "Attention needed";
-            OverallStatusDot.Fill = GetResourceBrush("AgentBridgeDangerBrush");
+            ApplyStatusBadge(OverallStatusBorder, OverallStatusDot, OverallStatusText, ManagedServiceState.Error);
         }
         else
         {
             OverallStatusText.Text = "Starting services";
-            OverallStatusDot.Fill = GetResourceBrush("AgentBridgeWarningBrush");
+            ApplyStatusBadge(OverallStatusBorder, OverallStatusDot, OverallStatusText, ManagedServiceState.Starting);
         }
 
         UpdateSupervisorDependentPages();
@@ -644,6 +665,44 @@ public partial class MainWindow : FluentWindow
         return status.State == ManagedServiceState.External
             ? "External process"
             : "No active process";
+    }
+
+    private static readonly System.Windows.Media.Brush SuccessBadgeBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x05, 0x96, 0x69));
+    private static readonly System.Windows.Media.Brush SuccessBadgeBorder = System.Windows.Media.Brushes.Transparent;
+    private static readonly System.Windows.Media.Brush SuccessBadgeText = System.Windows.Media.Brushes.White;
+
+    private static readonly System.Windows.Media.Brush WarningBadgeBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xD9, 0x77, 0x06));
+    private static readonly System.Windows.Media.Brush WarningBadgeBorder = System.Windows.Media.Brushes.Transparent;
+    private static readonly System.Windows.Media.Brush WarningBadgeText = System.Windows.Media.Brushes.White;
+
+    private static readonly System.Windows.Media.Brush DangerBadgeBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDC, 0x26, 0x26));
+    private static readonly System.Windows.Media.Brush DangerBadgeBorder = System.Windows.Media.Brushes.Transparent;
+    private static readonly System.Windows.Media.Brush DangerBadgeText = System.Windows.Media.Brushes.White;
+
+    private void ApplyStatusBadge(System.Windows.Controls.Border? badge, System.Windows.Shapes.Ellipse? dot, System.Windows.Controls.TextBlock? text, ManagedServiceState state)
+    {
+        if (text is null)
+            return;
+
+        var (bg, border, fg) = state switch
+        {
+            ManagedServiceState.Running or ManagedServiceState.External
+                => (SuccessBadgeBg, SuccessBadgeBorder, SuccessBadgeText),
+            ManagedServiceState.Error
+                => (DangerBadgeBg, DangerBadgeBorder, DangerBadgeText),
+            _ => (WarningBadgeBg, WarningBadgeBorder, WarningBadgeText)
+        };
+
+        if (badge is not null)
+        {
+            badge.Background = bg;
+            badge.BorderBrush = border;
+            badge.BorderThickness = new System.Windows.Thickness(0);
+        }
+        if (dot is not null)
+            dot.Fill = fg;
+
+        text.Foreground = fg;
     }
 
     private Brush GetStatusBrush(ManagedServiceState state) => state switch

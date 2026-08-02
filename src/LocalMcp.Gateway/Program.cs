@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using LocalMcp.Gateway;
 using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Hubs;
@@ -13,6 +16,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddGatewayServices(builder.Configuration);
 builder.Services.AddHostedService<ManagedRuntimeControlService>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
 // Visibility manager.
 
 // Add SignalR
@@ -156,26 +168,143 @@ if (securityOptions.PublicExposure && !securityOptions.AuthenticationEnabled)
 }
 // ──────────────────────────────────────────────────────────────────────────
 
+// Intercept GET probe requests on /mcp endpoints before UseRouting short-circuits with 405
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        (path.Equals("/mcp", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/a", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase)))
+    {
+        var security = context.RequestServices.GetRequiredService<IOptions<SecurityOptions>>().Value;
+        if (security.AuthenticationEnabled)
+        {
+            var authService = context.RequestServices.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationService>();
+            var authResult = await authService.AuthenticateAsync(context, Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme);
+            if (!authResult.Succeeded)
+            {
+                var isB = path.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase);
+                var metadataSuffix = isB
+                    ? "/.well-known/oauth-protected-resource/mcp/b"
+                    : "/.well-known/oauth-protected-resource";
+
+                var endpointRealm = isB ? $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/b" : $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/a";
+                var metadataUrl = $"{security.PublicBaseUrl.TrimEnd('/')}{metadataSuffix}";
+                var scopesStr = string.Join(" ", security.OAuth.RequiredScopes.Distinct());
+                context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+                context.Response.Headers.Append("WWW-Authenticate", $"Bearer realm=\"{endpointRealm}\", resource_metadata=\"{metadataUrl}\", scope=\"{scopesStr}\"");
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"unauthorized\",\"message\":\"Authentication required\"}");
+                return;
+            }
+        }
+
+        context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"ok\",\"transport\":\"streamable-http\"}");
+        return;
+    }
+
+    await next(context);
+});
+
+// Sanitize ChatGPT / MCP client per-request metadata that triggers protocol version mismatch in SDK
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (HttpMethods.IsPost(context.Request.Method) &&
+        (path.Equals("/mcp", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/a", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Request.EnableBuffering();
+        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+        var bodyText = await reader.ReadToEndAsync();
+        context.Request.Body.Position = 0;
+
+        if (!string.IsNullOrWhiteSpace(bodyText) &&
+            bodyText.Contains("_meta") &&
+            bodyText.Contains("clientCapabilities"))
+        {
+            try
+            {
+                var node = JsonNode.Parse(bodyText);
+                if (node is JsonObject obj &&
+                    obj.TryGetPropertyValue("params", out var paramsNode) &&
+                    paramsNode is JsonObject paramsObj &&
+                    paramsObj.TryGetPropertyValue("_meta", out var metaNode) &&
+                    metaNode is JsonObject metaObj)
+                {
+                    var keysToRemove = metaObj
+                        .Select(kv => kv.Key)
+                        .Where(k => k.Contains("clientCapabilities", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    if (keysToRemove.Count > 0)
+                    {
+                        foreach (var key in keysToRemove)
+                        {
+                            metaObj.Remove(key);
+                        }
+
+                        var sanitizedJson = node.ToJsonString();
+                        var bytes = Encoding.UTF8.GetBytes(sanitizedJson);
+                        context.Request.Body = new MemoryStream(bytes);
+                    }
+                }
+            }
+            catch
+            {
+                context.Request.Body.Position = 0;
+            }
+        }
+    }
+
+    await next(context);
+});
+
 app.UseRouting();
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
 // ── Protected Resource Metadata (RFC 9728) ─────────────────────────────────
-var metadataHandler = (IOptions<SecurityOptions> options) =>
+var metadataHandler = (IOptions<SecurityOptions> options, HttpContext context) =>
 {
     var security = options.Value;
+    var publicUrl = security.PublicBaseUrl.TrimEnd('/');
+    var path = context.Request.Path.Value ?? string.Empty;
+
+    string targetResource;
+    if (context.Request.Query.TryGetValue("resource", out var reqResource) && !string.IsNullOrWhiteSpace(reqResource))
+    {
+        targetResource = reqResource.ToString();
+    }
+    else if (path.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase))
+    {
+        targetResource = $"{publicUrl}/mcp/b";
+    }
+    else
+    {
+        targetResource = $"{publicUrl}/mcp/a";
+    }
+
     var response = new
     {
-        resource = security.PublicBaseUrl,
-        authorization_servers = new[] { security.OAuth.Authority },
+        resource = targetResource,
+        authorization_servers = new[] { security.OAuth.Authority.TrimEnd('/') },
         scopes_supported = new[] { "files:read", "files:write", "dev:execute" },
-        resource_documentation = $"{security.PublicBaseUrl}/docs"
+        resource_documentation = $"{publicUrl}/docs"
     };
     return Results.Json(response, contentType: "application/json");
 };
 
 app.MapGet("/.well-known/oauth-protected-resource", metadataHandler).AllowAnonymous();
 app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAnonymous();
+app.MapGet("/.well-known/oauth-protected-resource/mcp/a", metadataHandler).AllowAnonymous();
+app.MapGet("/.well-known/oauth-protected-resource/mcp/b", metadataHandler).AllowAnonymous();
 // ──────────────────────────────────────────────────────────────────────────
 
 // Local supervisor health probes. The Desktop app binds the Gateway to loopback.
@@ -420,6 +549,11 @@ app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
 app.MapMcp("/mcp").RequireAuthorization("McpAuthenticatedPolicy");
 app.MapMcp("/mcp/a").RequireAuthorization("McpAuthenticatedPolicy");
 app.MapMcp("/mcp/b").RequireAuthorization("McpAuthenticatedPolicy");
+
+// Handle GET probe requests for MCP endpoints to return 401 OAuth Challenge instead of 405 Method Not Allowed
+app.MapGet("/mcp", () => Results.Ok(new { status = "ok", connection = "A", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
+app.MapGet("/mcp/a", () => Results.Ok(new { status = "ok", connection = "A", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
+app.MapGet("/mcp/b", () => Results.Ok(new { status = "ok", connection = "B", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
 
 static DateTimeOffset? TryParseDateTimeOffset(string? value) =>
     DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;

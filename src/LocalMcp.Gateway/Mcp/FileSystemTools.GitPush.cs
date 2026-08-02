@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using LocalMcp.Contracts.Commands;
@@ -12,7 +13,7 @@ public sealed partial class FileSystemTools
 
     [McpServerTool(Name = GitPushToolName, ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = true), Description("Publishes local commits from an authorized Git repository to its configured remote. Uses non-interactive Git with prompts disabled, so credentials must already be available on the Windows agent. Requires files:write scope.")]
     public async Task<CallToolResult> GitPushAsync(
-        [Description("Optional internal target device id. Omit to use the active desktop agent.")] string? deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("An absolute directory path inside the Git working tree")] string path,
         [Description("Optional Git remote name. Omit to use the branch upstream.")] string? remote = null,
         [Description("Optional branch name. If provided, remote is required.")] string? branch = null,
@@ -61,3 +62,4 @@ public sealed partial class FileSystemTools
         return trimmed.All(character => !char.IsControl(character) && !char.IsWhiteSpace(character));
     }
 }
+

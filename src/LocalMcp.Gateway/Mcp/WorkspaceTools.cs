@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -41,18 +42,15 @@ public sealed class WorkspaceTools
         OpenWorld = false),
      Description("Lists configured workspace aliases on a target Windows agent, including availability and effective read/write access. Requires files:read scope.")]
     public async Task<CallToolResult> ListAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId)
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId)
     {
         if (!await AuthorizeScopeAsync("FilesReadPolicy"))
             return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
 
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
-
         var command = new WorkspaceListCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow
         };
 
@@ -71,7 +69,7 @@ public sealed class WorkspaceTools
         OpenWorld = false),
      Description("Resolves a workspace alias plus a relative path into a canonical absolute path on a target Windows agent. Traversal outside the workspace is rejected. Set requireWritable=true before write operations. Requires files:read or files:write scope.")]
     public async Task<CallToolResult> ResolveAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Configured workspace alias, for example main or work")] string workspace,
         [Description("Relative path inside the workspace. Empty resolves the workspace root.")] string? relativePath = null,
         [Description("Whether the selected workspace must have effective write permission (default: false)")] bool requireWritable = false)
@@ -80,9 +78,6 @@ public sealed class WorkspaceTools
         var requiredScope = requireWritable ? "files:write" : "files:read";
         if (!await AuthorizeScopeAsync(policy))
             return CreateErrorResult("FORBIDDEN", $"Access denied. Required scope: {requiredScope}");
-
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
         if (string.IsNullOrWhiteSpace(workspace))
             return CreateErrorResult("INVALID_REQUEST", "workspace parameter is required.");
         if (workspace.Length > 64)
@@ -93,7 +88,7 @@ public sealed class WorkspaceTools
         var command = new WorkspaceResolveCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             Alias = workspace,
             RelativePath = relativePath,
@@ -124,7 +119,7 @@ public sealed class WorkspaceTools
     private async Task<CallToolResult> DispatchAsync<TResult>(
         AgentCommand command,
         string toolName,
-        string deviceId,
+        string? deviceId,
         CancellationToken cancellationToken)
     {
         try
@@ -165,3 +160,5 @@ public sealed class WorkspaceTools
         IsError = true
     };
 }
+
+

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -36,7 +37,7 @@ public sealed class UiScrollTools
         OpenWorld = false),
      Description("Scrolls one targeted Windows UI Automation control through ScrollPattern, then ScrollItemPattern for nested vertical containers, with a verified keyboard fallback. Does not emulate a mouse wheel. Requires dev:execute scope.")]
     public async Task<CallToolResult> ScrollAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Direction: up, down, left, or right")] string direction,
         [Description("Scroll amount: small, page, or end (default: page)")] string amount = UiScrollAmounts.Page,
@@ -48,8 +49,6 @@ public sealed class UiScrollTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId)
@@ -67,7 +66,7 @@ public sealed class UiScrollTools
         var command = new UiScrollCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             Direction = normalizedDirection,
@@ -122,3 +121,4 @@ public sealed class UiScrollTools
         IsError = true
     };
 }
+

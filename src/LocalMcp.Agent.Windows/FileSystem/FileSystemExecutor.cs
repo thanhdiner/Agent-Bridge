@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -22,6 +23,10 @@ public sealed partial class FileSystemExecutor : IFileSystemExecutor
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true
     );
+
+    private const long MaxCachedFileBytes = 1 * 1024 * 1024;
+    private const int MaxCachedFileEntries = 256;
+    private readonly ConcurrentDictionary<string, CachedReadFile> _readFileCache = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly IPathPolicy _pathPolicy;
     private readonly FileAccessOptions _options;
@@ -52,7 +57,7 @@ public sealed partial class FileSystemExecutor : IFileSystemExecutor
         Guid commandId,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Reading file {Path} for command {CommandId}", path, commandId);
+        _logger.LogDebug("Reading file {Path} for command {CommandId}", path, commandId);
 
         try
         {
@@ -61,6 +66,21 @@ public sealed partial class FileSystemExecutor : IFileSystemExecutor
 
             var fileInfo = new FileInfo(path);
             var size = fileInfo.Length;
+            var lastWriteTimeUtc = fileInfo.LastWriteTimeUtc;
+
+            if (size <= MaxCachedFileBytes
+                && _readFileCache.TryGetValue(path, out var cached)
+                && cached.Size == size
+                && cached.LastWriteTimeUtc == lastWriteTimeUtc)
+            {
+                _logger.LogDebug("Read cache hit for {Path}", path);
+                return new CommandResult<ReadFileResult>
+                {
+                    CommandId = commandId,
+                    Success = true,
+                    Data = cached.Result
+                };
+            }
 
             byte[] bytes;
             using (var fs = new FileStream(
@@ -117,18 +137,32 @@ public sealed partial class FileSystemExecutor : IFileSystemExecutor
                 };
             }
 
+            var result = new ReadFileResult
+            {
+                Path = path,
+                Content = content,
+                Encoding = encoding,
+                Size = size,
+                Sha256 = sha256Hash
+            };
+
+            if (size <= MaxCachedFileBytes)
+            {
+                if (_readFileCache.Count >= MaxCachedFileEntries)
+                    _readFileCache.Clear();
+
+                _readFileCache[path] = new CachedReadFile(size, lastWriteTimeUtc, result);
+            }
+            else
+            {
+                _readFileCache.TryRemove(path, out _);
+            }
+
             return new CommandResult<ReadFileResult>
             {
                 CommandId = commandId,
                 Success = true,
-                Data = new ReadFileResult
-                {
-                    Path = path,
-                    Content = content,
-                    Encoding = encoding,
-                    Size = size,
-                    Sha256 = sha256Hash
-                }
+                Data = result
             };
         }
         catch (OperationCanceledException)
@@ -152,6 +186,8 @@ public sealed partial class FileSystemExecutor : IFileSystemExecutor
             };
         }
     }
+
+    private sealed record CachedReadFile(long Size, DateTime LastWriteTimeUtc, ReadFileResult Result);
 
     public async Task<CommandResult<ReadRangeResult>> ReadRangeAsync(
         string path,

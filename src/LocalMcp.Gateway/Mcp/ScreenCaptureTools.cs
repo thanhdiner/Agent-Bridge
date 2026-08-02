@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -44,7 +45,7 @@ public sealed class ScreenCaptureTools
         OpenWorld = false),
      Description("Captures the composed Windows virtual desktop, one monitor, or one virtual-screen region as an in-memory PNG. Includes monitor bounds, work areas, and DPI metadata. Does not write a file. Requires dev:execute scope.")]
     public async Task<CallToolResult> CaptureScreenAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Optional zero-based monitor index. Omit to capture the full virtual desktop. Cannot be combined with region coordinates.")] int? monitorIndex = null,
         [Description("Optional region left coordinate in virtual-screen pixels. Supply x, y, width, and height together.")] int? x = null,
         [Description("Optional region top coordinate in virtual-screen pixels. Supply x, y, width, and height together.")] int? y = null,
@@ -55,15 +56,13 @@ public sealed class ScreenCaptureTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (maxWidth is < 1 or > 4096 || maxHeight is < 1 or > 4096)
             return Error("INVALID_REQUEST", "maxWidth and maxHeight must be between 1 and 4096.");
 
         var command = new ScreenScreenshotCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             MonitorIndex = monitorIndex,
             X = x,
@@ -163,3 +162,4 @@ public sealed class ScreenCaptureTools
             IsError = true
         };
 }
+

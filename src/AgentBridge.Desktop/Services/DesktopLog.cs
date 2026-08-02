@@ -11,11 +11,15 @@ public static class DesktopLog
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
+    public static bool IsEnabled { get; set; } = false;
+
     public static async Task WriteAsync(
         string message,
         Exception? exception = null,
         CancellationToken cancellationToken = default)
     {
+        if (!IsEnabled)
+            return;
         try
         {
             var directory = LocalConfigurationPaths.GetLogsDirectory();

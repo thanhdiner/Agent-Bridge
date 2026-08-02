@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -42,7 +43,7 @@ public sealed class UiWaitTools
         OpenWorld = false),
      Description("Waits until a Windows UI Automation control appears, disappears, becomes enabled, disabled, focused, matches a value, or changes value. Does not focus or modify the window. Requires dev:execute scope.")]
     public async Task<CallToolResult> WaitUiAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
         [Description("Exact control name; either automationId or name is required")] string? name = null,
@@ -55,8 +56,6 @@ public sealed class UiWaitTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId) && string.IsNullOrWhiteSpace(name))
@@ -79,7 +78,7 @@ public sealed class UiWaitTools
         var command = new UiWaitCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             AutomationId = automationId,
@@ -143,3 +142,4 @@ public sealed class UiWaitTools
             IsError = true
         };
 }
+

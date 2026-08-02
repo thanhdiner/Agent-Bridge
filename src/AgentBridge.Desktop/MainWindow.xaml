@@ -9,13 +9,19 @@
                  MinWidth="980"
                  MinHeight="620"
                  WindowStartupLocation="CenterScreen"
+                 WindowBackdropType="None"
+                 FontFamily="Inter, Segoe UI, sans-serif"
+                 TextOptions.TextFormattingMode="Display"
+                 TextOptions.TextRenderingMode="ClearType"
+                 UseLayoutRounding="True"
+                 RenderOptions.EdgeMode="Unspecified"
                  Background="{StaticResource AgentBridgeBackgroundBrush}">
     <ui:FluentWindow.Resources>
         <Style x:Key="WorkspaceRowStyle" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource AgentBridgeSurfaceBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource AgentBridgeBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="CornerRadius" Value="3" />
             <Setter Property="Padding" Value="15,12" />
             <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
@@ -25,7 +31,7 @@
         </Style>
     </ui:FluentWindow.Resources>
 
-    <Grid>
+    <Grid Background="{StaticResource AgentBridgeBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
             <RowDefinition Height="*" />
@@ -35,7 +41,7 @@
                      Title="AgentBridge"
                      Background="{StaticResource AgentBridgeSidebarBrush}" />
 
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" Background="{StaticResource AgentBridgeBackgroundBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="210" />
                 <ColumnDefinition Width="*" />
@@ -57,20 +63,19 @@
                     <StackPanel Orientation="Horizontal">
                         <Border Width="34"
                                 Height="34"
-                                CornerRadius="10"
-                                Background="{StaticResource AgentBridgeAccentSoftBrush}">
-                            <Image Source="Assets/agentbridge-icon-512.png"
-                                   Width="28"
-                                   Height="28"
-                                   Stretch="Uniform"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center" />
+                                CornerRadius="4"
+                                Background="{StaticResource AgentBridgeAccentBrush}">
+                            <ui:SymbolIcon Symbol="Shapes24"
+                                           FontSize="18"
+                                           Foreground="White"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
                         </Border>
                         <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="AgentBridge"
                                        Foreground="{StaticResource AgentBridgeTextBrush}"
-                                       FontWeight="SemiBold"
-                                       FontSize="14" />
+                                       FontWeight="Bold"
+                                       FontSize="14.5" />
                             <TextBlock Text="Control center"
                                        Foreground="{StaticResource AgentBridgeMutedBrush}"
                                        FontSize="11" />
@@ -82,6 +87,8 @@
                                    Content="Overview"
                                    Icon="{ui:SymbolIcon Home20}"
                                    Appearance="Primary"
+                                   Background="{StaticResource AgentBridgeAccentBrush}"
+                                   Foreground="White"
                                    HorizontalContentAlignment="Left"
                                    AutomationProperties.AutomationId="OverviewNavButton"
                                    Click="OverviewNav_Click" />
@@ -94,37 +101,14 @@
                                    AutomationProperties.AutomationId="WorkspacesNavButton"
                                    Click="WorkspacesNav_Click" />
                     </StackPanel>
-
-                    <StackPanel Grid.Row="4"
-                                Margin="2,0,2,0">
-                        <Border Height="1"
-                                Background="{StaticResource AgentBridgeBorderBrush}"
-                                Opacity="0.65"
-                                Margin="0,0,0,12" />
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Settings20"
-                                           Width="14"
-                                           Height="14"
-                                           Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                           Margin="0,0,7,0" />
-                            <TextBlock Text="Local config"
-                                       Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                       FontWeight="SemiBold"
-                                       FontSize="11" />
-                        </StackPanel>
-                        <TextBlock Text="Agent restart applies workspace changes."
-                                   Margin="21,5,0,0"
-                                   Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                   FontSize="10.5"
-                                   LineHeight="15"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
                 </Grid>
             </Border>
 
-            <Grid x:Name="OverviewPage"
-                  Grid.Column="1"
-                  Margin="24,22,24,18">
+            <Border Grid.Column="1"
+                    Background="{StaticResource AgentBridgeBackgroundBrush}">
+                <Grid>
+                    <Grid x:Name="OverviewPage"
+                          Margin="24,22,24,18">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="14" />
@@ -145,7 +129,7 @@
                     <StackPanel>
                         <TextBlock Text="Overview"
                                    Foreground="{StaticResource AgentBridgeTextBrush}"
-                                   FontFamily="Segoe UI Variable Display"
+                                   FontFamily="Inter, Segoe UI, sans-serif"
                                    FontSize="27"
                                    FontWeight="SemiBold" />
                         <TextBlock Text="Gateway, Windows Agent, and Tunnel are managed from one place."
@@ -153,23 +137,24 @@
                                    Foreground="{StaticResource AgentBridgeMutedBrush}"
                                    FontSize="13" />
                     </StackPanel>
-                    <Border Grid.Column="1"
-                            Background="{StaticResource AgentBridgeSurfaceBrush}"
-                            BorderBrush="{StaticResource AgentBridgeBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="9"
-                            Padding="11,7"
+                    <Border x:Name="OverallStatusBorder"
+                            Grid.Column="1"
+                            Background="#059669"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="3"
+                            Padding="12,6"
                             VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="OverallStatusDot"
                                      Width="8"
                                      Height="8"
-                                     Fill="{StaticResource AgentBridgeWarningBrush}"
+                                     Fill="White"
                                      Margin="0,0,7,0" />
                             <TextBlock x:Name="OverallStatusText"
                                        Text="Starting services"
-                                       Foreground="{StaticResource AgentBridgeTextBrush}"
-                                       FontSize="11.5"
+                                       Foreground="White"
+                                       FontSize="12"
                                        FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
@@ -194,7 +179,7 @@
                             Background="{StaticResource AgentBridgeSurfaceBrush}"
                             BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="11"
+                            CornerRadius="3"
                             Padding="17">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -203,7 +188,7 @@
                             </Grid.ColumnDefinitions>
                             <Border Width="36"
                                     Height="36"
-                                    CornerRadius="10"
+                                    CornerRadius="3"
                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
                                     VerticalAlignment="Top">
                                 <ui:SymbolIcon Symbol="DesktopPulse24"
@@ -216,29 +201,40 @@
                                            Foreground="{StaticResource AgentBridgeTextBrush}"
                                            FontSize="14"
                                            FontWeight="SemiBold" />
-                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                    <Ellipse x:Name="GatewayStatusDot"
-                                             Width="7"
-                                             Height="7"
-                                             Fill="{StaticResource AgentBridgeWarningBrush}"
-                                             Margin="0,0,6,0" />
-                                    <TextBlock x:Name="GatewayStatusText"
-                                               Text="Starting"
-                                               Foreground="{StaticResource AgentBridgeWarningBrush}"
-                                               FontSize="11.5"
-                                               FontWeight="SemiBold" />
-                                </StackPanel>
+                                <Border x:Name="GatewayStatusBadge"
+                                        Background="#D97706"
+                                        BorderBrush="Transparent"
+                                        BorderThickness="0"
+                                        CornerRadius="3"
+                                        Padding="8,4"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,8,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse x:Name="GatewayStatusDot"
+                                                 Width="7"
+                                                 Height="7"
+                                                 Fill="White"
+                                                 Margin="0,0,6,0" />
+                                        <TextBlock x:Name="GatewayStatusText"
+                                                   Text="Starting"
+                                                   Foreground="White"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock x:Name="GatewayDetailText"
                                            Text="Waiting for health check…"
                                            Margin="0,7,0,0"
                                            Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                           FontSize="11"
+                                           FontSize="12.5"
+                                           FontWeight="Medium"
                                            TextWrapping="Wrap" />
                                 <TextBlock x:Name="GatewayMetaText"
                                            Text="No process yet"
                                            Margin="0,7,0,0"
                                            Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                           FontSize="10.5" />
+                                           FontSize="12"
+                                           FontWeight="Medium" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -247,7 +243,7 @@
                             Background="{StaticResource AgentBridgeSurfaceBrush}"
                             BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="11"
+                            CornerRadius="3"
                             Padding="17">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -256,7 +252,7 @@
                             </Grid.ColumnDefinitions>
                             <Border Width="36"
                                     Height="36"
-                                    CornerRadius="10"
+                                    CornerRadius="3"
                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
                                     VerticalAlignment="Top">
                                 <ui:SymbolIcon Symbol="DesktopSignal20"
@@ -269,29 +265,40 @@
                                            Foreground="{StaticResource AgentBridgeTextBrush}"
                                            FontSize="14"
                                            FontWeight="SemiBold" />
-                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                    <Ellipse x:Name="AgentStatusDot"
-                                             Width="7"
-                                             Height="7"
-                                             Fill="{StaticResource AgentBridgeWarningBrush}"
-                                             Margin="0,0,6,0" />
-                                    <TextBlock x:Name="AgentStatusText"
-                                               Text="Starting"
-                                               Foreground="{StaticResource AgentBridgeWarningBrush}"
-                                               FontSize="11.5"
-                                               FontWeight="SemiBold" />
-                                </StackPanel>
+                                <Border x:Name="AgentStatusBadge"
+                                        Background="#D97706"
+                                        BorderBrush="Transparent"
+                                        BorderThickness="0"
+                                        CornerRadius="3"
+                                        Padding="8,4"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,8,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse x:Name="AgentStatusDot"
+                                                 Width="7"
+                                                 Height="7"
+                                                 Fill="White"
+                                                 Margin="0,0,6,0" />
+                                        <TextBlock x:Name="AgentStatusText"
+                                                   Text="Starting"
+                                                   Foreground="White"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock x:Name="AgentDetailText"
                                            Text="Waiting for Gateway…"
                                            Margin="0,7,0,0"
                                            Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                           FontSize="11"
+                                           FontSize="12.5"
+                                           FontWeight="Medium"
                                            TextWrapping="Wrap" />
                                 <TextBlock x:Name="AgentMetaText"
                                            Text="No process yet"
                                            Margin="0,7,0,0"
                                            Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                           FontSize="10.5" />
+                                           FontSize="12"
+                                           FontWeight="Medium" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -300,7 +307,7 @@
                             Background="{StaticResource AgentBridgeSurfaceBrush}"
                             BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="11"
+                            CornerRadius="3"
                             Padding="17">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -309,7 +316,7 @@
                             </Grid.ColumnDefinitions>
                             <Border Width="36"
                                     Height="36"
-                                    CornerRadius="10"
+                                    CornerRadius="3"
                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
                                     VerticalAlignment="Top">
                                 <ui:SymbolIcon Symbol="Cloud24"
@@ -322,29 +329,40 @@
                                            Foreground="{StaticResource AgentBridgeTextBrush}"
                                            FontSize="14"
                                            FontWeight="SemiBold" />
-                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                    <Ellipse x:Name="TunnelStatusDot"
-                                             Width="7"
-                                             Height="7"
-                                             Fill="{StaticResource AgentBridgeWarningBrush}"
-                                             Margin="0,0,6,0" />
-                                    <TextBlock x:Name="TunnelStatusText"
-                                               Text="Starting"
-                                               Foreground="{StaticResource AgentBridgeWarningBrush}"
-                                               FontSize="11.5"
-                                               FontWeight="SemiBold" />
-                                </StackPanel>
+                                <Border x:Name="TunnelStatusBadge"
+                                        Background="#D97706"
+                                        BorderBrush="Transparent"
+                                        BorderThickness="0"
+                                        CornerRadius="3"
+                                        Padding="8,4"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,8,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse x:Name="TunnelStatusDot"
+                                                 Width="7"
+                                                 Height="7"
+                                                 Fill="White"
+                                                 Margin="0,0,6,0" />
+                                        <TextBlock x:Name="TunnelStatusText"
+                                                   Text="Starting"
+                                                   Foreground="White"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock x:Name="TunnelDetailText"
                                            Text="Tunnel waiting for Gateway"
                                            Margin="0,7,0,0"
                                            Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                           FontSize="11"
+                                           FontSize="12.5"
+                                           FontWeight="Medium"
                                            TextWrapping="Wrap" />
                                 <TextBlock x:Name="TunnelMetaText"
                                            Text="No process yet"
                                            Margin="0,7,0,0"
                                            Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                           FontSize="10.5" />
+                                           FontSize="12"
+                                           FontWeight="Medium" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -354,7 +372,7 @@
                         Background="{StaticResource AgentBridgeSurfaceBrush}"
                         BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                         BorderThickness="1"
-                        CornerRadius="11"
+                        CornerRadius="3"
                         Padding="17">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -372,9 +390,9 @@
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="DEFAULT DEVICE"
-                                   Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                   FontSize="10.5"
-                                   FontWeight="SemiBold" />
+                                   Foreground="{StaticResource AgentBridgeMutedBrush}"
+                                   FontSize="11.5"
+                                   FontWeight="Bold" />
                         <StackPanel Grid.Column="1">
                             <StackPanel Orientation="Horizontal">
                                 <ComboBox x:Name="DefaultDeviceComboBox"
@@ -392,48 +410,52 @@
                             <TextBlock x:Name="DeviceIdText"
                                        Text="This computer: preparing…"
                                        Margin="0,6,0,0"
-                                       Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                       FontFamily="Cascadia Mono"
-                                       FontSize="10.5"
+                                       Foreground="{StaticResource AgentBridgeTextBrush}"
+                                       FontFamily="Consolas, Cascadia Code, Segoe UI, monospace"
+                                       FontSize="12"
+                                       FontWeight="Medium"
                                        TextTrimming="CharacterEllipsis" />
                         </StackPanel>
 
                         <TextBlock Grid.Row="2"
                                    Text="GATEWAY ENDPOINT"
-                                   Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                   FontSize="10.5"
-                                   FontWeight="SemiBold" />
+                                   Foreground="{StaticResource AgentBridgeMutedBrush}"
+                                   FontSize="11.5"
+                                   FontWeight="Bold" />
                         <TextBlock x:Name="GatewayUrlText"
                                    Grid.Row="2"
                                    Grid.Column="1"
                                    Text="http://127.0.0.1:5227"
                                    Foreground="{StaticResource AgentBridgeTextBrush}"
-                                   FontFamily="Cascadia Mono"
-                                   FontSize="11.5" />
+                                   FontFamily="Consolas, Cascadia Code, Segoe UI, monospace"
+                                   FontSize="12.5"
+                                   FontWeight="SemiBold" />
 
                         <TextBlock Grid.Row="4"
                                    Text="LOGS"
-                                   Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                   FontSize="10.5"
-                                   FontWeight="SemiBold" />
+                                   Foreground="{StaticResource AgentBridgeMutedBrush}"
+                                   FontSize="11.5"
+                                   FontWeight="Bold" />
                         <TextBlock x:Name="LogsDirectoryText"
                                    Grid.Row="4"
                                    Grid.Column="1"
                                    Foreground="{StaticResource AgentBridgeTextBrush}"
-                                   FontFamily="Cascadia Mono"
-                                   FontSize="11.5"
+                                   FontFamily="Consolas, Cascadia Code, Segoe UI, monospace"
+                                   FontSize="12.5"
+                                   FontWeight="Medium"
                                    TextTrimming="CharacterEllipsis" />
 
                         <TextBlock Grid.Row="6"
                                    Text="LAST CHECKED"
-                                   Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                   FontSize="10.5"
-                                   FontWeight="SemiBold" />
+                                   Foreground="{StaticResource AgentBridgeMutedBrush}"
+                                   FontSize="11.5"
+                                   FontWeight="Bold" />
                         <TextBlock x:Name="LastCheckedText"
                                    Grid.Row="6"
                                    Grid.Column="1"
-                                   Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                   FontSize="11.5" />
+                                   Foreground="{StaticResource AgentBridgeTextBrush}"
+                                   FontSize="12.5"
+                                   FontWeight="Medium" />
                     </Grid>
                 </Border>
 
@@ -445,16 +467,24 @@
                     </Grid.RowDefinitions>
                     <TextBlock Text="Managed services continue running while AgentBridge is hidden to tray."
                                Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                               FontSize="10.5"
+                               FontSize="12"
+                               FontWeight="Medium"
                                TextTrimming="CharacterEllipsis" />
                     <WrapPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" ItemHeight="38">
-                        <TextBlock x:Name="ActivationStatusText"
-                                   Text="Not activated"
-                                   Foreground="{StaticResource AgentBridgeWarningBrush}"
-                                   FontSize="11.5"
-                                   FontWeight="SemiBold"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,14,8" />
+                        <Border x:Name="ActivationStatusBadge"
+                                Background="#D97706"
+                                BorderBrush="Transparent"
+                                BorderThickness="0"
+                                CornerRadius="3"
+                                Padding="9,4"
+                                VerticalAlignment="Center"
+                                Margin="0,0,14,8">
+                            <TextBlock x:Name="ActivationStatusText"
+                                       Text="Not activated"
+                                       Foreground="White"
+                                       FontSize="12"
+                                       FontWeight="SemiBold" />
+                        </Border>
                         <ui:Button x:Name="ActivateDeviceButton"
                                    Content="Activate this computer"
                                    Appearance="Secondary"
@@ -497,10 +527,9 @@
                 </Grid>
             </Grid>
 
-            <Grid x:Name="WorkspacePage"
-                  Grid.Column="1"
-                  Margin="24,22,24,18"
-                  Visibility="Collapsed">
+                    <Grid x:Name="WorkspacePage"
+                          Margin="24,22,24,18"
+                          Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="12" />
@@ -565,7 +594,7 @@
 
                                             <Border Width="34"
                                                     Height="34"
-                                                    CornerRadius="9"
+                                                    CornerRadius="3"
                                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
                                                     VerticalAlignment="Center">
                                                 <ui:SymbolIcon Symbol="Folder24"
@@ -607,7 +636,7 @@
                                                     Background="{StaticResource AgentBridgeSidebarBrush}"
                                                     BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                                                     BorderThickness="1"
-                                                    CornerRadius="7"
+                                                    CornerRadius="4"
                                                     Padding="8,5"
                                                     Margin="0,0,8,0"
                                                     VerticalAlignment="Center">
@@ -658,14 +687,14 @@
                             Background="{StaticResource AgentBridgeSurfaceBrush}"
                             BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="11"
+                            CornerRadius="3"
                             Visibility="Collapsed">
                         <StackPanel Width="420"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center">
                             <Border Width="52"
                                     Height="52"
-                                    CornerRadius="15"
+                                    CornerRadius="4"
                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
                                     HorizontalAlignment="Center">
                                 <ui:SymbolIcon Symbol="FolderAdd16"
@@ -719,6 +748,8 @@
                                Click="HideToTray_Click" />
                 </Grid>
             </Grid>
+            </Grid>
+            </Border>
         </Grid>
     </Grid>
 </ui:FluentWindow>

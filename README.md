@@ -33,11 +33,36 @@ The bridge is designed around explicit boundaries:
 | Text and native dialogs | Read or replace clipboard text, send guarded key chords, type text, and set paths in Open or Save dialogs | `clipboard_get`, `clipboard_set`, `ui_hotkey`, `ui_type_text`, `file_dialog_set_path` |
 | Files, workspaces, and Git | Discover portable workspace aliases, resolve relative paths, read, search, patch, copy, move, delete, inspect Git state and history, and verify projects inside configured roots | `workspace_list`, `workspace_resolve`, `fs_read`, `fs_search_context`, `fs_batch_patch`, `git_status`, `git_diff`, `git_log`, `project_verify` |
 | PowerShell | Run bounded PowerShell 7 commands, start observable sessions, poll status, and cancel process trees | `powershell_exec`, `powershell_start`, `powershell_status`, `powershell_cancel` |
+| Developer workflows | Build and diagnose extensions, trace DOM activity, supervise process trees, run repository dev sessions, compare UI captures, and save lightweight task checkpoints | `extension_dev_workflow`, `browser_extension_inspect`, `dom_event_trace`, `process_tree_supervisor`, `dev_session_run`, `visual_regression_compare`, `repo_task_checkpoint` |
 | Chrome DevTools MCP | Attach to the currently opened Chrome profile through `chrome-devtools-mcp --autoConnect`, cache the discovered tools, and reuse one persistent MCP session | `chrome-devtools.*` |
 
 The Gateway currently registers the complete tool surface from `src/LocalMcp.Gateway/Mcp/`. Aliases such as `ui_get_text` and `ui_hotkey` keep the public API readable while reusing the existing execution core.
 
 Chrome DevTools tools are proxied from the external `chrome-devtools` MCP server and are namespaced as `chrome-devtools.<tool>` to avoid conflicts with local AgentBridge tools.
+
+### Developer workflow profiles
+
+`dev_session_run` reads repository-local profiles from `.agentbridge/dev-sessions.json`. The `init` action creates a small template. A profile may start up to 12 commands and define up to 20 HTTP or TCP health checks:
+
+```json
+{
+  "profiles": {
+    "default": {
+      "commands": [
+        { "name": "app", "command": "npm run dev", "workingDirectory": "." }
+      ],
+      "healthChecks": [
+        { "name": "web", "url": "http://localhost:3000" },
+        { "name": "api", "host": "127.0.0.1", "port": 5227 }
+      ]
+    }
+  }
+}
+```
+
+Runtime logs and visual captures are written under `.agentbridge/sessions/` and `.agentbridge/visual-regression/`; both are ignored by Git. `repo_task_checkpoint` stores only branch, HEAD, changed-file status/path metadata, a short note, and a test summary in `.agentbridge/checkpoints.jsonl`. It never stores full diffs, debounces identical saves for 10 seconds by default, and retains 200 entries by default.
+
+The extension workflow, extension inspector, DOM tracer, and visual regression tools require the Chrome DevTools MCP connection and permission to access the current Chrome profile.
 
 ## Requirements
 

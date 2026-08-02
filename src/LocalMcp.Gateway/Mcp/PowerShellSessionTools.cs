@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -44,7 +45,7 @@ public sealed class PowerShellSessionTools
          "Requires dev:execute scope. " +
          "The script is not filesystem-sandboxed and runs with the agent user's privileges.")]
     public async Task<CallToolResult> StartSessionAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The absolute working directory path on the agent (must be within AllowedRoots)")] string workingDirectory,
         [Description("The PowerShell 7 script to run asynchronously")] string script,
         [Description("Timeout in seconds before the agent kills the script (1–900, default: 120)")] int timeoutSeconds = 120,
@@ -52,9 +53,6 @@ public sealed class PowerShellSessionTools
     {
         if (!await AuthorizeScopeAsync("DevExecutePolicy"))
             return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
-
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
         if (string.IsNullOrWhiteSpace(workingDirectory))
             return CreateErrorResult("INVALID_REQUEST", "workingDirectory parameter is required.");
@@ -71,7 +69,7 @@ public sealed class PowerShellSessionTools
         var command = new PowerShellStartCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WorkingDirectory = workingDirectory,
             Script = script,
@@ -90,7 +88,7 @@ public sealed class PowerShellSessionTools
          "Windows agent device. Pass nextStdoutOffset and nextStderrOffset from the previous response as stdoutOffset and stderrOffset to page through output. " +
          "Requires dev:execute scope.")]
     public async Task<CallToolResult> GetSessionStatusAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The sessionId returned by powershell_start")] string sessionId,
         [Description("Byte offset into the stdout buffer; use 0 on first call, then nextStdoutOffset from each response")] long stdoutOffset = 0,
         [Description("Byte offset into the stderr buffer; use 0 on first call, then nextStderrOffset from each response")] long stderrOffset = 0,
@@ -98,9 +96,6 @@ public sealed class PowerShellSessionTools
     {
         if (!await AuthorizeScopeAsync("DevExecutePolicy"))
             return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
-
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
         if (!Guid.TryParse(sessionId, out var parsedSessionId))
             return CreateErrorResult("INVALID_REQUEST", "sessionId must be a valid GUID.");
@@ -114,7 +109,7 @@ public sealed class PowerShellSessionTools
         var command = new PowerShellStatusCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             SessionId = parsedSessionId,
             StdoutOffset = stdoutOffset,
@@ -133,14 +128,11 @@ public sealed class PowerShellSessionTools
          "Idempotent: safe to call on sessions that have already completed. Returns the session's final state. " +
          "Requires dev:execute scope.")]
     public async Task<CallToolResult> CancelSessionAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The sessionId returned by powershell_start")] string sessionId)
     {
         if (!await AuthorizeScopeAsync("DevExecutePolicy"))
             return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: dev:execute");
-
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
         if (!Guid.TryParse(sessionId, out var parsedSessionId))
             return CreateErrorResult("INVALID_REQUEST", "sessionId must be a valid GUID.");
@@ -148,7 +140,7 @@ public sealed class PowerShellSessionTools
         var command = new PowerShellCancelCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             SessionId = parsedSessionId
         };
@@ -171,7 +163,7 @@ public sealed class PowerShellSessionTools
     private async Task<CallToolResult> DispatchAsync<TResult>(
         AgentCommand command,
         string toolName,
-        string deviceId,
+        string? deviceId,
         CancellationToken cancellationToken)
     {
         try
@@ -206,3 +198,5 @@ public sealed class PowerShellSessionTools
             IsError = true
         };
 }
+
+

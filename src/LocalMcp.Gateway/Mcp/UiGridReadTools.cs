@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class UiGridReadTools
         OpenWorld = false),
      Description("Reads a bounded row and column window from one Windows UI Automation GridPattern or TablePattern control, including headers and cell metadata. Password values are always redacted. Requires dev:execute scope.")]
     public async Task<CallToolResult> ReadAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Optional exact automationId selector")] string? automationId = null,
         [Description("Optional exact control name selector")] string? name = null,
@@ -55,8 +56,6 @@ public sealed class UiGridReadTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId)
@@ -85,7 +84,7 @@ public sealed class UiGridReadTools
         var command = new UiGridReadCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             AutomationId = automationId,
@@ -145,3 +144,4 @@ public sealed class UiGridReadTools
         IsError = true
     };
 }
+

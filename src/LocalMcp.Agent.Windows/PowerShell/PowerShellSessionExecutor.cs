@@ -62,6 +62,7 @@ internal class PowerShellSessionExecutor
                 return;
             }
 
+            Utils.ChildProcessTracker.AddProcess(process);
             session.Process = process;
             try
             {

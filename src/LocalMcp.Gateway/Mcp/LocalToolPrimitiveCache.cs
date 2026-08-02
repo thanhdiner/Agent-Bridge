@@ -18,7 +18,7 @@ public sealed class LocalToolPrimitiveCache
                 continue;
 
             _primitives[name] = primitive;
-            _protocolTools[name] = protocolTool!;
+            _protocolTools[name] = ToolSchemaSanitizer.NormalizeLocalToolSchema(protocolTool!);
         }
     }
 

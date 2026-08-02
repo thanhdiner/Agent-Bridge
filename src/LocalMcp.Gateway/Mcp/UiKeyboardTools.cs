@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -42,7 +43,7 @@ public sealed class UiKeyboardTools
         OpenWorld = false),
      Description("Sends one validated keyboard chord to a target Windows window or control. Requires dev:execute scope.")]
     public Task<CallToolResult> HotkeyAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("The key chord as + joined tokens, for example CTRL+A. Maximum 64 characters.")] string keys,
         [Description("Optional exact automationId of the control to target")] string? automationId = null,
@@ -60,7 +61,7 @@ public sealed class UiKeyboardTools
         OpenWorld = false),
      Description("Performs a standard keyboard action (such as key gesture or shortcut) on a targeted user interface control. Requires dev:execute scope.")]
     public async Task<CallToolResult> PressKeyAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("The key gesture to execute, represented by + joined tokens (e.g. CTRL+L, F5). Maximum 64 characters.")] string keys,
         [Description("Optional exact automationId of the control to target")] string? automationId = null,
@@ -89,7 +90,7 @@ public sealed class UiKeyboardTools
             new UiPressKeyCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 WindowHandle = windowHandle,
                 Keys = keys,
@@ -110,7 +111,7 @@ public sealed class UiKeyboardTools
         OpenWorld = false),
      Description("Enters Unicode text characters into a targeted user interface text input control. Requires dev:execute scope.")]
     public async Task<CallToolResult> TypeTextAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("The Unicode text characters to enter. Maximum 4096 characters. The typed text is not returned in the result.")] string text,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
@@ -139,7 +140,7 @@ public sealed class UiKeyboardTools
             new UiTypeTextCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 WindowHandle = windowHandle,
                 Text = text,
@@ -153,7 +154,7 @@ public sealed class UiKeyboardTools
     }
 
     private async Task<CallToolResult?> ValidateSelectorAsync(
-        string deviceId,
+        string? deviceId,
         string windowHandle,
         string? automationId,
         string? name,
@@ -163,8 +164,6 @@ public sealed class UiKeyboardTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (requireSelector && string.IsNullOrWhiteSpace(automationId) && string.IsNullOrWhiteSpace(name))
@@ -229,3 +228,5 @@ public sealed class UiKeyboardTools
             IsError = true
         };
 }
+
+

@@ -106,6 +106,8 @@ public sealed partial class FileSystemExecutor
                     "PowerShell 7 could not be started.");
             }
 
+            Utils.ChildProcessTracker.AddProcess(process);
+
             var stdoutTask = ReadPowerShellOutputAsync(
                 process.StandardOutput.BaseStream,
                 maxOutputBytes);
