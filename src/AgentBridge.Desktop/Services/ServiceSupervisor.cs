@@ -18,8 +18,8 @@ public sealed class ServiceSupervisor : IAsyncDisposable
     public const string DefaultGatewayUrl = "http://127.0.0.1:5227";
     public const string DefaultTunnelName = "localmcp";
 
-    private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan ForcedStopTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan ForcedStopTimeout = TimeSpan.FromSeconds(2);
 
     private readonly ServiceBinaryLocator _binaryLocator;
     private readonly LocalDeviceIdentityStore _identityStore;
@@ -150,9 +150,10 @@ public sealed class ServiceSupervisor : IAsyncDisposable
                 Tunnel = StartingStatus("Restarting Tunnel...")
             });
 
-            await StopOwnedTunnelAsync(cancellationToken);
-            await StopOwnedAgentAsync(cancellationToken);
-            await StopOwnedGatewayAsync(cancellationToken);
+            await Task.WhenAll(
+                StopOwnedTunnelAsync(cancellationToken),
+                StopOwnedAgentAsync(cancellationToken),
+                StopOwnedGatewayAsync(cancellationToken));
             _gatewayBackoff.Reset();
             _agentBackoff.Reset();
             _tunnelBackoff.Reset();
@@ -234,9 +235,10 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         await _operationGate.WaitAsync(cancellationToken);
         try
         {
-            await StopOwnedTunnelAsync(cancellationToken);
-            await StopOwnedAgentAsync(cancellationToken);
-            await StopOwnedGatewayAsync(cancellationToken);
+            await Task.WhenAll(
+                StopOwnedTunnelAsync(cancellationToken),
+                StopOwnedAgentAsync(cancellationToken),
+                StopOwnedGatewayAsync(cancellationToken));
             Publish(Current with
             {
                 Gateway = StoppedStatus("Stopped by AgentBridge Desktop."),
@@ -1020,7 +1022,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 
     private async Task StopOwnedTunnelAsync(CancellationToken cancellationToken)
     {
-        await StopProcessAsync(_tunnelProcess, GetTunnelLogFileName(), _tunnelLogGate, cancellationToken);
+        await StopProcessAsync(_tunnelProcess, GetTunnelLogFileName(), _tunnelLogGate, cancellationToken, forceKill: true);
         _tunnelProcess = null;
     }
 
@@ -1040,7 +1042,8 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         Process? process,
         string logFileName,
         SemaphoreSlim logGate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool forceKill = false)
     {
         if (!IsAlive(process))
         {
@@ -1049,40 +1052,47 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         }
 
         var logPath = Path.Combine(_logsDirectory, logFileName);
-        await AppendServiceLogAsync(
-            logPath,
-            "STOP",
-            $"Requesting graceful stop for PID {process!.Id}.",
-            logGate);
-
         var exitedGracefully = false;
-        try
-        {
-            await process.StandardInput.WriteLineAsync("stop");
-            await process.StandardInput.FlushAsync();
 
-            using var gracefulTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            gracefulTimeout.CancelAfter(GracefulStopTimeout);
-            await process.WaitForExitAsync(gracefulTimeout.Token);
-            exitedGracefully = true;
-        }
-        catch (InvalidOperationException)
+        if (!forceKill)
         {
-        }
-        catch (IOException)
-        {
-        }
-        catch (OperationCanceledException)
-        {
+            await AppendServiceLogAsync(
+                logPath,
+                "STOP",
+                $"Requesting graceful stop for PID {process!.Id}.",
+                logGate);
+
+            try
+            {
+                await process.StandardInput.WriteLineAsync("stop");
+                await process.StandardInput.FlushAsync();
+
+                using var gracefulTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                gracefulTimeout.CancelAfter(GracefulStopTimeout);
+                await process.WaitForExitAsync(gracefulTimeout.Token);
+                exitedGracefully = true;
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         if (!exitedGracefully && IsAlive(process))
         {
-            await AppendServiceLogAsync(
-                logPath,
-                "WARN",
-                $"Graceful stop exceeded {GracefulStopTimeout.TotalSeconds:0} seconds. Killing process tree.",
-                logGate);
+            if (!forceKill)
+            {
+                await AppendServiceLogAsync(
+                    logPath,
+                    "WARN",
+                    $"Graceful stop exceeded {GracefulStopTimeout.TotalMilliseconds:0}ms. Killing process tree.",
+                    logGate);
+            }
 
             try
             {
