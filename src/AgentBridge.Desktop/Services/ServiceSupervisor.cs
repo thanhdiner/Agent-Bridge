@@ -1045,9 +1045,12 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         CancellationToken cancellationToken,
         bool forceKill = false)
     {
+        if (process is null)
+            return;
+
         if (!IsAlive(process))
         {
-            process?.Dispose();
+            process.Dispose();
             return;
         }
 
@@ -1059,7 +1062,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             await AppendServiceLogAsync(
                 logPath,
                 "STOP",
-                $"Requesting graceful stop for PID {process!.Id}.",
+                $"Requesting graceful stop for PID {process.Id}.",
                 logGate);
 
             try
@@ -1116,7 +1119,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         process.Dispose();
     }
 
-    private static bool IsAlive(Process? process)
+    private static bool IsAlive([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] Process? process)
     {
         if (process is null)
             return false;
