@@ -311,11 +311,14 @@ public partial class MainWindow
             _toolPage.Visibility = Visibility.Visible;
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Collapsed;
+        if (_androidPage is not null)
+            _androidPage.Visibility = Visibility.Collapsed;
 
         ApplyNavButtonStyle(OverviewNavButton, false);
         ApplyNavButtonStyle(WorkspacesNavButton, false);
         ApplyNavButtonStyle(_toolsNavButton, true);
         ApplyNavButtonStyle(_runtimeNavButton, false);
+        ApplyNavButtonStyle(_androidNavButton, false);
     }
 
     private async void ToolRefresh_Click(object sender, RoutedEventArgs e) =>

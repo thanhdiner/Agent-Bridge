@@ -35,6 +35,7 @@ The bridge is designed around explicit boundaries:
 | PowerShell | Run bounded PowerShell 7 commands, start observable sessions, poll status, and cancel process trees | `powershell_exec`, `powershell_start`, `powershell_status`, `powershell_cancel` |
 | Developer workflows | Build and diagnose extensions, trace DOM activity, supervise process trees, run repository dev sessions, compare UI captures, and save lightweight task checkpoints | `extension_dev_workflow`, `browser_extension_inspect`, `dom_event_trace`, `process_tree_supervisor`, `dev_session_run`, `visual_regression_compare`, `repo_task_checkpoint` |
 | Chrome DevTools MCP | Attach to the currently opened Chrome profile through `chrome-devtools-mcp --autoConnect`, cache the discovered tools, and reuse one persistent MCP session | `chrome-devtools.*` |
+| Android over ADB | Discover a paired Android phone, inspect state and UI hierarchy, capture screenshots, tap, swipe, type safe text, press allowlisted keys, and open apps | `android_device_list`, `android_get_state`, `android_screenshot`, `android_ui_tree`, `android_tap`, `android_swipe` |
 
 The Gateway currently registers the complete tool surface from `src/LocalMcp.Gateway/Mcp/`. Aliases such as `ui_get_text` and `ui_hotkey` keep the public API readable while reusing the existing execution core.
 
@@ -114,8 +115,11 @@ AgentBridge exposes tools through two MCP connection shards so each ChatGPT refr
 |---|---|
 | AgentBridge A | `http://localhost:5227/mcp/a` |
 | AgentBridge B | `http://localhost:5227/mcp/b` |
+| AgentBridge Android A | `http://localhost:5227/mcp/android/a` |
 
 Use the Desktop app's **Tools** screen to assign enabled tools to Connection A, Connection B, or None. Each connection can expose up to 150 enabled tools; the combined total across both connections can be higher.
+
+The Android connector is intentionally isolated: `/mcp/android/a` exports only `android_*` tools, while `/mcp/a` and `/mcp/b` never export or execute Android tools. Android tools are not controlled by the desktop A/B assignment screen.
 
 ### Chrome DevTools MCP for the current Chrome profile
 
@@ -172,6 +176,36 @@ dotnet run --project .\src\LocalMcp.Agent.Windows -c Release --no-build
 ```
 
 A successful first connection produces Agent and Gateway logs showing that the SignalR connection started and the device registered.
+
+### 5. Pair and start an Android phone over Wi-Fi
+
+Android 11 or newer can pair without a USB cable. Enable **Developer options → Wireless debugging → Pair device with pairing code**, then run:
+
+```powershell
+adb pair 192.168.1.50:37123
+adb connect 192.168.1.50:41277
+adb devices
+```
+
+Use the connected serial reported by `adb devices` to start the independent Android process:
+
+```powershell
+.\run-android-agent.bat 192.168.1.50:41277 http://127.0.0.1:5227
+```
+
+Equivalent environment-based startup:
+
+```powershell
+$env:AndroidAdb__Serial = "192.168.1.50:41277"
+$env:AndroidAdb__GatewayUrl = "http://127.0.0.1:5227"
+dotnet run --project .\src\LocalMcp.Agent.AndroidAdb
+```
+
+The generated device id is stable for the ADB serial (for example `android-192.168.1.50-41277`). Set `AndroidAdb__DeviceId` to override it. The Android process is not started by the Desktop app or existing installer, so a phone disconnect or ADB failure cannot stop the Windows Agent.
+
+Connect the MCP client to `http://localhost:5227/mcp/android/a`. When exactly one Android device is online, tool calls may omit `deviceId`; with multiple phones, call `android_device_list` and pass the selected id. Execution tools still require the Gateway's `dev:execute` authorization and normal device activation/license checks.
+
+Do not expose an ADB port directly to the public Internet. Wireless ADB should stay on a trusted LAN or a controlled private VPN.
 
 ### Desktop control center
 

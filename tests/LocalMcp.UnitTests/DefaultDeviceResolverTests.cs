@@ -99,6 +99,19 @@ public sealed class DefaultDeviceResolverTests
         Assert.Equal("explicit-device", result.DeviceId);
     }
 
+    [Fact]
+    public void Resolve_DefaultDesktopDevice_IgnoresConnectedAndroidAgents()
+    {
+        _registry.Register("desktop", "desktop-connection", platform: "windows");
+        _registry.Register("android-phone", "android-connection", platform: "android");
+        var resolver = CreateResolver();
+
+        var result = resolver.Resolve(null);
+
+        Assert.True(result.Success);
+        Assert.Equal("desktop", result.DeviceId);
+    }
+
     private DefaultDeviceResolver CreateResolver() =>
         new(_registry, _preferredDeviceStore);
 

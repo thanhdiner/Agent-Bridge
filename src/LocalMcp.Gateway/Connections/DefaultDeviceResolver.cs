@@ -22,7 +22,9 @@ public sealed class DefaultDeviceResolver : IDeviceResolver
         }
 
         var activeDevices = _registry
-            .GetActiveDevices()
+            .GetActiveDeviceInfos()
+            .Where(device => string.Equals(device.Platform, "windows", StringComparison.OrdinalIgnoreCase))
+            .Select(device => device.DeviceId)
             .Where(deviceId => !string.IsNullOrWhiteSpace(deviceId))
             .OrderBy(deviceId => deviceId, StringComparer.OrdinalIgnoreCase)
             .ToArray();

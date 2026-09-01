@@ -43,7 +43,8 @@ function Get-AgentBridgeProcess {
     $names = @(
         'AgentBridge.Desktop.exe',
         'LocalMcp.Gateway.exe',
-        'LocalMcp.Agent.Windows.exe'
+        'LocalMcp.Agent.Windows.exe',
+        'LocalMcp.Agent.AndroidAdb.exe'
     )
 
     Get-CimInstance Win32_Process |

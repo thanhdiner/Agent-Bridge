@@ -121,6 +121,16 @@ public static class ErrorCodes
     public const string UiScrollNotSupported = "UI_SCROLL_NOT_SUPPORTED";
     public const string UiScrollFailed = "UI_SCROLL_FAILED";
 
+    // Android ADB-related error codes
+    public const string AndroidDeviceUnavailable = "ANDROID_DEVICE_UNAVAILABLE";
+    public const string AndroidAdbNotFound = "ANDROID_ADB_NOT_FOUND";
+    public const string AndroidAdbFailed = "ANDROID_ADB_FAILED";
+    public const string AndroidScreenshotFailed = "ANDROID_SCREENSHOT_FAILED";
+    public const string AndroidScreenshotTooLarge = "ANDROID_SCREENSHOT_TOO_LARGE";
+    public const string AndroidUiTreeFailed = "ANDROID_UI_TREE_FAILED";
+    public const string AndroidInputFailed = "ANDROID_INPUT_FAILED";
+    public const string AndroidAppLaunchFailed = "ANDROID_APP_LAUNCH_FAILED";
+
     // Write-related error codes
     public const string WriteNotAllowed = "WRITE_NOT_ALLOWED";
     public const string WritableRootNotConfigured = "WRITABLE_ROOT_NOT_CONFIGURED";

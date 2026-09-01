@@ -175,7 +175,8 @@ app.Use(async (context, next) =>
     if (HttpMethods.IsGet(context.Request.Method) &&
         (path.Equals("/mcp", StringComparison.OrdinalIgnoreCase) ||
          path.Equals("/mcp/a", StringComparison.OrdinalIgnoreCase) ||
-         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase)))
+         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/android/a", StringComparison.OrdinalIgnoreCase)))
     {
         var security = context.RequestServices.GetRequiredService<IOptions<SecurityOptions>>().Value;
         if (security.AuthenticationEnabled)
@@ -184,12 +185,19 @@ app.Use(async (context, next) =>
             var authResult = await authService.AuthenticateAsync(context, Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme);
             if (!authResult.Succeeded)
             {
+                var isAndroid = path.EndsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase);
                 var isB = path.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase);
-                var metadataSuffix = isB
-                    ? "/.well-known/oauth-protected-resource/mcp/b"
-                    : "/.well-known/oauth-protected-resource";
+                var metadataSuffix = isAndroid
+                    ? "/.well-known/oauth-protected-resource/mcp/android/a"
+                    : isB
+                        ? "/.well-known/oauth-protected-resource/mcp/b"
+                        : "/.well-known/oauth-protected-resource";
 
-                var endpointRealm = isB ? $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/b" : $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/a";
+                var endpointRealm = isAndroid
+                    ? $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/android/a"
+                    : isB
+                        ? $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/b"
+                        : $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/a";
                 var metadataUrl = $"{security.PublicBaseUrl.TrimEnd('/')}{metadataSuffix}";
                 var scopesStr = string.Join(" ", security.OAuth.RequiredScopes.Distinct());
                 context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
@@ -217,7 +225,8 @@ app.Use(async (context, next) =>
     if (HttpMethods.IsPost(context.Request.Method) &&
         (path.Equals("/mcp", StringComparison.OrdinalIgnoreCase) ||
          path.Equals("/mcp/a", StringComparison.OrdinalIgnoreCase) ||
-         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase)))
+         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/android/a", StringComparison.OrdinalIgnoreCase)))
     {
         context.Request.EnableBuffering();
         using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
@@ -282,6 +291,10 @@ var metadataHandler = (IOptions<SecurityOptions> options, HttpContext context) =
     {
         targetResource = reqResource.ToString();
     }
+    else if (path.EndsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase))
+    {
+        targetResource = $"{publicUrl}/mcp/android/a";
+    }
     else if (path.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase))
     {
         targetResource = $"{publicUrl}/mcp/b";
@@ -305,6 +318,7 @@ app.MapGet("/.well-known/oauth-protected-resource", metadataHandler).AllowAnonym
 app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAnonymous();
 app.MapGet("/.well-known/oauth-protected-resource/mcp/a", metadataHandler).AllowAnonymous();
 app.MapGet("/.well-known/oauth-protected-resource/mcp/b", metadataHandler).AllowAnonymous();
+app.MapGet("/.well-known/oauth-protected-resource/mcp/android/a", metadataHandler).AllowAnonymous();
 // ──────────────────────────────────────────────────────────────────────────
 
 // Local supervisor health probes. The Desktop app binds the Gateway to loopback.
@@ -395,6 +409,7 @@ app.MapGet("/api/devices", (
 {
     var preferredDeviceId = preferredDeviceStore.GetPreferredDeviceId();
     var devices = registry.GetActiveDeviceInfos()
+        .Where(device => string.Equals(device.Platform, "windows", StringComparison.OrdinalIgnoreCase))
         .OrderBy(device => string.IsNullOrWhiteSpace(device.DisplayName) ? device.DeviceId : device.DisplayName, StringComparer.OrdinalIgnoreCase)
         .Select(device => new
         {
@@ -549,11 +564,13 @@ app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
 app.MapMcp("/mcp").RequireAuthorization("McpAuthenticatedPolicy");
 app.MapMcp("/mcp/a").RequireAuthorization("McpAuthenticatedPolicy");
 app.MapMcp("/mcp/b").RequireAuthorization("McpAuthenticatedPolicy");
+app.MapMcp("/mcp/android/a").RequireAuthorization("McpAuthenticatedPolicy");
 
 // Handle GET probe requests for MCP endpoints to return 401 OAuth Challenge instead of 405 Method Not Allowed
 app.MapGet("/mcp", () => Results.Ok(new { status = "ok", connection = "A", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
 app.MapGet("/mcp/a", () => Results.Ok(new { status = "ok", connection = "A", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
 app.MapGet("/mcp/b", () => Results.Ok(new { status = "ok", connection = "B", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
+app.MapGet("/mcp/android/a", () => Results.Ok(new { status = "ok", connection = "AndroidA", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
 
 static DateTimeOffset? TryParseDateTimeOffset(string? value) =>
     DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
@@ -561,6 +578,9 @@ static DateTimeOffset? TryParseDateTimeOffset(string? value) =>
 static string ResolveMcpConnection(IServiceProvider services)
 {
     var path = services.GetRequiredService<IHttpContextAccessor>().HttpContext?.Request.Path.Value ?? string.Empty;
+    if (path.StartsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase))
+        return ToolVisibilityStore.ConnectionAndroidA;
+
     return path.StartsWith("/mcp/b", StringComparison.OrdinalIgnoreCase)
         ? ToolVisibilityStore.ConnectionB
         : ToolVisibilityStore.ConnectionA;

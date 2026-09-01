@@ -9,6 +9,78 @@ namespace LocalMcp.UnitTests;
 public sealed class McpShardToolVisibilityTests
 {
     [Fact]
+    public void DesktopVisibilityCatalogDoesNotIncludeAndroidTools()
+    {
+        using var temp = new TempToolVisibilityConfig();
+        var store = temp.CreateStore();
+
+        store.RememberCatalog([Tool("window_list"), Tool("android_tap")], [], []);
+
+        var names = store.GetSnapshot().Groups.SelectMany(group => group.Tools).Select(tool => tool.Name);
+        Assert.Contains("window_list", names);
+        Assert.DoesNotContain("android_tap", names);
+    }
+
+    [Fact]
+    public async Task AndroidEndpointExportsOnlyAndroidToolsAndDesktopShardsExcludeThem()
+    {
+        using var temp = new TempToolVisibilityConfig();
+        var store = temp.CreateStore();
+        var localTools = new[] { Tool("window_list"), Tool("android_tap"), Tool("android_screenshot") };
+        store.RememberCatalog(localTools, [Tool("playwright.browser_navigate")], []);
+        await store.SaveAsync(new ToolVisibilityUpdateRequest
+        {
+            Mode = "custom",
+            ToolAssignments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["window_list"] = ToolVisibilityStore.ConnectionA,
+                ["android_tap"] = ToolVisibilityStore.ConnectionA,
+                ["playwright.browser_navigate"] = ToolVisibilityStore.ConnectionB
+            }
+        });
+
+        var android = McpShardRuntime.ExportToolsForConnection(
+            localTools, [Tool("playwright.browser_navigate")], store, ToolVisibilityStore.ConnectionAndroidA);
+        var shardA = McpShardRuntime.ExportToolsForConnection(localTools, [], store, ToolVisibilityStore.ConnectionA);
+        var shardB = McpShardRuntime.ExportToolsForConnection(localTools, [Tool("playwright.browser_navigate")], store, ToolVisibilityStore.ConnectionB);
+
+        Assert.Equal(["android_screenshot", "android_tap"], android.Select(tool => tool.Name));
+        Assert.DoesNotContain(shardA, tool => tool.Name.StartsWith("android_", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(shardB, tool => tool.Name.StartsWith("android_", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(android, tool => tool.Name == "playwright.browser_navigate");
+    }
+
+    [Fact]
+    public async Task CallsCannotCrossBetweenAndroidAndDesktopEndpoints()
+    {
+        using var temp = new TempToolVisibilityConfig();
+        var store = temp.CreateStore();
+        var router = Substitute.For<IExternalMcpRouter>();
+        var localCalled = false;
+
+        var desktopResult = await McpShardRuntime.CallToolAsync(
+            new CallToolRequestParams { Name = "android_tap" },
+            ToolVisibilityStore.ConnectionA,
+            store,
+            router,
+            (_, _) => { localCalled = true; return Task.FromResult(new CallToolResult()); },
+            CancellationToken.None);
+        var androidResult = await McpShardRuntime.CallToolAsync(
+            new CallToolRequestParams { Name = "window_list" },
+            ToolVisibilityStore.ConnectionAndroidA,
+            store,
+            router,
+            (_, _) => { localCalled = true; return Task.FromResult(new CallToolResult()); },
+            CancellationToken.None);
+
+        Assert.True(desktopResult.IsError);
+        Assert.True(androidResult.IsError);
+        Assert.False(localCalled);
+        Assert.Contains("only on the Android", Assert.IsType<TextContentBlock>(Assert.Single(desktopResult.Content)).Text);
+        Assert.Contains("not available on the Android", Assert.IsType<TextContentBlock>(Assert.Single(androidResult.Content)).Text);
+    }
+
+    [Fact]
     public void ExternalToolsAppearInToolVisibilityCatalogWithServerStatus()
     {
         using var temp = new TempToolVisibilityConfig();

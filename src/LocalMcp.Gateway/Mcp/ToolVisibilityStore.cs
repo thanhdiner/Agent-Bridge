@@ -9,6 +9,7 @@ public sealed class ToolVisibilityStore
     public const int DefaultConnectionMaxEnabledTools = 150;
     public const string ConnectionA = "A";
     public const string ConnectionB = "B";
+    public const string ConnectionAndroidA = "AndroidA";
     public const string ConnectionNone = "None";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -112,7 +113,10 @@ public sealed class ToolVisibilityStore
         IEnumerable<Tool> externalTools,
         IEnumerable<ExternalMcpServerCatalogStatus> externalServerStatuses)
     {
-        var localItems = localTools.Select(tool => BuildCatalogItem(tool, "local")).ToArray();
+        var localItems = localTools
+            .Where(tool => !tool.Name.StartsWith("android_", StringComparison.OrdinalIgnoreCase))
+            .Select(tool => BuildCatalogItem(tool, "local"))
+            .ToArray();
         var externalItems = externalTools.Select(tool => BuildCatalogItem(tool, "external")).ToArray();
 
         lock (_gate)

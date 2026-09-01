@@ -22,6 +22,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\LocalMcp.Gateway\LocalMcp.Gateway.csproj" />
     <ProjectReference Include="..\..\src\LocalMcp.Agent.Windows\LocalMcp.Agent.Windows.csproj" />
+    <ProjectReference Include="..\..\src\LocalMcp.Agent.AndroidAdb\LocalMcp.Agent.AndroidAdb.csproj" />
+    <ProjectReference Include="..\..\src\AgentBridge.Desktop\AgentBridge.Desktop.csproj" />
     <ProjectReference Include="..\..\src\LocalMcp.BuildingBlocks\LocalMcp.BuildingBlocks.csproj" />
   </ItemGroup>
 

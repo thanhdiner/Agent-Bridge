@@ -213,11 +213,14 @@ public partial class MainWindow
             _toolPage.Visibility = Visibility.Collapsed;
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Visible;
+        if (_androidPage is not null)
+            _androidPage.Visibility = Visibility.Collapsed;
 
         ApplyNavButtonStyle(OverviewNavButton, false);
         ApplyNavButtonStyle(WorkspacesNavButton, false);
         ApplyNavButtonStyle(_toolsNavButton, false);
         ApplyNavButtonStyle(_runtimeNavButton, true);
+        ApplyNavButtonStyle(_androidNavButton, false);
     }
 
     private void RuntimeRefresh_Click(object sender, RoutedEventArgs e) => BeginRuntimeRefresh(showLoading: true);
@@ -387,6 +390,7 @@ public partial class MainWindow
             "LocalMcp.Agent.Windows",
             "dotnet",
             "cloudflared",
+            "ngrok",
             "node",
             "npx"
         };
@@ -463,7 +467,8 @@ public partial class MainWindow
         var role = ClassifyRuntimeRole(processName, processId, path, currentDesktopPid, gatewayPid, agentPid, tunnelPid);
         var isCurrentDesktop = processId == currentDesktopPid;
         var isCurrentManaged = processId == gatewayPid || processId == agentPid || processId == tunnelPid;
-        var isStaleTunnel = string.Equals(processName, "cloudflared", StringComparison.OrdinalIgnoreCase)
+        var isStaleTunnel = (string.Equals(processName, "cloudflared", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(processName, "ngrok", StringComparison.OrdinalIgnoreCase))
                             && tunnelPid is int currentTunnelPid
                             && processId != currentTunnelPid;
         var state = isCurrentDesktop
@@ -540,7 +545,7 @@ public partial class MainWindow
             return "Gateway";
         if (processId == agentPid || path.Contains("LocalMcp.Agent.Windows", StringComparison.OrdinalIgnoreCase))
             return "Agent";
-        if (processId == tunnelPid || string.Equals(processName, "cloudflared", StringComparison.OrdinalIgnoreCase))
+        if (processId == tunnelPid || string.Equals(processName, "cloudflared", StringComparison.OrdinalIgnoreCase) || string.Equals(processName, "ngrok", StringComparison.OrdinalIgnoreCase))
             return "Tunnel";
         if (string.Equals(processName, "node", StringComparison.OrdinalIgnoreCase) || string.Equals(processName, "npx", StringComparison.OrdinalIgnoreCase))
             return "External MCP";

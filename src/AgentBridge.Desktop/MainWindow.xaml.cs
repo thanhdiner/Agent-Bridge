@@ -36,6 +36,7 @@ public partial class MainWindow : FluentWindow
         InitializeComponent();
         InitializeToolVisibilityUi();
         InitializeRuntimeUi();
+        InitializeAndroidUi();
         WorkspaceList.ItemsSource = _workspaces;
         DefaultDeviceComboBox.ItemsSource = _deviceChoices;
         ConfigPathText.Text = _store.ConfigurationPath;
@@ -60,6 +61,7 @@ public partial class MainWindow : FluentWindow
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         _supervisor.SnapshotChanged -= OnSupervisorSnapshotChanged;
+        _androidPage?.Dispose();
     }
 
     private static readonly System.Windows.Media.Brush ActiveNavBackground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF4, 0x7C, 0x20));
@@ -103,11 +105,14 @@ public partial class MainWindow : FluentWindow
             _toolPage.Visibility = Visibility.Collapsed;
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Collapsed;
+        if (_androidPage is not null)
+            _androidPage.Visibility = Visibility.Collapsed;
 
         ApplyNavButtonStyle(OverviewNavButton, true);
         ApplyNavButtonStyle(WorkspacesNavButton, false);
         ApplyNavButtonStyle(_toolsNavButton, false);
         ApplyNavButtonStyle(_runtimeNavButton, false);
+        ApplyNavButtonStyle(_androidNavButton, false);
     }
 
     private void ShowWorkspaces()
@@ -118,11 +123,14 @@ public partial class MainWindow : FluentWindow
             _toolPage.Visibility = Visibility.Collapsed;
         if (_runtimePage is not null)
             _runtimePage.Visibility = Visibility.Collapsed;
+        if (_androidPage is not null)
+            _androidPage.Visibility = Visibility.Collapsed;
 
         ApplyNavButtonStyle(OverviewNavButton, false);
         ApplyNavButtonStyle(WorkspacesNavButton, true);
         ApplyNavButtonStyle(_toolsNavButton, false);
         ApplyNavButtonStyle(_runtimeNavButton, false);
+        ApplyNavButtonStyle(_androidNavButton, false);
     }
 
     private async void RestartServices_Click(object sender, RoutedEventArgs e)
@@ -614,6 +622,11 @@ public partial class MainWindow : FluentWindow
             ? "This computer: preparing…"
             : $"This computer: {snapshot.DeviceId}";
         GatewayUrlText.Text = snapshot.GatewayUrl;
+        TunnelUrlText.Text = !string.IsNullOrWhiteSpace(snapshot.PublicTunnelUrl)
+            ? snapshot.PublicTunnelUrl
+            : (snapshot.Tunnel.IsHealthy ? "Active (no public domain)" : "Preparing tunnel…");
+        CopyTunnelUrlButton.IsEnabled = !string.IsNullOrWhiteSpace(snapshot.PublicTunnelUrl);
+        OpenTunnelUrlButton.IsEnabled = !string.IsNullOrWhiteSpace(snapshot.PublicTunnelUrl);
         LogsDirectoryText.Text = snapshot.LogsDirectory;
         LastCheckedText.Text = snapshot.UpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 
@@ -749,6 +762,55 @@ public partial class MainWindow : FluentWindow
 
         if (autoClose)
             _feedbackTimer.Start();
+    }
+
+    private void CopyTunnelUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var url = _supervisor.Current.PublicTunnelUrl;
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+
+        try
+        {
+            Clipboard.SetText(url);
+            ShowOverviewFeedback(
+                "Tunnel URL copied",
+                url,
+                InfoBarSeverity.Success,
+                autoClose: true);
+        }
+        catch (Exception ex)
+        {
+            ShowOverviewFeedback(
+                "Could not copy URL",
+                ex.Message,
+                InfoBarSeverity.Error,
+                autoClose: false);
+        }
+    }
+
+    private void OpenTunnelUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var url = _supervisor.Current.PublicTunnelUrl;
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowOverviewFeedback(
+                "Could not open URL",
+                ex.Message,
+                InfoBarSeverity.Error,
+                autoClose: false);
+        }
     }
 
     private void FeedbackTimer_Tick(object? sender, EventArgs e)

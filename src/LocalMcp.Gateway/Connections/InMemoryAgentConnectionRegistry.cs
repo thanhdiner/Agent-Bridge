@@ -7,7 +7,12 @@ public sealed class InMemoryAgentConnectionRegistry : IAgentConnectionRegistry
     private readonly ConcurrentDictionary<string, AgentDeviceInfo> _devices = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _connectionToDevice = new();
 
-    public void Register(string deviceId, string connectionId, string? displayName = null)
+    public void Register(
+        string deviceId,
+        string connectionId,
+        string? displayName = null,
+        string? platform = null,
+        IReadOnlyCollection<string>? capabilities = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
@@ -21,7 +26,9 @@ public sealed class InMemoryAgentConnectionRegistry : IAgentConnectionRegistry
             deviceId,
             NormalizeDisplayName(displayName),
             connectionId,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            NormalizePlatform(platform),
+            NormalizeCapabilities(capabilities));
         _connectionToDevice[connectionId] = deviceId;
     }
 
@@ -72,5 +79,33 @@ public sealed class InMemoryAgentConnectionRegistry : IAgentConnectionRegistry
         return normalized.Length > 128 || normalized.Any(char.IsControl)
             ? null
             : normalized;
+    }
+
+    private static string NormalizePlatform(string? platform)
+    {
+        if (string.IsNullOrWhiteSpace(platform))
+            return "windows";
+
+        var normalized = platform.Trim().ToLowerInvariant();
+        return normalized.Length <= 32
+            && normalized.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
+                ? normalized
+                : "unknown";
+    }
+
+    private static IReadOnlyList<string> NormalizeCapabilities(IReadOnlyCollection<string>? capabilities)
+    {
+        if (capabilities is null)
+            return Array.Empty<string>();
+
+        return capabilities
+            .Where(capability => !string.IsNullOrWhiteSpace(capability))
+            .Select(capability => capability.Trim().ToLowerInvariant())
+            .Where(capability => capability.Length <= 64
+                && capability.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(capability => capability, StringComparer.OrdinalIgnoreCase)
+            .Take(64)
+            .ToArray();
     }
 }

@@ -387,6 +387,8 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="13" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="13" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="DEFAULT DEVICE"
@@ -432,12 +434,48 @@
                                    FontWeight="SemiBold" />
 
                         <TextBlock Grid.Row="4"
+                                   Text="TUNNEL ENDPOINT"
+                                   Foreground="{StaticResource AgentBridgeMutedBrush}"
+                                   FontSize="11.5"
+                                   FontWeight="Bold" />
+                        <StackPanel Grid.Row="4"
+                                    Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center">
+                            <TextBlock x:Name="TunnelUrlText"
+                                       Text="Preparing tunnel…"
+                                       Foreground="{StaticResource AgentBridgeTextBrush}"
+                                       FontFamily="Consolas, Cascadia Code, Segoe UI, monospace"
+                                       FontSize="12.5"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <ui:Button x:Name="CopyTunnelUrlButton"
+                                       Content="Copy"
+                                       Icon="{ui:SymbolIcon Copy16}"
+                                       Appearance="Transparent"
+                                       Margin="12,0,0,0"
+                                       Padding="8,3"
+                                       FontSize="11.5"
+                                       Click="CopyTunnelUrl_Click"
+                                       ToolTip="Copy public tunnel URL to clipboard" />
+                            <ui:Button x:Name="OpenTunnelUrlButton"
+                                       Content="Open"
+                                       Icon="{ui:SymbolIcon Open16}"
+                                       Appearance="Transparent"
+                                       Margin="4,0,0,0"
+                                       Padding="8,3"
+                                       FontSize="11.5"
+                                       Click="OpenTunnelUrl_Click"
+                                       ToolTip="Open public tunnel URL in browser" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="6"
                                    Text="LOGS"
                                    Foreground="{StaticResource AgentBridgeMutedBrush}"
                                    FontSize="11.5"
                                    FontWeight="Bold" />
                         <TextBlock x:Name="LogsDirectoryText"
-                                   Grid.Row="4"
+                                   Grid.Row="6"
                                    Grid.Column="1"
                                    Foreground="{StaticResource AgentBridgeTextBrush}"
                                    FontFamily="Consolas, Cascadia Code, Segoe UI, monospace"
@@ -445,13 +483,13 @@
                                    FontWeight="Medium"
                                    TextTrimming="CharacterEllipsis" />
 
-                        <TextBlock Grid.Row="6"
+                        <TextBlock Grid.Row="8"
                                    Text="LAST CHECKED"
                                    Foreground="{StaticResource AgentBridgeMutedBrush}"
                                    FontSize="11.5"
                                    FontWeight="Bold" />
                         <TextBlock x:Name="LastCheckedText"
-                                   Grid.Row="6"
+                                   Grid.Row="8"
                                    Grid.Column="1"
                                    Foreground="{StaticResource AgentBridgeTextBrush}"
                                    FontSize="12.5"
