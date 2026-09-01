@@ -175,12 +175,14 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0"
+                    <Border x:Name="GatewayCard"
+                            Grid.Column="0"
                             Background="{StaticResource AgentBridgeSurfaceBrush}"
                             BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="3"
-                            Padding="17">
+                            Padding="14,12"
+                            ToolTip="Gateway status details">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="42" />
@@ -190,61 +192,50 @@
                                     Height="36"
                                     CornerRadius="3"
                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
-                                    VerticalAlignment="Top">
+                                    VerticalAlignment="Center">
                                 <ui:SymbolIcon Symbol="DesktopPulse24"
                                                Foreground="{StaticResource AgentBridgeAccentBrush}"
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center" />
                             </Border>
-                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="Gateway"
                                            Foreground="{StaticResource AgentBridgeTextBrush}"
-                                           FontSize="14"
+                                           FontSize="13.5"
                                            FontWeight="SemiBold" />
                                 <Border x:Name="GatewayStatusBadge"
                                         Background="#D97706"
                                         BorderBrush="Transparent"
                                         BorderThickness="0"
                                         CornerRadius="3"
-                                        Padding="8,4"
+                                        Padding="7,3"
                                         HorizontalAlignment="Left"
-                                        Margin="0,8,0,0">
+                                        Margin="0,5,0,0">
                                     <StackPanel Orientation="Horizontal">
                                         <Ellipse x:Name="GatewayStatusDot"
                                                  Width="7"
                                                  Height="7"
                                                  Fill="White"
-                                                 Margin="0,0,6,0" />
+                                                 Margin="0,0,5,0" />
                                         <TextBlock x:Name="GatewayStatusText"
                                                    Text="Starting"
                                                    Foreground="White"
-                                                   FontSize="12"
+                                                   FontSize="11.5"
                                                    FontWeight="SemiBold" />
                                     </StackPanel>
                                 </Border>
-                                <TextBlock x:Name="GatewayDetailText"
-                                           Text="Waiting for health check…"
-                                           Margin="0,7,0,0"
-                                           Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                           FontSize="12.5"
-                                           FontWeight="Medium"
-                                           TextWrapping="Wrap" />
-                                <TextBlock x:Name="GatewayMetaText"
-                                           Text="No process yet"
-                                           Margin="0,7,0,0"
-                                           Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                           FontSize="12"
-                                           FontWeight="Medium" />
                             </StackPanel>
                         </Grid>
                     </Border>
 
-                    <Border Grid.Column="2"
+                    <Border x:Name="AgentCard"
+                            Grid.Column="2"
                             Background="{StaticResource AgentBridgeSurfaceBrush}"
                             BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="3"
-                            Padding="17">
+                            Padding="14,12"
+                            ToolTip="Windows Agent status details">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="42" />
@@ -254,61 +245,50 @@
                                     Height="36"
                                     CornerRadius="3"
                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
-                                    VerticalAlignment="Top">
+                                    VerticalAlignment="Center">
                                 <ui:SymbolIcon Symbol="DesktopSignal20"
                                                Foreground="{StaticResource AgentBridgeAccentBrush}"
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center" />
                             </Border>
-                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="Windows Agent"
                                            Foreground="{StaticResource AgentBridgeTextBrush}"
-                                           FontSize="14"
+                                           FontSize="13.5"
                                            FontWeight="SemiBold" />
                                 <Border x:Name="AgentStatusBadge"
                                         Background="#D97706"
                                         BorderBrush="Transparent"
                                         BorderThickness="0"
                                         CornerRadius="3"
-                                        Padding="8,4"
+                                        Padding="7,3"
                                         HorizontalAlignment="Left"
-                                        Margin="0,8,0,0">
+                                        Margin="0,5,0,0">
                                     <StackPanel Orientation="Horizontal">
                                         <Ellipse x:Name="AgentStatusDot"
                                                  Width="7"
                                                  Height="7"
                                                  Fill="White"
-                                                 Margin="0,0,6,0" />
+                                                 Margin="0,0,5,0" />
                                         <TextBlock x:Name="AgentStatusText"
                                                    Text="Starting"
                                                    Foreground="White"
-                                                   FontSize="12"
+                                                   FontSize="11.5"
                                                    FontWeight="SemiBold" />
                                     </StackPanel>
                                 </Border>
-                                <TextBlock x:Name="AgentDetailText"
-                                           Text="Waiting for Gateway…"
-                                           Margin="0,7,0,0"
-                                           Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                           FontSize="12.5"
-                                           FontWeight="Medium"
-                                           TextWrapping="Wrap" />
-                                <TextBlock x:Name="AgentMetaText"
-                                           Text="No process yet"
-                                           Margin="0,7,0,0"
-                                           Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                           FontSize="12"
-                                           FontWeight="Medium" />
                             </StackPanel>
                         </Grid>
                     </Border>
 
-                    <Border Grid.Column="4"
+                    <Border x:Name="TunnelCard"
+                            Grid.Column="4"
                             Background="{StaticResource AgentBridgeSurfaceBrush}"
                             BorderBrush="{StaticResource AgentBridgeBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="3"
-                            Padding="17">
+                            Padding="14,12"
+                            ToolTip="Tunnel status details">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="42" />
@@ -318,51 +298,38 @@
                                     Height="36"
                                     CornerRadius="3"
                                     Background="{StaticResource AgentBridgeAccentSoftBrush}"
-                                    VerticalAlignment="Top">
+                                    VerticalAlignment="Center">
                                 <ui:SymbolIcon Symbol="Cloud24"
                                                Foreground="{StaticResource AgentBridgeAccentBrush}"
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center" />
                             </Border>
-                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="Tunnel"
                                            Foreground="{StaticResource AgentBridgeTextBrush}"
-                                           FontSize="14"
+                                           FontSize="13.5"
                                            FontWeight="SemiBold" />
                                 <Border x:Name="TunnelStatusBadge"
                                         Background="#D97706"
                                         BorderBrush="Transparent"
                                         BorderThickness="0"
                                         CornerRadius="3"
-                                        Padding="8,4"
+                                        Padding="7,3"
                                         HorizontalAlignment="Left"
-                                        Margin="0,8,0,0">
+                                        Margin="0,5,0,0">
                                     <StackPanel Orientation="Horizontal">
                                         <Ellipse x:Name="TunnelStatusDot"
                                                  Width="7"
                                                  Height="7"
                                                  Fill="White"
-                                                 Margin="0,0,6,0" />
+                                                 Margin="0,0,5,0" />
                                         <TextBlock x:Name="TunnelStatusText"
                                                    Text="Starting"
                                                    Foreground="White"
-                                                   FontSize="12"
+                                                   FontSize="11.5"
                                                    FontWeight="SemiBold" />
                                     </StackPanel>
                                 </Border>
-                                <TextBlock x:Name="TunnelDetailText"
-                                           Text="Tunnel waiting for Gateway"
-                                           Margin="0,7,0,0"
-                                           Foreground="{StaticResource AgentBridgeMutedBrush}"
-                                           FontSize="12.5"
-                                           FontWeight="Medium"
-                                           TextWrapping="Wrap" />
-                                <TextBlock x:Name="TunnelMetaText"
-                                           Text="No process yet"
-                                           Margin="0,7,0,0"
-                                           Foreground="{StaticResource AgentBridgeSubtleBrush}"
-                                           FontSize="12"
-                                           FontWeight="Medium" />
                             </StackPanel>
                         </Grid>
                     </Border>

@@ -605,14 +605,12 @@ public partial class MainWindow : FluentWindow
     private void ApplySupervisorSnapshot(SupervisorSnapshot snapshot)
     {
         GatewayStatusText.Text = BuildServiceSummary(snapshot.Gateway, "Online");
-        GatewayDetailText.Text = snapshot.Gateway.Detail;
-        GatewayMetaText.Text = BuildProcessMeta(snapshot.Gateway);
         AgentStatusText.Text = BuildServiceSummary(snapshot.Agent, "Connected");
-        AgentDetailText.Text = snapshot.Agent.Detail;
-        AgentMetaText.Text = BuildProcessMeta(snapshot.Agent);
         TunnelStatusText.Text = BuildServiceSummary(snapshot.Tunnel, "Running");
-        TunnelDetailText.Text = snapshot.Tunnel.Detail;
-        TunnelMetaText.Text = BuildProcessMeta(snapshot.Tunnel);
+
+        GatewayCard.ToolTip = $"{snapshot.Gateway.Detail}\n{BuildProcessMeta(snapshot.Gateway)}";
+        AgentCard.ToolTip = $"{snapshot.Agent.Detail}\n{BuildProcessMeta(snapshot.Agent)}";
+        TunnelCard.ToolTip = $"{snapshot.Tunnel.Detail}\n{BuildProcessMeta(snapshot.Tunnel)}";
 
         ApplyStatusBadge(GatewayStatusBadge, GatewayStatusDot, GatewayStatusText, snapshot.Gateway.State);
         ApplyStatusBadge(AgentStatusBadge, AgentStatusDot, AgentStatusText, snapshot.Agent.State);
