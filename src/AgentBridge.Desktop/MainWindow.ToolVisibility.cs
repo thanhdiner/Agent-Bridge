@@ -83,6 +83,7 @@ public partial class MainWindow
         _toolsNavButton = new UiButton
         {
             Content = "Tools",
+            Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = Wpf.Ui.Controls.SymbolRegular.Wrench24 },
             Appearance = UiControlAppearance.Transparent,
             HorizontalContentAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 6, 0, 0)
