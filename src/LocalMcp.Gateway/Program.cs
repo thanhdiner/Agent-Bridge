@@ -187,11 +187,14 @@ app.Use(async (context, next) =>
             {
                 var isAndroid = path.EndsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase);
                 var isB = path.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase);
+                var isA = path.EndsWith("/mcp/a", StringComparison.OrdinalIgnoreCase);
                 var metadataSuffix = isAndroid
                     ? "/.well-known/oauth-protected-resource/mcp/android/a"
                     : isB
                         ? "/.well-known/oauth-protected-resource/mcp/b"
-                        : "/.well-known/oauth-protected-resource";
+                        : isA
+                            ? "/.well-known/oauth-protected-resource/mcp/a"
+                            : "/.well-known/oauth-protected-resource";
 
                 var endpointRealm = isAndroid
                     ? $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/android/a"

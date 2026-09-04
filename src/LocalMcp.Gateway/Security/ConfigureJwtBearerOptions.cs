@@ -51,12 +51,22 @@ public sealed class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearer
                 context.Response.ContentType = "application/json";
 
                 var requestPath = context.Request.Path.Value ?? string.Empty;
+                var isAndroid = requestPath.EndsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase);
                 var isB = requestPath.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase);
-                var metadataSuffix = isB
-                    ? "/.well-known/oauth-protected-resource/mcp/b"
-                    : "/.well-known/oauth-protected-resource";
+                var isA = requestPath.EndsWith("/mcp/a", StringComparison.OrdinalIgnoreCase);
+                var metadataSuffix = isAndroid
+                    ? "/.well-known/oauth-protected-resource/mcp/android/a"
+                    : isB
+                        ? "/.well-known/oauth-protected-resource/mcp/b"
+                        : isA
+                            ? "/.well-known/oauth-protected-resource/mcp/a"
+                            : "/.well-known/oauth-protected-resource";
 
-                var endpointRealm = isB ? $"{publicBaseUrl.TrimEnd('/')}/mcp/b" : $"{publicBaseUrl.TrimEnd('/')}/mcp/a";
+                var endpointRealm = isAndroid
+                    ? $"{publicBaseUrl.TrimEnd('/')}/mcp/android/a"
+                    : isB
+                        ? $"{publicBaseUrl.TrimEnd('/')}/mcp/b"
+                        : $"{publicBaseUrl.TrimEnd('/')}/mcp/a";
                 var metadataUrl = $"{publicBaseUrl.TrimEnd('/')}{metadataSuffix}";
                 var scopesStr = string.Join(" ", requiredScopes.Distinct());
                 context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
