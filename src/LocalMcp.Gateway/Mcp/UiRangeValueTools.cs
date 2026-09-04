@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -36,7 +37,7 @@ public sealed class UiRangeValueTools
         OpenWorld = false),
      Description("Reads or changes one Windows UI Automation range control through RangeValuePattern, using explicit set or small-step increase/decrease and verifying the resulting value. Requires dev:execute scope.")]
     public async Task<CallToolResult> RangeValueAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Action: get, set, increase, or decrease (default: get)")] string action = UiRangeValueActions.Get,
         [Description("Required finite numeric value when action is set")] double? value = null,
@@ -48,8 +49,6 @@ public sealed class UiRangeValueTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId) && string.IsNullOrWhiteSpace(name))
@@ -69,7 +68,7 @@ public sealed class UiRangeValueTools
         var command = new UiRangeValueCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             Action = normalizedAction,
@@ -119,3 +118,4 @@ public sealed class UiRangeValueTools
         IsError = true
     };
 }
+

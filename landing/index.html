@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgentBridge — Your Windows PC, operated by AI</title>
+  <meta name="description" content="Control your Windows development machine with AI. Code, build, launch, test, and review from anywhere." />
+  <meta name="theme-color" content="#08090d" />
+  <link rel="icon" type="image/svg+xml" href="assets/agentbridge-mark.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="header.css" />
+  <link rel="stylesheet" href="founder-card.css" />
+  <link rel="stylesheet" href="pricing-card.css" />
+  <link rel="stylesheet" href="feature-cards.css" />
+  <link rel="stylesheet" href="workflow-v3.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-ambient" aria-hidden="true"></div>
+    <div class="container nav-shell">
+      <div class="nav">
+        <a class="brand" href="#top" aria-label="AgentBridge home">
+          <span class="brand-mark-wrap">
+            <span class="brand-mark"><img class="brand-symbol" src="assets/agentbridge-mark.svg" alt="" aria-hidden="true" /></span>
+          </span>
+          <span class="brand-copy">
+            <strong>AgentBridge</strong>
+            <small>Local Windows runtime</small>
+          </span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a href="#features">Features</a>
+          <a href="#workflow">How it works</a>
+          <a href="#security">Security</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+
+        <div class="nav-right">
+          <div class="header-status" title="AgentBridge runtime is available">
+            <span class="header-status-dot"></span>
+            <span>Runtime online</span>
+          </div>
+          <a class="button button-primary button-small nav-cta" href="#pricing">
+            <span>Founder access</span>
+            <span class="nav-arrow">→</span>
+          </a>
+        </div>
+
+        <button class="menu-button" type="button" aria-label="Open menu" aria-expanded="false">☰</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero section">
+      <div class="container hero-grid">
+        <div class="hero-copy reveal">
+          <div class="eyebrow"><span class="eyebrow-accent"></span><strong>Founder Edition</strong><small>50 seats · Early access</small></div>
+          <h1>Your Windows PC, <span class="hero-gradient"><span class="gradient hero-gradient-line">operated by</span><span class="gradient hero-gradient-line">AI.</span></span></h1>
+          <p class="hero-lead">
+            Give ChatGPT and other AI agents real access to your development machine.
+            Code, build, launch, test, and control Windows apps from anywhere.
+          </p>
+          <div class="hero-actions">
+            <a class="button hero-primary" href="#pricing"><span>Get founder access</span><i>↗</i></a>
+            <a class="button button-secondary" href="#demo">See the workflow ▶</a>
+          </div>
+          <div class="proof-row">
+            <span>Local-first</span>
+            <span>Bring your own AI</span>
+            <span>No source migration</span>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal">
+          <div class="machine glass">
+            <div class="window-bar">
+              <div class="window-dots"><i></i><i></i><i></i></div>
+              <div class="window-title">AGENTBRIDGE · DESKTOP SESSION</div>
+              <div class="local-pill"><span class="local-indicator"></span><span>Local</span></div>
+            </div>
+            <div class="machine-body">
+              <aside class="machine-sidebar">
+                <div class="side-item active">⌁</div>
+                <div class="side-item">⌘</div>
+                <div class="side-item">◫</div>
+                <div class="side-item">⚙</div>
+              </aside>
+              <div class="machine-main">
+                <div class="task-head">
+                  <div>
+                    <span class="label">ACTIVE TASK</span>
+                    <h3>Fix issue #184 and verify the desktop flow</h3>
+                  </div>
+                  <span class="task-state"><span class="state-indicator"><i></i></span><span>Running</span></span>
+                </div>
+
+                <div class="terminal">
+                  <div class="terminal-line"><span>01</span>Reading repository and issue context<b class="done">DONE</b></div>
+                  <div class="terminal-line"><span>02</span>Editing UiAutomationExecutor.cs<b class="done">DONE</b></div>
+                  <div class="terminal-line"><span>03</span>Running 921 automated tests<b class="done">PASS</b></div>
+                  <div class="terminal-line"><span>04</span>Launching app and testing UI<b class="live">LIVE</b></div>
+                  <div class="progress"><span></span></div>
+                </div>
+
+                <div class="stat-grid">
+                  <div class="stat-card"><span class="label">BUILD</span><strong>0 errors</strong><small>00:01:42</small></div>
+                  <div class="stat-card"><span class="label">TESTS</span><strong>921 passed</strong><small>0 failed</small></div>
+                  <div class="stat-card"><span class="label">EVIDENCE</span><strong>4 screenshots</strong><small>2 logs</small></div>
+                </div>
+
+                <div class="approval-bar">
+                  <span>✓ Ready for approval</span>
+                  <button type="button">Commit &amp; push</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="phone glass">
+            <div class="phone-inner">
+              <div class="chat-head">
+                <span class="chat-avatar"><img class="brand-symbol" src="assets/agentbridge-mark.svg" alt="" aria-hidden="true" /></span>
+                <span>AgentBridge<br /><small>PC online</small></span>
+              </div>
+              <div class="chat-bubble user">Fix issue #184, run tests, open the app, verify the flow, then ask before pushing.</div>
+              <div class="chat-bubble agent">Working on DESKTOP-JENA…</div>
+              <div class="phone-status phone-status-live"><span class="status-wave"><i></i><i></i><i></i></span><span>Verifying interface</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="logo-strip">
+      <div class="container">
+        <p>Built for the tools already on your machine</p>
+        <div class="tool-list">
+          <span>ChatGPT</span><span>Claude</span><span>Windows</span><span>PowerShell</span><span>Visual Studio</span><span>Chrome</span><span>Git</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="comparison">
+      <div class="container narrow reveal">
+        <span class="kicker">THE MISSING EXECUTION LAYER</span>
+        <h2>AI can write code. AgentBridge lets it finish the job.</h2>
+        <p class="section-lead" style="margin-inline:auto">
+          Most AI coding tools stop at the repository or terminal. Real Windows development continues
+          inside desktop apps, dialogs, installers, browsers, debuggers, and test environments.
+        </p>
+      </div>
+
+      <div class="container comparison-flow reveal">
+        <article class="comparison-card comparison-without">
+          <div class="comparison-head">
+            <span class="comparison-label danger"><i></i> WITHOUT AGENTBRIDGE</span>
+            <b>HANDOFF REQUIRED</b>
+          </div>
+          <h3>The workflow breaks before the real test.</h3>
+          <p>AI finishes the code, then throws the desktop work back to you.</p>
+
+          <div class="broken-workflow">
+            <div class="compare-terminal">
+              <div class="compare-terminal-bar"><span><i></i><i></i><i></i></span><small>AI SESSION</small></div>
+              <div class="compare-terminal-body">
+                <span><i>✓</i> Code updated</span>
+                <span><i>✓</i> Build passed</span>
+                <span class="terminal-stop"><i>!</i> Please open the app and test this manually.</span>
+              </div>
+            </div>
+
+            <div class="compare-pipeline broken-pipeline" aria-label="Broken workflow">
+              <span class="pipeline-node complete">AI</span><i></i>
+              <span class="pipeline-node complete">Code</span><i class="pipeline-break"><b>×</b></i>
+              <span class="pipeline-node blocked">Desktop</span>
+            </div>
+          </div>
+
+          <div class="comparison-outcome danger">
+            <span><i></i><strong>You take over</strong></span>
+            <small>Context lost · Manual test · PC required</small>
+          </div>
+        </article>
+
+        <div class="comparison-bridge" aria-hidden="true">
+          <div class="bridge-track"><i></i></div>
+          <div class="bridge-core"><img src="assets/agentbridge-mark.svg" alt="" /></div>
+          <span>BRIDGE</span>
+        </div>
+
+        <article class="comparison-card comparison-with">
+          <div class="comparison-head">
+            <span class="comparison-label success"><i></i> WITH AGENTBRIDGE</span>
+            <b>RUNNING END TO END</b>
+          </div>
+          <h3>One task reaches verified evidence.</h3>
+          <p>AgentBridge carries the same context through the whole Windows workflow.</p>
+
+          <div class="complete-workflow">
+            <div class="compare-pipeline complete-pipeline" aria-label="Complete workflow">
+              <span class="pipeline-node complete">Edit</span><i></i>
+              <span class="pipeline-node complete">Build</span><i></i>
+              <span class="pipeline-node complete">Launch</span><i></i>
+              <span class="pipeline-node active">Verify</span><i></i>
+              <span class="pipeline-node proof">Proof</span>
+            </div>
+
+            <div class="evidence-stack">
+              <span><i>✓</i><strong>921 tests passed</strong><small>0 failed</small></span>
+              <span><i>▣</i><strong>Desktop UI verified</strong><small>Live app</small></span>
+              <span><i>↗</i><strong>Evidence returned</strong><small>Ready for approval</small></span>
+            </div>
+          </div>
+
+          <div class="comparison-outcome success">
+            <span><i></i><strong>Ready for approval</strong></span>
+            <small>Screenshots · Logs · Test results</small>
+          </div>
+        </article>
+
+        <div class="comparison-metrics">
+          <div><span>Manual handoffs</span><strong><s>4</s><i>→</i><b>0</b></strong></div>
+          <div><span>Desktop verification</span><strong><s>No</s><i>→</i><b>Yes</b></strong></div>
+          <div><span>Proof returned</span><strong><s>No</s><i>→</i><b>Automatic</b></strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section features-section" id="features">
+      <div class="container section-head reveal">
+        <div>
+          <span class="kicker">WHAT IT DOES</span>
+          <h2>A real pair of hands for your AI.</h2>
+        </div>
+        <p class="section-lead">AgentBridge runs on your Windows machine and exposes controlled actions to supported AI clients.</p>
+      </div>
+
+      <div class="container feature-grid">
+        <article class="card feature-card featured reveal">
+          <div class="feature-copy">
+            <div class="feature-icon" aria-hidden="true">⌘</div>
+            <h3>Code on the machine that matters</h3>
+            <p>Work inside the actual repository, SDK setup, database, certificates, devices, and tools already installed on your PC.</p>
+          </div>
+          <div class="flow-map" aria-hidden="true">
+            <div class="flow-node main">AI task</div>
+            <i class="flow-line one"></i><i class="flow-line two"></i><i class="flow-line three"></i>
+            <div class="flow-node one">Repository</div>
+            <div class="flow-node two">Terminal</div>
+            <div class="flow-node three">Desktop app</div>
+          </div>
+        </article>
+
+        <article class="card feature-card feature-card-windows reveal">
+          <span class="windows-pointer" aria-hidden="true"></span>
+          <div class="feature-icon" aria-hidden="true">▣</div>
+          <h3>Control Windows apps</h3>
+          <p>Launch, focus, inspect, click, type, scroll, drag, capture, and verify desktop interfaces.</p>
+        </article>
+
+        <article class="card feature-card feature-card-test reveal">
+          <span class="test-scanline" aria-hidden="true"></span>
+          <span class="test-pass-points" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div class="feature-icon" aria-hidden="true">▤</div>
+          <h3>Test the UI it just built</h3>
+          <p>Validate WinForms, WPF, Tauri, Electron, browser flows, installers, popups, and system dialogs.</p>
+        </article>
+
+        <article class="card feature-card feature-card-remote reveal">
+          <span class="remote-signal" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div class="feature-icon feature-icon-terminal" aria-hidden="true"><span>›</span><span class="terminal-cursor">_</span></div>
+          <h3>Control it remotely</h3>
+          <p>Start a task from your phone, leave the machine working, and return only when approval is needed.</p>
+        </article>
+
+        <article class="card feature-card feature-card-gate reveal">
+          <span class="gate-sweep" aria-hidden="true"></span>
+          <div class="feature-icon" aria-hidden="true"><span class="gate-diamond">◈</span></div>
+          <h3>Gate sensitive actions</h3>
+          <p>Require approval before pushing code, changing system state, or performing high-impact operations.</p>
+        </article>
+
+        <article class="card feature-card feature-card-access reveal">
+          <svg class="access-rings" viewBox="0 0 270 180" aria-hidden="true">
+            <defs>
+              <linearGradient id="access-meteor-gradient" x1="-42" y1="0" x2="0" y2="0" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#7c5cff" stop-opacity="0" />
+                <stop offset="0.62" stop-color="#8f78ff" stop-opacity="0.62" />
+                <stop offset="1" stop-color="#efeaff" stop-opacity="1" />
+              </linearGradient>
+              <filter id="access-meteor-glow" x="-120%" y="-500%" width="340%" height="1000%">
+                <feGaussianBlur stdDeviation="2.4" result="blur" />
+                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+            </defs>
+            <path id="access-ring-1" class="access-ring" d="M -10 178 A 90 50 0 0 1 170 178" />
+            <path id="access-ring-2" class="access-ring" d="M -30 178 A 110 62 0 0 1 190 178" />
+            <path id="access-ring-3" class="access-ring" d="M -50 178 A 130 74 0 0 1 210 178" />
+            <path id="access-ring-4" class="access-ring" d="M -70 178 A 150 86 0 0 1 230 178" />
+            <path id="access-ring-5" class="access-ring" d="M -90 178 A 170 98 0 0 1 250 178" />
+            <path id="access-ring-6" class="access-ring" d="M -110 178 A 190 110 0 0 1 270 178" />
+            <path id="access-ring-7" class="access-ring" d="M -130 178 A 210 122 0 0 1 290 178" />
+            <g class="access-meteor" data-ring="access-ring-1"><path class="meteor-tail" /><circle r="1.9" /></g>
+            <g class="access-meteor" data-ring="access-ring-2"><path class="meteor-tail" /><circle r="1.9" /></g>
+            <g class="access-meteor" data-ring="access-ring-3"><path class="meteor-tail" /><circle r="1.9" /></g>
+            <g class="access-meteor" data-ring="access-ring-4"><path class="meteor-tail" /><circle r="1.9" /></g>
+            <g class="access-meteor" data-ring="access-ring-5"><path class="meteor-tail" /><circle r="1.9" /></g>
+            <g class="access-meteor" data-ring="access-ring-6"><path class="meteor-tail" /><circle r="1.9" /></g>
+            <g class="access-meteor" data-ring="access-ring-7"><path class="meteor-tail" /><circle r="1.9" /></g>
+          </svg>
+          <div class="feature-icon" aria-hidden="true">⌁</div>
+          <h3>Use the AI you already pay for</h3>
+          <p>AgentBridge is an execution layer, not another model subscription.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section workflow-section" id="workflow">
+      <div class="container narrow reveal">
+        <span class="kicker">HOW IT WORKS</span>
+        <h2>From message to verified result.</h2>
+        <p class="section-lead" style="margin-inline:auto">Three steps. No new IDE. No moving your development environment to somebody else’s cloud.</p>
+      </div>
+
+      <div class="container step-grid">
+        <article class="card step-card step-card-connect reveal">
+          <span class="step-number">01</span>
+          <div class="step-visual step-visual-connect" aria-hidden="true">
+            <span class="pair-phone"><i></i></span>
+            <span class="pair-link"><i></i></span>
+            <span class="pair-laptop"><span class="windows-logo"><i></i><i></i><i></i><i></i></span></span>
+          </div>
+          <h3>Connect your machine</h3>
+          <p>Install AgentBridge, pair your device, and choose which folders, apps, and actions are allowed.</p>
+        </article>
+
+        <article class="card step-card step-card-task reveal">
+          <span class="step-number">02</span>
+          <div class="step-visual step-visual-task" aria-hidden="true">
+            <div class="task-note">
+              <span class="task-note-dot"></span>
+              <strong>Fix the issue,<br />run tests,<br />verify the UI.</strong>
+              <small>TASK</small>
+            </div>
+            <span class="task-connector"><i></i></span>
+            <div class="task-terminal">
+              <div class="task-terminal-top"><i></i><i></i><i></i></div>
+              <div class="task-terminal-content">
+                <b>&gt;_</b>
+                <span class="code-line green"></span>
+                <span class="code-line wide"></span>
+                <span class="code-line purple"></span>
+                <span class="code-line short"></span>
+              </div>
+            </div>
+          </div>
+          <h3>Send a real task</h3>
+          <p>Use ChatGPT or another supported client from desktop or mobile. Describe the outcome, not every click.</p>
+        </article>
+
+        <article class="card step-card step-card-review reveal">
+          <span class="step-number">03</span>
+          <div class="step-visual step-visual-review" aria-hidden="true">
+            <div class="evidence-panel">
+              <div class="evidence-item">
+                <span class="evidence-item-icon evidence-icon-image"></span>
+                <span><strong>Screenshots</strong><small>12 files</small></span>
+              </div>
+              <div class="evidence-item">
+                <span class="evidence-item-icon evidence-icon-log"></span>
+                <span><strong>Logs</strong><small>app.log · 2.4 MB</small></span>
+              </div>
+              <div class="evidence-item">
+                <span class="evidence-item-icon evidence-icon-diff">&lt;/&gt;</span>
+                <span><strong>Diffs</strong><small>3 files changed</small></span>
+              </div>
+            </div>
+            <div class="review-ready">
+              <span class="review-shield"><i></i></span>
+              <span class="review-ready-label">Ready for review</span>
+            </div>
+          </div>
+          <h3>Review the evidence</h3>
+          <p>Receive screenshots, logs, diffs, and approval prompts before sensitive actions are performed.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="demo">
+      <div class="container demo-grid">
+        <div class="reveal">
+          <span class="kicker">LIVE WORKFLOW</span>
+          <h2>One task across the whole machine.</h2>
+          <p class="section-lead">A coding task is complete when the build passes, the real app behaves correctly, and you have evidence.</p>
+
+          <div class="demo-controls">
+            <button class="demo-control active" type="button" data-demo-step><span>1</span><div><strong>Receive the task</strong><small>From ChatGPT on desktop or mobile</small></div></button>
+            <button class="demo-control" type="button" data-demo-step><span>2</span><div><strong>Edit and build</strong><small>Use the real repository and toolchain</small></div></button>
+            <button class="demo-control" type="button" data-demo-step><span>3</span><div><strong>Launch and test</strong><small>Operate the actual Windows application</small></div></button>
+            <button class="demo-control" type="button" data-demo-step><span>4</span><div><strong>Return proof</strong><small>Logs, screenshots, diff, and approval</small></div></button>
+          </div>
+        </div>
+
+        <div class="demo-stage glass reveal">
+          <div class="demo-top"><span>AgentBridge Task Timeline</span><span class="demo-live">Live session</span></div>
+          <div class="demo-screen">
+            <section class="demo-panel receive-panel active" data-demo-screen>
+              <span class="demo-label">INCOMING TASK</span>
+              <div class="incoming-task-card">
+                <div class="incoming-task-head">
+                  <span class="incoming-avatar">Y</span>
+                  <span><strong>You</strong><small>Mobile · just now</small></span>
+                  <b>Queued</b>
+                </div>
+                <p>Open AgentBridge, fix the minimized-window screenshot bug, run tests, verify it in the app, then ask before pushing.</p>
+              </div>
+              <div class="task-timeline" aria-label="Task routing progress">
+                <div class="timeline-step complete"><span class="timeline-node">✓</span><strong>Received</strong><small>00:00</small></div>
+                <div class="timeline-rail complete"></div>
+                <div class="timeline-step complete"><span class="timeline-node">✓</span><strong>Routed</strong><small>00:01</small></div>
+                <div class="timeline-rail active"><i></i></div>
+                <div class="timeline-step active"><span class="timeline-node"><i></i></span><strong>Executing</strong><small>Live</small></div>
+              </div>
+              <div class="task-status-row">
+                <span><i></i> PC online</span>
+                <span><i></i> Secure session</span>
+                <span><i></i> Local runtime</span>
+              </div>
+            </section>
+
+            <section class="demo-panel" data-demo-screen>
+              <span class="demo-label">LOCAL EXECUTION</span>
+              <div class="editor editor-polished">
+                <div class="editor-frame-top">
+                  <span class="editor-dot-row"><i></i><i></i><i></i></span>
+                  <span class="editor-path">AgentBridge / capture / MinimizedCapture.cs</span>
+                  <span class="editor-sync"><i></i> AI editing</span>
+                </div>
+                <div class="editor-workspace">
+                  <div class="editor-files">
+                    <span class="editor-files-label">FILES</span>
+                    <span>WindowCapture.cs</span>
+                    <span class="selected">MinimizedCapture.cs</span>
+                    <span>CaptureTests.cs</span>
+                  </div>
+                  <div class="editor-code-wrap">
+                    <div class="editor-code-tabs">
+                      <span class="active">MinimizedCapture.cs</span>
+                      <span>CaptureTests.cs</span>
+                    </div>
+                    <pre><code><span class="line"><b>41</b><span><span class="purple">await</span> window.RestoreWithoutFocus();</span></span>
+<span class="line"><b>42</b><span><span class="purple">await</span> Task.Delay(<span class="blue">150</span>);</span></span>
+<span class="line blank"><b>43</b><span></span></span>
+<span class="line focus"><b>44</b><span><span class="green">// Capture the restored surface</span></span></span>
+<span class="line"><b>45</b><span><span class="purple">var</span> frame = <span class="purple">await</span> CaptureAsync(window);</span></span>
+<span class="line blank"><b>46</b><span></span></span>
+<span class="line"><b>47</b><span><span class="purple">if</span> (wasMinimized)</span></span>
+<span class="line"><b>48</b><span>    window.Minimize();</span></span></code></pre>
+                  </div>
+                </div>
+              </div>
+              <div class="verification-note"><span class="verification-icon">✓</span><span><strong>Build passed</strong><small>0 warnings · 0 errors</small></span></div>
+            </section>
+
+            <section class="demo-panel verification-panel" data-demo-screen>
+              <span class="demo-label">DESKTOP VERIFICATION</span>
+
+              <div class="capture-compare">
+                <article class="capture-card capture-before">
+                  <div class="capture-card-head">
+                    <span><i></i><i></i><i></i></span>
+                    <small>BEFORE</small>
+                  </div>
+                  <div class="capture-preview minimized-preview">
+                    <div class="mini-window mini-window-minimized">
+                      <span class="mini-window-title">AgentBridge Test App</span>
+                      <span class="mini-window-state">Minimized</span>
+                    </div>
+                  </div>
+                  <div class="capture-meta">
+                    <span><strong>Target window</strong><small>Original app state</small></span>
+                    <b>MINIMIZED</b>
+                  </div>
+                </article>
+
+                <div class="capture-transfer" aria-hidden="true"><span>→</span><i></i></div>
+
+                <article class="capture-card capture-after">
+                  <div class="capture-card-head">
+                    <span><i></i><i></i><i></i></span>
+                    <small>AFTER</small>
+                  </div>
+                  <div class="capture-preview visible-preview">
+                    <div class="mini-window mini-window-visible">
+                      <div class="mini-toolbar"><i></i><i></i><i></i></div>
+                      <div class="mini-content">
+                        <span></span><span></span><span></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="capture-meta">
+                    <span><strong>Captured preview</strong><small>912 × 596 · PNG</small></span>
+                    <b>VISIBLE</b>
+                  </div>
+                </article>
+              </div>
+
+              <div class="capture-success">
+                <span class="capture-success-icon">✓</span>
+                <span><strong>Window state preserved</strong><small>Restored invisibly · Captured · Minimized again</small></span>
+                <b>VERIFIED</b>
+              </div>
+            </section>
+
+            <section class="demo-panel result-panel" data-demo-screen>
+              <span class="demo-label">RESULT</span>
+              <div class="result-proof">
+                <div class="result-main">
+                  <div class="result-badge"><i>✓</i><span>VERIFIED</span></div>
+                  <h3>Issue fixed on the real Windows desktop</h3>
+                  <p>Build, tests, and runtime behavior were checked before approval.</p>
+
+                  <div class="result-checklist">
+                    <span><i>✓</i><strong>921 tests passed</strong><small>0 failed</small></span>
+                    <span><i>✓</i><strong>Runtime flow confirmed</strong><small>Live app</small></span>
+                    <span><i>✓</i><strong>Window state preserved</strong><small>Verified</small></span>
+                  </div>
+
+                  <div class="result-footer">
+                    <span class="result-diff"><strong>3 files changed</strong><small><b>+84</b> added · <b>−19</b> removed</small></span>
+                    <span class="result-ready"><i></i> Ready to approve</span>
+                  </div>
+                </div>
+
+                <aside class="evidence-card">
+                  <div class="evidence-head"><span><i></i><i></i><i></i></span><b>Evidence</b></div>
+                  <div class="evidence-terminal">
+                    <span><i>›</i> dotnet test</span>
+                    <strong><i>✓</i> 921 passed</strong>
+                    <small>Duration 00:01:42</small>
+                  </div>
+                  <div class="evidence-preview">
+                    <div class="evidence-window">
+                      <span></span><span></span><span></span>
+                    </div>
+                    <small>Runtime screenshot captured</small>
+                  </div>
+                  <div class="evidence-status"><i></i> Proof attached</div>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section security-section" id="security">
+      <div class="container security-grid">
+        <div class="security-visual reveal">
+          <article class="card policy-card">
+            <div class="policy-head">
+              <span class="policy-title">
+                <strong>Permission policy</strong>
+                <small>DESKTOP-JENA / developer-default</small>
+              </span>
+              <span class="policy-online"><i></i> Runtime online</span>
+            </div>
+
+            <div class="permission-list">
+              <div class="permission-row">
+                <span class="permission-copy"><strong>Repository access</strong><small>Selected project workspace</small></span>
+                <span class="permission-status allowed"><i></i>Allowed</span>
+              </div>
+              <div class="permission-row">
+                <span class="permission-copy"><strong>Process control</strong><small>Kill, restart, inspect</small></span>
+                <span class="permission-status ask"><i></i>Ask first</span>
+              </div>
+              <div class="permission-row">
+                <span class="permission-copy"><strong>Git push</strong><small>origin / main</small></span>
+                <span class="permission-status ask"><i></i>Ask first</span>
+              </div>
+              <div class="permission-row">
+                <span class="permission-copy"><strong>System changes</strong><small>Registry, services, Windows settings</small></span>
+                <span class="permission-status blocked"><i></i>Blocked</span>
+              </div>
+            </div>
+
+            <div class="policy-footer">
+              <span><strong>Audit log</strong><small>Stored locally</small></span>
+              <span><strong>Last approval</strong><small>2 min ago</small></span>
+            </div>
+          </article>
+        </div>
+
+        <div class="security-copy reveal">
+          <span class="kicker">CONTROL, NOT BLIND TRUST</span>
+          <h2>Give AI enough power to work, not enough to wreck the machine.</h2>
+          <p class="section-lead">AgentBridge is built around explicit permissions, scoped access, action logs, and human approval for sensitive operations.</p>
+          <div class="security-points">
+            <div class="security-point"><span>01</span><p><strong>Local execution.</strong> Your tools and source stay on the Windows machine.</p></div>
+            <div class="security-point"><span>02</span><p><strong>Scoped permissions.</strong> Limit folders, apps, processes, and action types.</p></div>
+            <div class="security-point"><span>03</span><p><strong>Approval gates.</strong> Confirm sensitive changes from desktop or mobile.</p></div>
+            <div class="security-point"><span>04</span><p><strong>Evidence trail.</strong> Review logs, screenshots, and task history.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section pricing-section" id="pricing">
+      <div class="container narrow reveal">
+        <span class="kicker">LAUNCH PRICING</span>
+        <h2>Start small. Save yearly. Own it as a Founder.</h2>
+        <p class="section-lead" style="margin-inline:auto">Choose the commitment that fits now. Every plan unlocks the same core AgentBridge runtime.</p>
+      </div>
+
+      <div class="container pricing-wrap">
+        <div class="pricing-grid">
+          <article class="pricing-plan reveal">
+            <div class="plan-topline">
+              <span>Flexible</span>
+              <small>Monthly</small>
+            </div>
+            <h3>Monthly</h3>
+            <p class="plan-copy">Use the full product without a long commitment.</p>
+            <div class="plan-price"><sup>$</sup><strong>8.9</strong><small>/ month</small></div>
+            <ul class="plan-features">
+              <li>1 Windows PC</li>
+              <li>Full core runtime</li>
+              <li>All updates while active</li>
+              <li>Cancel anytime</li>
+            </ul>
+            <a class="button plan-cta" href="https://example.com/checkout?plan=monthly">
+              <span>Choose monthly</span><i>→</i>
+            </a>
+            <p class="plan-note">AI usage is not included.</p>
+          </article>
+
+          <article class="pricing-plan pricing-plan-featured reveal">
+            <div class="plan-badge">Annual savings</div>
+            <div class="plan-topline">
+              <span>Best value</span>
+              <small>Save 26%</small>
+            </div>
+            <h3>Yearly</h3>
+            <p class="plan-copy">The default choice for regular development work.</p>
+            <div class="plan-price"><sup>$</sup><strong>79</strong><small>/ year</small></div>
+            <div class="plan-equivalent">Equivalent to $6.58 per month</div>
+            <ul class="plan-features">
+              <li>1 Windows PC</li>
+              <li>Full core runtime</li>
+              <li>All updates while active</li>
+              <li>Priority product feedback</li>
+            </ul>
+            <a class="button plan-cta plan-cta-primary" href="https://example.com/checkout?plan=yearly">
+              <span>Choose yearly</span><i>→</i>
+            </a>
+            <p class="plan-note">Best recurring value at launch.</p>
+          </article>
+
+          <article class="pricing-plan pricing-plan-founder reveal">
+            <div class="plan-badge plan-badge-founder">Founder offer</div>
+            <div class="plan-topline">
+              <span>Lifetime</span>
+              <small>50 licenses</small>
+            </div>
+            <h3>Founder Lifetime</h3>
+            <p class="plan-copy">Pay once and keep the version you buy permanently.</p>
+            <div class="plan-price"><sup>$</sup><strong>59</strong><small>one-time</small></div>
+            <div class="plan-equivalent">Next batch: <strong>$79</strong></div>
+            <ul class="plan-features">
+              <li>1 Windows PC</li>
+              <li>Permanent current-version license</li>
+              <li>6 months of product updates</li>
+              <li>Founder feedback channel</li>
+            </ul>
+            <a class="button plan-cta plan-cta-founder" href="https://example.com/checkout?plan=founder">
+              <span>Get Founder Lifetime</span><i>→</i>
+            </a>
+            <p class="plan-note">Limited early-access allocation.</p>
+          </article>
+        </div>
+
+        <div class="pricing-common reveal">
+          <span>Local execution runtime</span>
+          <span>Desktop automation suite</span>
+          <span>Permission and approval gates</span>
+          <span>Remote task control</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="container faq-grid">
+        <div class="reveal">
+          <span class="kicker">FAQ</span>
+          <h2>Before you hand AI the keyboard.</h2>
+          <p class="section-lead">Everything that should be clear before somebody pays.</p>
+        </div>
+
+        <div class="faq-list reveal">
+          <article class="faq-item">
+            <button type="button" aria-expanded="false"><span>What exactly does AgentBridge do?</span><i>+</i></button>
+            <div class="faq-answer"><p>AgentBridge runs on your Windows PC and gives supported AI clients controlled access to files, terminal commands, processes, windows, desktop controls, screenshots, and other local tools.</p></div>
+          </article>
+          <article class="faq-item">
+            <button type="button" aria-expanded="false"><span>Does AgentBridge include an AI model?</span><i>+</i></button>
+            <div class="faq-answer"><p>No. You connect a supported AI account or provider you already use. AgentBridge is the execution layer on your machine.</p></div>
+          </article>
+          <article class="faq-item">
+            <button type="button" aria-expanded="false"><span>Can I control it from my phone?</span><i>+</i></button>
+            <div class="faq-answer"><p>Yes, through a supported remote client. Start tasks, receive progress, review evidence, and approve sensitive actions away from the PC.</p></div>
+          </article>
+          <article class="faq-item">
+            <button type="button" aria-expanded="false"><span>Does my source code move to AgentBridge servers?</span><i>+</i></button>
+            <div class="faq-answer"><p>The execution runtime works locally. Data sent to your chosen AI provider depends on that provider and the permissions you grant.</p></div>
+          </article>
+          <article class="faq-item">
+            <button type="button" aria-expanded="false"><span>What does the Founder lifetime license include?</span><i>+</i></button>
+            <div class="faq-answer"><p>You can keep using the version you buy permanently. The Founder purchase includes six months of product updates, not lifetime updates or a permanent guarantee for third-party services.</p></div>
+          </article>
+          <article class="faq-item">
+            <button type="button" aria-expanded="false"><span>Is this production-ready?</span><i>+</i></button>
+            <div class="faq-answer"><p>Founder Edition is early-access software. Buyers should expect rough edges and should review permissions before using it on critical machines.</p></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section final-cta">
+      <div class="container cta-card reveal">
+        <div class="cta-copy">
+          <span class="cta-kicker"><i></i> Stop babysitting the terminal</span>
+          <h2>Your PC should keep shipping after you leave the desk.</h2>
+          <p>Send the task, let AgentBridge build and verify it on the real Windows machine, then come back only when approval is needed.</p>
+          <div class="cta-actions">
+            <a class="button cta-primary" href="#pricing"><span>Get founder access</span><i>→</i></a>
+            <a class="cta-secondary" href="#demo">Watch the workflow <span>↗</span></a>
+          </div>
+          <div class="cta-proof">
+            <span>Local-first</span>
+            <span>Plans from $8.9</span>
+            <span>First 50 seats</span>
+          </div>
+        </div>
+
+        <aside class="cta-offer" aria-label="Founder Edition offer">
+          <div class="cta-offer-top">
+            <div class="cta-offer-identity">
+              <span class="cta-offer-mark"><img class="brand-symbol" src="assets/agentbridge-mark.svg" alt="" aria-hidden="true" /></span>
+              <span class="cta-offer-name">AgentBridge<small>Founder license</small></span>
+            </div>
+            <span class="cta-offer-batch">Limited to 50 licenses</span>
+          </div>
+          <div class="cta-offer-body">
+            <span class="cta-offer-status"><i></i> Early access allocation</span>
+            <div class="cta-price"><sup>$</sup><b>59</b><small>one-time</small></div>
+            <div class="cta-license-meta"><span>Permanent license</span><span>1 Windows PC</span><span>6 months updates</span></div>
+          </div>
+          <div class="cta-includes-head"><span>Included with Founder</span><small>Core access</small></div>
+          <ul class="cta-includes">
+            <li><span aria-hidden="true"></span><div><strong>Local Windows runtime</strong><small>Runs privately on your own PC</small></div></li>
+            <li><span aria-hidden="true"></span><div><strong>Desktop automation suite</strong><small>Inspect, control, test, and verify</small></div></li>
+            <li><span aria-hidden="true"></span><div><strong>Founder release channel</strong><small>Six months of product updates</small></div></li>
+          </ul>
+          <div class="cta-offer-bottom"><span><i></i> 50 founder licenses</span><strong>Limited release</strong></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-panel">
+        <div class="footer-main">
+          <div class="footer-brand">
+            <a class="footer-logo" href="#top" aria-label="AgentBridge home">
+              <span class="footer-logo-mark"><img class="brand-symbol" src="assets/agentbridge-mark.svg" alt="" aria-hidden="true" /></span>
+              <span>
+                <strong>AgentBridge</strong>
+                <small>Local Windows runtime</small>
+              </span>
+            </a>
+            <p>Controlled local execution for AI on the Windows machine you already own.</p>
+            <div class="footer-update">
+              <strong>Get product updates</strong>
+              <a href="#pricing">Join founder updates <span>↗</span></a>
+            </div>
+            <div class="footer-badges">
+              <span><i></i> Local-first runtime</span>
+              <span><i></i> System status: operational</span>
+              <span>Founder Edition</span>
+            </div>
+          </div>
+
+          <div class="footer-links">
+            <div>
+              <strong>Product</strong>
+              <a href="#features">Features <span>↗</span></a>
+              <a href="#workflow">How it works <span>↗</span></a>
+              <a href="#pricing">Pricing <span>↗</span></a>
+            </div>
+            <div>
+              <strong>Explore</strong>
+              <a href="#security">Security <span>↗</span></a>
+              <a href="#demo">Workflow demo <span>↗</span></a>
+              <a href="#faq">Docs <span>Γåù</span></a>
+              <a href="#faq">Installation guide <span>Γåù</span></a>
+              <a href="#faq">FAQ <span>↗</span></a>
+            </div>
+            <div>
+              <strong>Legal</strong>
+              <a href="#">Privacy <span>↗</span></a>
+              <a href="#">Terms <span>↗</span></a>
+              <a href="#">Refund policy <span>↗</span></a>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-bottom">
+          <span>© <span data-year></span> AgentBridge. Built for Windows developers.</span>
+          <div class="footer-bottom-actions">
+            <span class="footer-social"><b>GitHub</b><b>X</b><b>Discord</b></span>
+            <a class="footer-top" href="#top">Back to top <i>↑</i></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <a class="mobile-buy" href="#pricing"><span><b>$8.9</b> Plans start here</span><strong>View pricing ↗</strong></a>
+  <script src="script.js"></script>
+</body>
+</html>

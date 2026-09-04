@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -25,14 +26,26 @@ public sealed class ServiceBinaryLocator
         "agent",
         "LocalMcp.Agent.Windows");
 
-    public LaunchTarget? ResolveCloudflared(string tunnelName)
+    public LaunchTarget? ResolveAndroidAgent() => Resolve(
+        "AGENTBRIDGE_ANDROID_AGENT_PATH",
+        "android-agent",
+        "LocalMcp.Agent.AndroidAdb");
+
+    public LaunchTarget? ResolveCloudflared(string tunnelName, int? gatewayPort = null)
     {
+        var isQuickTunnel = string.IsNullOrWhiteSpace(tunnelName)
+            || string.Equals(tunnelName, "quick", StringComparison.OrdinalIgnoreCase);
+
+        var arguments = isQuickTunnel
+            ? $"tunnel --url http://127.0.0.1:{gatewayPort ?? 5227}"
+            : $"tunnel run {QuoteArgument(tunnelName)}";
+
         var configured = Environment.GetEnvironmentVariable("AGENTBRIDGE_CLOUDFLARED_PATH");
         if (!string.IsNullOrWhiteSpace(configured))
         {
             var configuredTarget = CreateExecutableTarget(
                 Path.GetFullPath(configured),
-                $"tunnel run {QuoteArgument(tunnelName)}");
+                arguments);
             if (configuredTarget is not null)
                 return configuredTarget;
         }
@@ -45,7 +58,7 @@ public sealed class ServiceBinaryLocator
         {
             var packagedTarget = CreateExecutableTarget(
                 candidate,
-                $"tunnel run {QuoteArgument(tunnelName)}");
+                arguments);
             if (packagedTarget is not null)
                 return packagedTarget;
         }
@@ -54,7 +67,70 @@ public sealed class ServiceBinaryLocator
             ?? FindOnPath("cloudflared");
         return pathTarget is null
             ? null
-            : CreateExecutableTarget(pathTarget, $"tunnel run {QuoteArgument(tunnelName)}");
+            : CreateExecutableTarget(pathTarget, arguments);
+    }
+
+    public LaunchTarget? ResolveNgrok(string? customPath, string domain, int port, string? authtoken = null)
+    {
+        var domainArg = !string.IsNullOrWhiteSpace(domain) ? $"--url={QuoteArgument(domain)} " : string.Empty;
+        var tokenArg = !string.IsNullOrWhiteSpace(authtoken) ? $"--authtoken={QuoteArgument(authtoken)} " : string.Empty;
+        var arguments = $"http {tokenArg}{domainArg}{port}";
+
+        var configured = !string.IsNullOrWhiteSpace(customPath)
+            ? customPath
+            : Environment.GetEnvironmentVariable("AGENTBRIDGE_NGROK_PATH");
+
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var configuredTarget = CreateExecutableTarget(Path.GetFullPath(configured), arguments);
+            if (configuredTarget is not null)
+                return configuredTarget;
+        }
+
+        var candidates = new List<string>
+        {
+            Path.Combine(_baseDirectory, "tools", "ngrok", "ngrok.exe"),
+            Path.Combine(_baseDirectory, "ngrok.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "ngrok", "ngrok.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ngrok", "ngrok.exe")
+        };
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var roamingNvm = Path.Combine(appData, "Roaming", "nvm");
+        if (Directory.Exists(roamingNvm))
+        {
+            try
+            {
+                candidates.AddRange(Directory.GetFiles(roamingNvm, "ngrok.exe", SearchOption.AllDirectories));
+            }
+            catch
+            {
+            }
+        }
+
+        var localNvm = Path.Combine(appData, "nvm");
+        if (Directory.Exists(localNvm))
+        {
+            try
+            {
+                candidates.AddRange(Directory.GetFiles(localNvm, "ngrok.exe", SearchOption.AllDirectories));
+            }
+            catch
+            {
+            }
+        }
+
+        foreach (var candidate in candidates)
+        {
+            var target = CreateExecutableTarget(candidate, arguments);
+            if (target is not null)
+                return target;
+        }
+
+        var pathTarget = FindOnPath("ngrok.exe") ?? FindOnPath("ngrok");
+        return pathTarget is null
+            ? null
+            : CreateExecutableTarget(pathTarget, arguments);
     }
 
     private LaunchTarget? Resolve(

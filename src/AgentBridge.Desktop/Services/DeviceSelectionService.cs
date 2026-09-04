@@ -29,19 +29,32 @@ internal sealed class DeviceSelectionService
         string gatewayUrl,
         CancellationToken cancellationToken = default)
     {
-        using var response = await _httpClient.GetAsync(
-            $"{gatewayUrl.TrimEnd('/')}/api/devices",
-            cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        int[] retryDelaysMs = [500, 1000, 2000, 4000];
+        for (int attempt = 0; attempt <= retryDelaysMs.Length; attempt++)
+        {
+            try
+            {
+                using var response = await _httpClient.GetAsync(
+                    $"{gatewayUrl.TrimEnd('/')}/api/devices",
+                    cancellationToken).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
 
-        await using var stream = await response.Content
-            .ReadAsStreamAsync(cancellationToken)
-            .ConfigureAwait(false);
+                await using var stream = await response.Content
+                    .ReadAsStreamAsync(cancellationToken)
+                    .ConfigureAwait(false);
 
-        return await JsonSerializer
-            .DeserializeAsync<DeviceListResponse>(stream, JsonOptions, cancellationToken)
-            .ConfigureAwait(false)
-               ?? new DeviceListResponse(0, null, []);
+                return await JsonSerializer
+                    .DeserializeAsync<DeviceListResponse>(stream, JsonOptions, cancellationToken)
+                    .ConfigureAwait(false)
+                       ?? new DeviceListResponse(0, null, []);
+            }
+            catch (HttpRequestException) when (attempt < retryDelaysMs.Length && !cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(retryDelaysMs[attempt], cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return new DeviceListResponse(0, null, []);
     }
 
     public async Task SetDefaultDeviceAsync(

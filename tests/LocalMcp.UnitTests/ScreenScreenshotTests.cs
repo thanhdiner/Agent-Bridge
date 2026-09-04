@@ -1,8 +1,12 @@
 using System.Reflection;
 using LocalMcp.Agent.Windows.UiAutomation;
 using LocalMcp.BuildingBlocks.Errors;
+using LocalMcp.Gateway.Commands;
 using LocalMcp.Gateway.Mcp;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using System.Text.Json;
 using ModelContextProtocol.Server;
 
 namespace LocalMcp.UnitTests;
@@ -24,6 +28,34 @@ public sealed class ScreenScreenshotTests
         Assert.Equal(
             new[] { "deviceId", "monitorIndex", "x", "y", "width", "height", "maxWidth", "maxHeight" },
             method.GetParameters().Select(parameter => parameter.Name).ToArray());
+
+        var deviceIdParameter = method.GetParameters().Single(parameter => parameter.Name == "deviceId");
+        Assert.True(deviceIdParameter.HasDefaultValue);
+        Assert.Null(deviceIdParameter.DefaultValue);
+    }
+
+    [Fact]
+    public void ProtocolToolSchema_DoesNotRequireDeviceIdAfterNormalization()
+    {
+        var method = typeof(ScreenCaptureTools).GetMethods()
+            .Single(candidate => candidate.GetCustomAttribute<McpServerToolAttribute>()?.Name == "screen_screenshot");
+        var target = new ScreenCaptureTools(
+            Substitute.For<ICommandDispatcher>(),
+            Substitute.For<IAuthorizationService>(),
+            NullLogger<ScreenCaptureTools>.Instance);
+        var primitive = McpServerTool.Create(method, target);
+        var tool = ToolSchemaSanitizer.NormalizeLocalToolSchema(primitive.ProtocolTool);
+
+        Assert.True(tool.InputSchema.TryGetProperty("properties", out var properties));
+        Assert.True(properties.TryGetProperty("deviceId", out _));
+
+        if (tool.InputSchema.TryGetProperty("required", out var required))
+        {
+            var requiredNames = required.EnumerateArray()
+                .Select(item => item.GetString())
+                .ToArray();
+            Assert.DoesNotContain("deviceId", requiredNames);
+        }
     }
 
     [Fact]

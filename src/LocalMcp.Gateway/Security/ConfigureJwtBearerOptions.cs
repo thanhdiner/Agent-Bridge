@@ -26,12 +26,12 @@ public sealed class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearer
         }
 
         options.Authority = _securityOptions.OAuth.Authority;
-        options.Audience = _securityOptions.OAuth.Audience;
+        options.Audience = string.IsNullOrWhiteSpace(_securityOptions.OAuth.Audience) ? null : _securityOptions.OAuth.Audience;
 
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidateAudience = true,
+            ValidateAudience = false,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true
         };
@@ -42,19 +42,36 @@ public sealed class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearer
 
         options.Events = new JwtBearerEvents
         {
-            OnChallenge = context =>
+            OnChallenge = async context =>
             {
-                // Skip default ASP.NET Core challenge response to prevent leaking internal validation exceptions
+                // Skip default ASP.NET Core challenge response
                 context.HandleResponse();
 
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 context.Response.ContentType = "application/json";
 
-                var metadataUrl = $"{publicBaseUrl.TrimEnd('/')}/.well-known/oauth-protected-resource";
-                var scopesStr = string.Join(" ", requiredScopes.Distinct());
-                context.Response.Headers.Append("WWW-Authenticate", $"Bearer resource_metadata=\"{metadataUrl}\", scope=\"{scopesStr}\"");
+                var requestPath = context.Request.Path.Value ?? string.Empty;
+                var isAndroid = requestPath.EndsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase);
+                var isB = requestPath.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase);
+                var isA = requestPath.EndsWith("/mcp/a", StringComparison.OrdinalIgnoreCase);
+                var metadataSuffix = isAndroid
+                    ? "/.well-known/oauth-protected-resource/mcp/android/a"
+                    : isB
+                        ? "/.well-known/oauth-protected-resource/mcp/b"
+                        : isA
+                            ? "/.well-known/oauth-protected-resource/mcp/a"
+                            : "/.well-known/oauth-protected-resource";
 
-                return Task.CompletedTask;
+                var endpointRealm = isAndroid
+                    ? $"{publicBaseUrl.TrimEnd('/')}/mcp/android/a"
+                    : isB
+                        ? $"{publicBaseUrl.TrimEnd('/')}/mcp/b"
+                        : $"{publicBaseUrl.TrimEnd('/')}/mcp/a";
+                var metadataUrl = $"{publicBaseUrl.TrimEnd('/')}{metadataSuffix}";
+                var scopesStr = string.Join(" ", requiredScopes.Distinct());
+                context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+                context.Response.Headers.Append("WWW-Authenticate", $"Bearer realm=\"{endpointRealm}\", resource_metadata=\"{metadataUrl}\", scope=\"{scopesStr}\"");
+                await context.Response.WriteAsync("{\"error\":\"unauthorized\",\"message\":\"Authentication required\"}");
             }
         };
     }

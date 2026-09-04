@@ -27,7 +27,7 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
-CloseApplicationsFilter=AgentBridge.Desktop.exe,LocalMcp.Gateway.exe,LocalMcp.Agent.Windows.exe
+CloseApplicationsFilter=AgentBridge.Desktop.exe,LocalMcp.Gateway.exe,LocalMcp.Agent.Windows.exe,LocalMcp.Agent.AndroidAdb.exe
 RestartApplications=no
 SetupLogging=yes
 SetupIconFile={#IconFile}
@@ -43,6 +43,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Icons]
 Name: "{group}\AgentBridge"; Filename: "{app}\AgentBridge.Desktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\agentbridge.ico"
 Name: "{autodesktop}\AgentBridge"; Filename: "{app}\AgentBridge.Desktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\agentbridge.ico"; Tasks: desktopicon
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "AgentBridge Desktop"; ValueData: """{app}\AgentBridge.Desktop.exe"" --hidden"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\AgentBridge.Desktop.exe"; WorkingDir: "{app}"; Description: "Launch AgentBridge"; Flags: nowait postinstall skipifsilent

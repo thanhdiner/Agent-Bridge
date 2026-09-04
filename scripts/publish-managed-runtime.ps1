@@ -36,6 +36,7 @@ if (!$outputRoot.StartsWith($artifactsRootWithSeparator, [System.StringCompariso
 
 $gatewayOutput = Join-Path $outputRoot 'services\gateway'
 $agentOutput = Join-Path $outputRoot 'services\agent'
+$androidAgentOutput = Join-Path $outputRoot 'services\android-agent'
 
 if (Test-Path -LiteralPath $outputRoot) {
     Remove-Item -LiteralPath $outputRoot -Recurse -Force
@@ -43,6 +44,7 @@ if (Test-Path -LiteralPath $outputRoot) {
 
 New-Item -ItemType Directory -Path $gatewayOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $agentOutput -Force | Out-Null
+New-Item -ItemType Directory -Path $androidAgentOutput -Force | Out-Null
 
 $selfContainedValue = if ($SelfContained) { 'true' } else { 'false' }
 $commonArguments = @(
@@ -72,6 +74,7 @@ Push-Location $repositoryRoot
 try {
     Publish-Project 'src\LocalMcp.Gateway\LocalMcp.Gateway.csproj' $gatewayOutput
     Publish-Project 'src\LocalMcp.Agent.Windows\LocalMcp.Agent.Windows.csproj' $agentOutput
+    Publish-Project 'src\LocalMcp.Agent.AndroidAdb\LocalMcp.Agent.AndroidAdb.csproj' $androidAgentOutput
     Publish-Project 'src\AgentBridge.Desktop\AgentBridge.Desktop.csproj' $outputRoot
 }
 finally {
@@ -81,7 +84,8 @@ finally {
 $requiredFiles = @(
     (Join-Path $outputRoot 'AgentBridge.Desktop.exe'),
     (Join-Path $gatewayOutput 'LocalMcp.Gateway.exe'),
-    (Join-Path $agentOutput 'LocalMcp.Agent.Windows.exe')
+    (Join-Path $agentOutput 'LocalMcp.Agent.Windows.exe'),
+    (Join-Path $androidAgentOutput 'LocalMcp.Agent.AndroidAdb.exe')
 )
 
 $missingFiles = @($requiredFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -41,7 +42,7 @@ public sealed class ClipboardTools
         OpenWorld = false),
      Description("Reads bounded Unicode text from the Windows clipboard. Non-text clipboard contents are reported without conversion. Requires dev:execute scope.")]
     public async Task<CallToolResult> GetAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Maximum UTF-16 characters returned (default: 65536, hard limit: 1048576)")] int maxCharacters = 65_536)
     {
         var authorizationError = await ValidateAuthorizationAndDeviceAsync(deviceId);
@@ -54,7 +55,7 @@ public sealed class ClipboardTools
             new ClipboardGetCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 MaxCharacters = maxCharacters
             },
@@ -69,7 +70,7 @@ public sealed class ClipboardTools
         OpenWorld = false),
      Description("Replaces Windows clipboard contents with Unicode text. The text is not echoed in the result. Requires dev:execute scope.")]
     public async Task<CallToolResult> SetAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Unicode clipboard text. Empty text clears the textual clipboard value. Hard limit: 1048576 UTF-16 characters.")] string text,
         [Description("Whether to read back and verify the clipboard after writing (default: true)")] bool verify = true)
     {
@@ -85,7 +86,7 @@ public sealed class ClipboardTools
             new ClipboardSetCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 Text = text,
                 Verify = verify
@@ -93,12 +94,10 @@ public sealed class ClipboardTools
             "clipboard_set");
     }
 
-    private async Task<CallToolResult?> ValidateAuthorizationAndDeviceAsync(string deviceId)
+    private async Task<CallToolResult?> ValidateAuthorizationAndDeviceAsync(string? deviceId)
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         return null;
     }
 
@@ -140,3 +139,5 @@ public sealed class ClipboardTools
         IsError = true
     };
 }
+
+

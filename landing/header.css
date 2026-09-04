@@ -1,0 +1,79 @@
+@property --nav-cta-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* AgentBridge premium header */
+.site-header { padding-top: 14px; border: 0; background: transparent; backdrop-filter: none; transition: padding .24s ease; }
+.site-header.scrolled { padding-top: 8px; background: transparent; }
+.header-ambient { position: absolute; inset: -40px 0 auto; height: 170px; z-index: -1; pointer-events: none; opacity: .56; filter: none; background: radial-gradient(circle at 22% 5%, rgba(119,104,168,.11), transparent 34%), radial-gradient(circle at 78% 0%, rgba(70,109,137,.09), transparent 32%); }
+.site-header.scrolled .header-ambient { opacity: .42; }
+.nav-shell { position: relative; }
+.brand { gap: 11px; font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; font-weight: 500; letter-spacing: 0; }
+.brand-copy { display: grid; gap: 2px; line-height: 1; }
+.brand-copy strong { color: #f2f4f8; font-size: 15px; font-weight: 650; letter-spacing: -.02em; }
+.brand-copy small { color: #858ea1; font-size: 9px; font-weight: 500; letter-spacing: .015em; }
+.nav-shell > .nav { grid-template-columns: auto 1fr auto; gap: 22px; min-height: 76px; padding: 0 14px; border: 1px solid rgba(255,255,255,.085); border-radius: 22px; background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015)), rgba(13,16,22,.84); box-shadow: 0 18px 50px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.05); backdrop-filter: none; }
+.site-header.scrolled .nav-shell > .nav { min-height: 66px; background: rgba(11,14,19,.94); }
+.brand-mark-wrap { display: grid; place-items: center; }
+.nav-right { display: flex; align-items: center; justify-self: end; gap: 10px; }
+.nav-right > div { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 999px; color: #c8ccd7; font-size: 11px; font-weight: 700; }
+.brand-mark { display: grid; width: 46px; height: 31px; place-items: center; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.brand-mark .brand-symbol { position: static; width: 100%; height: 100%; max-width: none; object-fit: contain; transform: none; }
+
+.nav-cta.button-primary {
+  position: relative;
+  min-height: 42px;
+  padding: 0 7px 0 15px;
+  gap: 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: #f3f4fb;
+  background:
+    linear-gradient(#202538, #202538) padding-box,
+    conic-gradient(from var(--nav-cta-angle), rgba(111,103,221,.28) 0 72%, rgba(150,136,255,.96) 79%, rgba(87,163,255,.92) 84%, rgba(111,103,221,.28) 91% 100%) border-box;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045), 0 8px 22px rgba(0,0,0,.22), 0 0 0 1px rgba(102,95,214,.06);
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -.015em;
+  animation: nav-cta-border 3.8s linear infinite;
+}
+.nav-cta.button-primary::before,
+.nav-cta.button-primary::after { display: none; }
+.nav-cta.button-primary > span { position: relative; z-index: 1; }
+@keyframes nav-cta-border { to { --nav-cta-angle: 360deg; } }
+.nav-cta.button-primary:hover {
+  color: #fff;
+  background:
+    linear-gradient(#252b42, #252b42) padding-box,
+    conic-gradient(from var(--nav-cta-angle), rgba(111,103,221,.34) 0 70%, rgba(158,145,255,1) 78%, rgba(91,171,255,.96) 84%, rgba(111,103,221,.34) 92% 100%) border-box;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 11px 26px rgba(0,0,0,.26), 0 0 0 1px rgba(102,95,214,.1);
+  transform: none;
+  animation-duration: 2.8s;
+}
+.nav-cta.button-primary:active { transform: scale(.985); }
+.nav-arrow {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 9px;
+  color: #fff;
+  background: #665fd6;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 5px 12px rgba(55,48,145,.22);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
+}
+.nav-cta.button-primary:hover .nav-arrow {
+  background: #726ae2;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 6px 14px rgba(55,48,145,.28);
+  transform: translateX(2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-cta.button-primary { animation: none; }
+}

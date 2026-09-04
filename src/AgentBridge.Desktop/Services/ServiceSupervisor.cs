@@ -18,12 +18,13 @@ public sealed class ServiceSupervisor : IAsyncDisposable
     public const string DefaultGatewayUrl = "http://127.0.0.1:5227";
     public const string DefaultTunnelName = "localmcp";
 
-    private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan ForcedStopTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan GracefulStopTimeout = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan ForcedStopTimeout = TimeSpan.FromSeconds(2);
 
     private readonly ServiceBinaryLocator _binaryLocator;
     private readonly LocalDeviceIdentityStore _identityStore;
     private readonly InternalTokenStore _tokenStore;
+    private readonly TunnelSettingsStore _tunnelSettingsStore;
     private readonly HttpClient _httpClient;
     private readonly RestartBackoff _gatewayBackoff = new();
     private readonly RestartBackoff _agentBackoff = new();
@@ -32,10 +33,13 @@ public sealed class ServiceSupervisor : IAsyncDisposable
     private readonly SemaphoreSlim _gatewayLogGate = new(1, 1);
     private readonly SemaphoreSlim _agentLogGate = new(1, 1);
     private readonly SemaphoreSlim _tunnelLogGate = new(1, 1);
+    private readonly ChildProcessJob _childProcessJob = ChildProcessJob.Create($"AgentBridge.Desktop.Children.{Environment.ProcessId}");
     private readonly string _logsDirectory;
     private readonly string _gatewayUrl;
     private readonly string _tunnelName;
     private readonly int _gatewayPort;
+    private TunnelSettings _tunnelSettings = TunnelSettings.Default;
+    private string _publicTunnelUrl = string.Empty;
     private CancellationTokenSource? _monitorCancellation;
     private Task? _monitorTask;
     private Process? _gatewayProcess;
@@ -49,12 +53,14 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         ServiceBinaryLocator? binaryLocator = null,
         LocalDeviceIdentityStore? identityStore = null,
         InternalTokenStore? tokenStore = null,
+        TunnelSettingsStore? tunnelSettingsStore = null,
         HttpClient? httpClient = null,
         string? gatewayUrl = null)
     {
         _binaryLocator = binaryLocator ?? new ServiceBinaryLocator();
         _identityStore = identityStore ?? new LocalDeviceIdentityStore();
         _tokenStore = tokenStore ?? new InternalTokenStore();
+        _tunnelSettingsStore = tunnelSettingsStore ?? new TunnelSettingsStore();
         _httpClient = httpClient ?? new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(2)
@@ -92,13 +98,14 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             var identity = await _identityStore.LoadOrCreateAsync(cancellationToken);
             _deviceId = identity.DeviceId;
             _internalToken = await _tokenStore.LoadOrCreateAsync(cancellationToken);
+            _tunnelSettings = await _tunnelSettingsStore.LoadAsync(cancellationToken);
 
             Publish(Current with
             {
                 DeviceId = _deviceId,
                 Gateway = StartingStatus("Preparing Gateway..."),
                 Agent = StartingStatus("Preparing Windows Agent..."),
-                Tunnel = StartingStatus("Preparing Cloudflare Tunnel...")
+                Tunnel = StartingStatus("Preparing Tunnel...")
             });
 
             await EnsureGatewayAsync(cancellationToken);
@@ -140,15 +147,17 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             {
                 Gateway = StartingStatus("Restarting Gateway..."),
                 Agent = StartingStatus("Restarting Windows Agent..."),
-                Tunnel = StartingStatus("Restarting Cloudflare Tunnel...")
+                Tunnel = StartingStatus("Restarting Tunnel...")
             });
 
-            await StopOwnedTunnelAsync(cancellationToken);
-            await StopOwnedAgentAsync(cancellationToken);
-            await StopOwnedGatewayAsync(cancellationToken);
+            await Task.WhenAll(
+                StopOwnedTunnelAsync(cancellationToken),
+                StopOwnedAgentAsync(cancellationToken),
+                StopOwnedGatewayAsync(cancellationToken));
             _gatewayBackoff.Reset();
             _agentBackoff.Reset();
             _tunnelBackoff.Reset();
+            _tunnelSettings = await _tunnelSettingsStore.LoadAsync(cancellationToken);
             await EnsureGatewayAsync(cancellationToken);
             await EnsureAgentAsync(cancellationToken);
             await EnsureTunnelAsync(cancellationToken);
@@ -226,14 +235,16 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         await _operationGate.WaitAsync(cancellationToken);
         try
         {
-            await StopOwnedTunnelAsync(cancellationToken);
-            await StopOwnedAgentAsync(cancellationToken);
-            await StopOwnedGatewayAsync(cancellationToken);
+            await Task.WhenAll(
+                StopOwnedTunnelAsync(cancellationToken),
+                StopOwnedAgentAsync(cancellationToken),
+                StopOwnedGatewayAsync(cancellationToken));
             Publish(Current with
             {
                 Gateway = StoppedStatus("Stopped by AgentBridge Desktop."),
                 Agent = StoppedStatus("Stopped by AgentBridge Desktop."),
-                Tunnel = StoppedStatus("Stopped by AgentBridge Desktop.")
+                Tunnel = StoppedStatus("Stopped by AgentBridge Desktop."),
+                PublicTunnelUrl = string.Empty
             });
         }
         finally
@@ -251,6 +262,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         _gatewayLogGate.Dispose();
         _agentLogGate.Dispose();
         _tunnelLogGate.Dispose();
+        _childProcessJob.Dispose();
     }
 
     private async Task MonitorLoopAsync(CancellationToken cancellationToken)
@@ -556,21 +568,27 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 
             Publish(Current with
             {
-                Tunnel = StoppedStatus("Tunnel waiting for Gateway")
+                Tunnel = StoppedStatus("Tunnel waiting for Gateway"),
+                PublicTunnelUrl = string.Empty
             });
             return;
         }
 
+        var isNgrok = IsUsingNgrok();
+        var tunnelTypeDisplay = isNgrok ? "Ngrok" : "Cloudflare Tunnel";
+        var tunnelLogFile = GetTunnelLogFileName();
+
         if (IsAlive(_tunnelProcess))
         {
             _tunnelBackoff.ObserveHealthy(DateTimeOffset.UtcNow);
+            var detail = isNgrok
+                ? (!string.IsNullOrWhiteSpace(_publicTunnelUrl) ? $"{_publicTunnelUrl} -> {_gatewayUrl}" : $"Ngrok forwarding to {_gatewayUrl}")
+                : (!string.IsNullOrWhiteSpace(_publicTunnelUrl) ? $"{_publicTunnelUrl} -> {_gatewayUrl}" : $"Tunnel '{_tunnelName}' forwarding to {_gatewayUrl}");
+
             Publish(Current with
             {
-                Tunnel = RunningStatus(
-                    "Running",
-                    $"Tunnel '{_tunnelName}' forwarding to {_gatewayUrl}",
-                    _tunnelProcess!.Id,
-                    managed: true)
+                Tunnel = RunningStatus("Running", detail, _tunnelProcess!.Id, managed: true),
+                PublicTunnelUrl = _publicTunnelUrl
             });
             return;
         }
@@ -581,28 +599,66 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             {
                 Tunnel = ErrorStatus(
                     "Tunnel restart cooling down",
-                    $"Automatic retry in {FormatSeconds(remaining)} seconds.")
+                    $"Automatic retry in {FormatSeconds(remaining)} seconds."),
+                PublicTunnelUrl = string.Empty
             });
             return;
         }
 
-        var target = _binaryLocator.ResolveCloudflared(_tunnelName);
-        if (target is null)
+        LaunchTarget? target = null;
+        if (isNgrok)
         {
-            Publish(Current with
+            var ngrokDomain = !string.IsNullOrWhiteSpace(_tunnelSettings.NgrokDomain)
+                ? _tunnelSettings.NgrokDomain
+                : Environment.GetEnvironmentVariable("AGENTBRIDGE_NGROK_DOMAIN") ?? string.Empty;
+
+            target = _binaryLocator.ResolveNgrok(
+                _tunnelSettings.NgrokPath,
+                ngrokDomain,
+                _gatewayPort,
+                _tunnelSettings.NgrokAuthToken);
+
+            if (target is null)
             {
-                Tunnel = ErrorStatus(
-                    "cloudflared missing",
-                    "Install cloudflared, add it to PATH, or set AGENTBRIDGE_CLOUDFLARED_PATH.")
-            });
-            return;
+                Publish(Current with
+                {
+                    Tunnel = ErrorStatus(
+                        "ngrok missing",
+                        "Install ngrok, add it to PATH, or set AGENTBRIDGE_NGROK_PATH."),
+                    PublicTunnelUrl = string.Empty
+                });
+                return;
+            }
+
+            _publicTunnelUrl = !string.IsNullOrWhiteSpace(ngrokDomain)
+                ? (ngrokDomain.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ngrokDomain : $"https://{ngrokDomain}")
+                : string.Empty;
+        }
+        else
+        {
+            target = _binaryLocator.ResolveCloudflared(_tunnelSettings.CloudflareTunnelName, _gatewayPort);
+            if (target is null)
+            {
+                Publish(Current with
+                {
+                    Tunnel = ErrorStatus(
+                        "cloudflared missing",
+                        "Install cloudflared, add it to PATH, or set AGENTBRIDGE_CLOUDFLARED_PATH."),
+                    PublicTunnelUrl = string.Empty
+                });
+                return;
+            }
+
+            _publicTunnelUrl = !string.IsNullOrWhiteSpace(_tunnelSettings.CustomPublicUrl)
+                ? _tunnelSettings.CustomPublicUrl
+                : DetectCloudflarePublicUrl();
         }
 
         try
         {
             _tunnelProcess = StartProcess(
                 target,
-                "cloudflared.log",
+                tunnelLogFile,
                 _tunnelLogGate,
                 BuildTunnelEnvironment());
             _tunnelBackoff.RecordStarted(DateTimeOffset.UtcNow);
@@ -610,12 +666,13 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         catch (Exception ex)
         {
             var delay = _tunnelBackoff.RecordFailure(DateTimeOffset.UtcNow);
-            await DesktopLog.WriteAsync("Cloudflare Tunnel process failed to start.", ex, cancellationToken);
+            await DesktopLog.WriteAsync($"{tunnelTypeDisplay} process failed to start.", ex, cancellationToken);
             Publish(Current with
             {
                 Tunnel = ErrorStatus(
-                    "Tunnel failed to start",
-                    $"Retrying in {FormatSeconds(delay)} seconds. {ex.Message}")
+                    $"{tunnelTypeDisplay} failed to start",
+                    $"Retrying in {FormatSeconds(delay)} seconds. {ex.Message}"),
+                PublicTunnelUrl = string.Empty
             });
             return;
         }
@@ -623,9 +680,10 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         Publish(Current with
         {
             Tunnel = StartingStatus(
-                $"Starting Tunnel '{_tunnelName}'...",
+                $"Starting {tunnelTypeDisplay}...",
                 _tunnelProcess.Id,
-                target.DisplayPath)
+                target.DisplayPath),
+            PublicTunnelUrl = _publicTunnelUrl
         });
 
         if (await WaitUntilAsync(
@@ -633,13 +691,14 @@ public sealed class ServiceSupervisor : IAsyncDisposable
                 TimeSpan.FromSeconds(5),
                 cancellationToken))
         {
+            var detail = isNgrok
+                ? (!string.IsNullOrWhiteSpace(_publicTunnelUrl) ? $"{_publicTunnelUrl} -> {_gatewayUrl}" : $"Ngrok forwarding to {_gatewayUrl}")
+                : (!string.IsNullOrWhiteSpace(_publicTunnelUrl) ? $"{_publicTunnelUrl} -> {_gatewayUrl}" : $"Tunnel '{_tunnelName}' forwarding to {_gatewayUrl}");
+
             Publish(Current with
             {
-                Tunnel = RunningStatus(
-                    "Running",
-                    $"Tunnel '{_tunnelName}' forwarding to {_gatewayUrl}",
-                    _tunnelProcess.Id,
-                    managed: true)
+                Tunnel = RunningStatus("Running", detail, _tunnelProcess.Id, managed: true),
+                PublicTunnelUrl = _publicTunnelUrl
             });
             return;
         }
@@ -650,14 +709,60 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         Publish(Current with
         {
             Tunnel = ErrorStatus(
-                "Tunnel exited during startup",
-                $"Retrying in {FormatSeconds(retryDelay)} seconds. See {Path.Combine(_logsDirectory, "cloudflared.log")}",
-                processId)
+                $"{tunnelTypeDisplay} exited during startup",
+                $"Retrying in {FormatSeconds(retryDelay)} seconds. See {Path.Combine(_logsDirectory, tunnelLogFile)}",
+                processId),
+            PublicTunnelUrl = string.Empty
         });
     }
 
-    private IReadOnlyDictionary<string, string> BuildGatewayEnvironment() =>
-        new Dictionary<string, string>
+    private bool IsUsingNgrok() =>
+        _tunnelSettings.Provider == TunnelProviderType.Ngrok
+        || (_tunnelSettings.Provider == TunnelProviderType.Auto && (!string.IsNullOrWhiteSpace(_tunnelSettings.NgrokDomain) || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AGENTBRIDGE_NGROK_DOMAIN"))));
+
+    private string GetTunnelLogFileName() => IsUsingNgrok() ? "ngrok.log" : "cloudflared.log";
+
+    private static string DetectCloudflarePublicUrl()
+    {
+        try
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var configPath = Path.Combine(userProfile, ".cloudflared", "config.yml");
+            if (!File.Exists(configPath))
+                return string.Empty;
+
+            var lines = File.ReadAllLines(configPath);
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("hostname:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parts = trimmed.Split(':', 2);
+                    if (parts.Length == 2)
+                    {
+                        var host = parts[1].Trim().Trim('\'', '"');
+                        if (!string.IsNullOrWhiteSpace(host))
+                            return $"https://{host}";
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return string.Empty;
+    }
+
+    private IReadOnlyDictionary<string, string> BuildGatewayEnvironment()
+    {
+        var publicUrl = !string.IsNullOrWhiteSpace(_publicTunnelUrl)
+            ? _publicTunnelUrl
+            : (!string.IsNullOrWhiteSpace(_tunnelSettings.NgrokDomain)
+                ? (_tunnelSettings.NgrokDomain.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? _tunnelSettings.NgrokDomain : $"https://{_tunnelSettings.NgrokDomain}")
+                : string.Empty);
+
+        var dict = new Dictionary<string, string>
         {
             ["ASPNETCORE_URLS"] = _gatewayUrl,
             ["ASPNETCORE_ENVIRONMENT"] = "Production",
@@ -667,6 +772,12 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             ["AgentSecurity__TokenEnvironmentVariable"] = InternalTokenStore.TokenEnvironmentVariable,
             [InternalTokenStore.TokenEnvironmentVariable] = _internalToken
         };
+
+        if (!string.IsNullOrWhiteSpace(publicUrl))
+            dict["Security__PublicBaseUrl"] = publicUrl;
+
+        return dict;
+    }
 
     private static IReadOnlyDictionary<string, string> BuildTunnelEnvironment() =>
         new Dictionary<string, string>
@@ -682,6 +793,16 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             ["Agent__DeviceId"] = _deviceId,
             ["Agent__DisplayName"] = Environment.MachineName,
             ["Agent__GatewayUrl"] = _gatewayUrl,
+            ["FileAccess__AllowedRoots__0"] = @"F:\All Project\_Đang build",
+            ["FileAccess__AllowedRoots__1"] = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ["FileAccess__AllowedRoots__2"] = @"F:\",
+            ["FileAccess__AllowedRoots__3"] = @"D:\",
+            ["FileAccess__AllowedRoots__4"] = @"C:\",
+            ["FileAccess__WritableRoots__0"] = @"F:\All Project\_Đang build",
+            ["FileAccess__WritableRoots__1"] = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ["FileAccess__WritableRoots__2"] = @"F:\",
+            ["FileAccess__WritableRoots__3"] = @"D:\",
+            ["FileAccess__WritableRoots__4"] = @"C:\",
             ["AgentSecurity__AuthenticationEnabled"] = "true",
             ["AgentSecurity__TokenEnvironmentVariable"] = InternalTokenStore.TokenEnvironmentVariable,
             [InternalTokenStore.TokenEnvironmentVariable] = _internalToken
@@ -736,6 +857,15 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 
         if (!process.Start())
             throw new InvalidOperationException($"Failed to start {target.DisplayPath}.");
+
+        if (!_childProcessJob.TryAssign(process, out var assignmentError))
+        {
+            _ = AppendServiceLogAsync(
+                logPath,
+                "WARN",
+                $"Could not attach PID {process.Id} to AgentBridge child process job: {assignmentError}",
+                logGate);
+        }
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -884,7 +1014,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         _tunnelProcess = null;
         var delay = _tunnelBackoff.RecordFailure(DateTimeOffset.UtcNow);
         await AppendServiceLogAsync(
-            Path.Combine(_logsDirectory, "cloudflared.log"),
+            Path.Combine(_logsDirectory, GetTunnelLogFileName()),
             "BACKOFF",
             $"Unexpected exit code {exitCode}. Next retry in {FormatSeconds(delay)} seconds.",
             _tunnelLogGate);
@@ -892,7 +1022,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
 
     private async Task StopOwnedTunnelAsync(CancellationToken cancellationToken)
     {
-        await StopProcessAsync(_tunnelProcess, "cloudflared.log", _tunnelLogGate, cancellationToken);
+        await StopProcessAsync(_tunnelProcess, GetTunnelLogFileName(), _tunnelLogGate, cancellationToken, forceKill: true);
         _tunnelProcess = null;
     }
 
@@ -912,49 +1042,60 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         Process? process,
         string logFileName,
         SemaphoreSlim logGate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool forceKill = false)
     {
+        if (process is null)
+            return;
+
         if (!IsAlive(process))
         {
-            process?.Dispose();
+            process.Dispose();
             return;
         }
 
         var logPath = Path.Combine(_logsDirectory, logFileName);
-        await AppendServiceLogAsync(
-            logPath,
-            "STOP",
-            $"Requesting graceful stop for PID {process!.Id}.",
-            logGate);
-
         var exitedGracefully = false;
-        try
-        {
-            await process.StandardInput.WriteLineAsync("stop");
-            await process.StandardInput.FlushAsync();
 
-            using var gracefulTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            gracefulTimeout.CancelAfter(GracefulStopTimeout);
-            await process.WaitForExitAsync(gracefulTimeout.Token);
-            exitedGracefully = true;
-        }
-        catch (InvalidOperationException)
+        if (!forceKill)
         {
-        }
-        catch (IOException)
-        {
-        }
-        catch (OperationCanceledException)
-        {
+            await AppendServiceLogAsync(
+                logPath,
+                "STOP",
+                $"Requesting graceful stop for PID {process.Id}.",
+                logGate);
+
+            try
+            {
+                await process.StandardInput.WriteLineAsync("stop");
+                await process.StandardInput.FlushAsync();
+
+                using var gracefulTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                gracefulTimeout.CancelAfter(GracefulStopTimeout);
+                await process.WaitForExitAsync(gracefulTimeout.Token);
+                exitedGracefully = true;
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         if (!exitedGracefully && IsAlive(process))
         {
-            await AppendServiceLogAsync(
-                logPath,
-                "WARN",
-                $"Graceful stop exceeded {GracefulStopTimeout.TotalSeconds:0} seconds. Killing process tree.",
-                logGate);
+            if (!forceKill)
+            {
+                await AppendServiceLogAsync(
+                    logPath,
+                    "WARN",
+                    $"Graceful stop exceeded {GracefulStopTimeout.TotalMilliseconds:0}ms. Killing process tree.",
+                    logGate);
+            }
 
             try
             {
@@ -978,7 +1119,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         process.Dispose();
     }
 
-    private static bool IsAlive(Process? process)
+    private static bool IsAlive([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] Process? process)
     {
         if (process is null)
             return false;
@@ -1049,6 +1190,9 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             : normalized;
     }
 
+    private const long MaxServiceLogBytes = 10 * 1024 * 1024;
+    private const int ServiceLogBackupCount = 3;
+
     private static async Task AppendServiceLogAsync(
         string path,
         string channel,
@@ -1061,6 +1205,7 @@ public sealed class ServiceSupervisor : IAsyncDisposable
             await gate.WaitAsync();
             try
             {
+                RotateServiceLogIfNeeded(path);
                 await File.AppendAllTextAsync(
                     path,
                     $"{DateTimeOffset.UtcNow:O} [{channel}] {message}{Environment.NewLine}");
@@ -1073,6 +1218,25 @@ public sealed class ServiceSupervisor : IAsyncDisposable
         catch
         {
         }
+    }
+
+    private static void RotateServiceLogIfNeeded(string path)
+    {
+        if (!File.Exists(path) || new FileInfo(path).Length < MaxServiceLogBytes)
+            return;
+
+        var oldest = $"{path}.{ServiceLogBackupCount}";
+        if (File.Exists(oldest))
+            File.Delete(oldest);
+
+        for (var index = ServiceLogBackupCount - 1; index >= 1; index--)
+        {
+            var source = $"{path}.{index}";
+            if (File.Exists(source))
+                File.Move(source, $"{path}.{index + 1}", overwrite: true);
+        }
+
+        File.Move(path, $"{path}.1", overwrite: true);
     }
 
     private void Publish(SupervisorSnapshot snapshot)

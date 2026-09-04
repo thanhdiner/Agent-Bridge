@@ -3,6 +3,7 @@ using LocalMcp.Gateway;
 using LocalMcp.Gateway.Commands;
 using LocalMcp.Gateway.Security;
 using LocalMcp.Gateway.Licensing;
+using LocalMcp.Gateway.Mcp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -25,12 +26,123 @@ public static class DependencyInjection
         services.AddSingleton<IDeviceActivationStore>(sp => sp.GetRequiredService<DeviceActivationStore>());
         services.AddSingleton<ILicenseGate, LicenseGate>();
         services.AddSingleton<ICommandDispatcher, SignalRCommandDispatcher>();
+        services.AddSingleton<IExternalMcpRouter, ExternalMcpRouter>();
+        services.AddSingleton<ExternalMcpCatalogCache>();
+        services.AddSingleton<ToolVisibilityStore>();
+        services.AddSingleton<LocalToolPrimitiveCache>();
+        services.AddHostedService<ExternalMcpCatalogWarmupService>();
 
         var config = configuration ?? new ConfigurationBuilder().Build();
 
         // 1. Bind options
         var securitySection = config.GetSection(SecurityOptions.SectionName);
         var agentSecuritySection = config.GetSection(AgentSecurityOptions.SectionName);
+        var externalMcpSection = config.GetSection(ExternalMcpOptions.SectionName);
+
+        services.AddOptions<ExternalMcpOptions>()
+            .Bind(externalMcpSection)
+            .PostConfigure(options =>
+            {
+                if (!options.Servers.ContainsKey("chrome-devtools"))
+                {
+                    options.Servers["chrome-devtools"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--autoConnect"],
+                        InitializeTimeoutSeconds = 60,
+                        ToolCallTimeoutSeconds = 120
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("playwright"))
+                {
+                    options.Servers["playwright"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "npx", "-y", "@playwright/mcp@latest"],
+                        InitializeTimeoutSeconds = 90,
+                        ToolCallTimeoutSeconds = 180
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("puppeteer"))
+                {
+                    options.Servers["puppeteer"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "npx", "-y", "@modelcontextprotocol/server-puppeteer"],
+                        InitializeTimeoutSeconds = 90,
+                        ToolCallTimeoutSeconds = 180
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("git-mcp"))
+                {
+                    options.Servers["git-mcp"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "uvx", "mcp-server-git", "--repository", @"F:\All Project\_Đang build\AgentBridge-Commercial"],
+                        InitializeTimeoutSeconds = 60,
+                        ToolCallTimeoutSeconds = 120
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("github-mcp"))
+                {
+                    options.Servers["github-mcp"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "npx", "-y", "@modelcontextprotocol/server-github"],
+                        InitializeTimeoutSeconds = 60,
+                        ToolCallTimeoutSeconds = 120
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("context7"))
+                {
+                    options.Servers["context7"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "npx", "-y", "@upstash/context7-mcp"],
+                        InitializeTimeoutSeconds = 60,
+                        ToolCallTimeoutSeconds = 120
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("memory"))
+                {
+                    options.Servers["memory"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "npx", "-y", "@modelcontextprotocol/server-memory"],
+                        WorkingDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AgentBridge", "mcp-memory"),
+                        InitializeTimeoutSeconds = 60,
+                        ToolCallTimeoutSeconds = 120
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("sequential-thinking"))
+                {
+                    options.Servers["sequential-thinking"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+                        InitializeTimeoutSeconds = 60,
+                        ToolCallTimeoutSeconds = 120
+                    };
+                }
+
+                if (!options.Servers.ContainsKey("fetch-mcp"))
+                {
+                    options.Servers["fetch-mcp"] = new ExternalMcpServerOptions
+                    {
+                        Command = "cmd",
+                        Args = ["/c", "uvx", "mcp-server-fetch"],
+                        InitializeTimeoutSeconds = 60,
+                        ToolCallTimeoutSeconds = 120
+                    };
+                }
+            });
 
         services.AddOptions<SecurityOptions>()
             .Bind(securitySection)

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -38,7 +39,7 @@ public sealed class ScreenInputTools
     [McpServerTool(Name = "screen_click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Clicks one virtual-desktop point only when the guarded Windows window is still foreground. Requires dev:execute scope.")]
     public Task<CallToolResult> ClickAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Required native handle of the window expected to own the foreground")] string expectedForegroundWindowHandle,
         [Description("Horizontal coordinate in virtual-desktop pixels; may be negative")] int x,
         [Description("Vertical coordinate in virtual-desktop pixels; may be negative")] int y,
@@ -51,7 +52,7 @@ public sealed class ScreenInputTools
     [McpServerTool(Name = "screen_double_click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Double-clicks one virtual-desktop point only when the guarded Windows window is still foreground. Requires dev:execute scope.")]
     public Task<CallToolResult> DoubleClickAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Required native handle of the window expected to own the foreground")] string expectedForegroundWindowHandle,
         [Description("Horizontal coordinate in virtual-desktop pixels; may be negative")] int x,
         [Description("Vertical coordinate in virtual-desktop pixels; may be negative")] int y,
@@ -64,7 +65,7 @@ public sealed class ScreenInputTools
     [McpServerTool(Name = "screen_right_click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Right-clicks one virtual-desktop point only when the guarded Windows window is still foreground. Requires dev:execute scope.")]
     public Task<CallToolResult> RightClickAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Required native handle of the window expected to own the foreground")] string expectedForegroundWindowHandle,
         [Description("Horizontal coordinate in virtual-desktop pixels; may be negative")] int x,
         [Description("Vertical coordinate in virtual-desktop pixels; may be negative")] int y,
@@ -77,7 +78,7 @@ public sealed class ScreenInputTools
     [McpServerTool(Name = "screen_drag", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Drags between two absolute virtual-desktop points while continuously enforcing the foreground-window guard. Requires dev:execute scope.")]
     public async Task<CallToolResult> DragAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Required native handle of the window expected to own the foreground")] string expectedForegroundWindowHandle,
         [Description("Absolute virtual-desktop start X coordinate; may be negative")] int startX,
         [Description("Absolute virtual-desktop start Y coordinate; may be negative")] int startY,
@@ -110,7 +111,7 @@ public sealed class ScreenInputTools
         var command = new ScreenDragCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             ExpectedForegroundWindowHandle = expectedForegroundWindowHandle,
             StartX = startX,
@@ -132,7 +133,7 @@ public sealed class ScreenInputTools
     [McpServerTool(Name = "screen_scroll", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Sends vertical or horizontal mouse-wheel input at one guarded virtual-desktop point. Requires dev:execute scope.")]
     public async Task<CallToolResult> ScrollAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Required native handle of the window expected to own the foreground")] string expectedForegroundWindowHandle,
         [Description("Horizontal coordinate in virtual-desktop pixels; may be negative")] int x,
         [Description("Vertical coordinate in virtual-desktop pixels; may be negative")] int y,
@@ -157,7 +158,7 @@ public sealed class ScreenInputTools
         var command = new ScreenScrollCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             ExpectedForegroundWindowHandle = expectedForegroundWindowHandle,
             X = x,
@@ -173,7 +174,7 @@ public sealed class ScreenInputTools
     }
 
     private async Task<CallToolResult> ExecuteClickAsync(
-        string deviceId,
+        string? deviceId,
         string expectedForegroundWindowHandle,
         int x,
         int y,
@@ -195,7 +196,7 @@ public sealed class ScreenInputTools
         var command = new ScreenClickCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             ExpectedForegroundWindowHandle = expectedForegroundWindowHandle,
             X = x,
@@ -211,15 +212,13 @@ public sealed class ScreenInputTools
     }
 
     private async Task<CallToolResult?> ValidateCommonAsync(
-        string deviceId,
+        string? deviceId,
         string expectedForegroundWindowHandle,
         int? expectedProcessId,
         string? expectedWindowTitle)
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidHandle(expectedForegroundWindowHandle))
             return Error("INVALID_REQUEST", "expectedForegroundWindowHandle is invalid.");
         if (expectedProcessId is <= 0)
@@ -233,7 +232,7 @@ public sealed class ScreenInputTools
         return null;
     }
 
-    private async Task<CallToolResult> DispatchAsync<T>(AgentCommand command, string toolName, string deviceId)
+    private async Task<CallToolResult> DispatchAsync<T>(AgentCommand command, string toolName, string? deviceId)
     {
         try
         {
@@ -278,3 +277,5 @@ public sealed class ScreenInputTools
         IsError = true
     };
 }
+
+

@@ -33,8 +33,37 @@ The bridge is designed around explicit boundaries:
 | Text and native dialogs | Read or replace clipboard text, send guarded key chords, type text, and set paths in Open or Save dialogs | `clipboard_get`, `clipboard_set`, `ui_hotkey`, `ui_type_text`, `file_dialog_set_path` |
 | Files, workspaces, and Git | Discover portable workspace aliases, resolve relative paths, read, search, patch, copy, move, delete, inspect Git state and history, and verify projects inside configured roots | `workspace_list`, `workspace_resolve`, `fs_read`, `fs_search_context`, `fs_batch_patch`, `git_status`, `git_diff`, `git_log`, `project_verify` |
 | PowerShell | Run bounded PowerShell 7 commands, start observable sessions, poll status, and cancel process trees | `powershell_exec`, `powershell_start`, `powershell_status`, `powershell_cancel` |
+| Developer workflows | Build and diagnose extensions, trace DOM activity, supervise process trees, run repository dev sessions, compare UI captures, and save lightweight task checkpoints | `extension_dev_workflow`, `browser_extension_inspect`, `dom_event_trace`, `process_tree_supervisor`, `dev_session_run`, `visual_regression_compare`, `repo_task_checkpoint` |
+| Chrome DevTools MCP | Attach to the currently opened Chrome profile through `chrome-devtools-mcp --autoConnect`, cache the discovered tools, and reuse one persistent MCP session | `chrome-devtools.*` |
+| Android over ADB | Discover a paired Android phone, inspect state and UI hierarchy, capture screenshots, tap, swipe, type safe text, press allowlisted keys, and open apps | `android_device_list`, `android_get_state`, `android_screenshot`, `android_ui_tree`, `android_tap`, `android_swipe` |
 
 The Gateway currently registers the complete tool surface from `src/LocalMcp.Gateway/Mcp/`. Aliases such as `ui_get_text` and `ui_hotkey` keep the public API readable while reusing the existing execution core.
+
+Chrome DevTools tools are proxied from the external `chrome-devtools` MCP server and are namespaced as `chrome-devtools.<tool>` to avoid conflicts with local AgentBridge tools.
+
+### Developer workflow profiles
+
+`dev_session_run` reads repository-local profiles from `.agentbridge/dev-sessions.json`. The `init` action creates a small template. A profile may start up to 12 commands and define up to 20 HTTP or TCP health checks:
+
+```json
+{
+  "profiles": {
+    "default": {
+      "commands": [
+        { "name": "app", "command": "npm run dev", "workingDirectory": "." }
+      ],
+      "healthChecks": [
+        { "name": "web", "url": "http://localhost:3000" },
+        { "name": "api", "host": "127.0.0.1", "port": 5227 }
+      ]
+    }
+  }
+}
+```
+
+Runtime logs and visual captures are written under `.agentbridge/sessions/` and `.agentbridge/visual-regression/`; both are ignored by Git. `repo_task_checkpoint` stores only branch, HEAD, changed-file status/path metadata, a short note, and a test summary in `.agentbridge/checkpoints.jsonl`. It never stores full diffs, debounces identical saves for 10 seconds by default, and retains 200 entries by default.
+
+The extension workflow, extension inspector, DOM tracer, and visual regression tools require the Chrome DevTools MCP connection and permission to access the current Chrome profile.
 
 ## Requirements
 
@@ -78,6 +107,57 @@ dotnet run --project .\src\LocalMcp.Gateway -c Release --no-build
 
 The default development profile listens on `http://localhost:5227`.
 
+### ChatGPT custom connectors
+
+AgentBridge exposes tools through two MCP connection shards so each ChatGPT refresh receives a smaller `tools/list` response. Add both custom connectors in ChatGPT:
+
+| Connector name | URL |
+|---|---|
+| AgentBridge A | `http://localhost:5227/mcp/a` |
+| AgentBridge B | `http://localhost:5227/mcp/b` |
+| AgentBridge Android A | `http://localhost:5227/mcp/android/a` |
+
+Use the Desktop app's **Tools** screen to assign enabled tools to Connection A, Connection B, or None. Each connection can expose up to 150 enabled tools; the combined total across both connections can be higher.
+
+The Android connector is intentionally isolated: `/mcp/android/a` exports only `android_*` tools, while `/mcp/a` and `/mcp/b` never export or execute Android tools. Android tools are not controlled by the desktop A/B assignment screen.
+
+### Chrome DevTools MCP for the current Chrome profile
+
+AgentBridge includes an external MCP client for Chrome DevTools. The default configuration starts one persistent `chrome-devtools-mcp` process and connects with `--autoConnect`:
+
+```json
+{
+  "ExternalMcp": {
+    "Servers": {
+      "chrome-devtools": {
+        "Command": "cmd",
+        "Args": ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--autoConnect"]
+      }
+    }
+  }
+}
+```
+
+Setup:
+
+1. Open Chrome with the target profile.
+2. Go to `chrome://inspect/#remote-debugging`.
+3. Enable **Allow remote debugging for this browser instance**.
+4. Start the Gateway.
+5. When Chrome shows the remote debugging permission dialog, click **Allow**.
+
+After permission is allowed, AgentBridge keeps the same MCP session alive and reuses it for Chrome actions. It does not spawn `chrome-devtools-mcp` per tool call and does not reconnect per action. If the MCP process crashes or disconnects, AgentBridge restarts it on the next Chrome tool call; Chrome may ask for permission again.
+
+Health check:
+
+```powershell
+Invoke-RestMethod http://localhost:5227/healthz/chrome-devtools
+```
+
+The health check verifies that Node and `npx` are available, starts the configured Chrome DevTools MCP server if needed, initializes MCP, and runs `list_tools`. It reports clear setup errors for missing Node or `npx`, Chrome not running, remote debugging not enabled, permission denial, timeout, and MCP process crashes.
+
+Security note: `--autoConnect` can access tabs and data in the current Chrome profile. This is the default because it is useful for working with your active browser session. A safer isolated-profile mode can be added later for workflows that do not need current-profile tabs, cookies, or logged-in state.
+
 ### 4. Start the Windows Agent
 
 Open terminal 2:
@@ -96,6 +176,36 @@ dotnet run --project .\src\LocalMcp.Agent.Windows -c Release --no-build
 ```
 
 A successful first connection produces Agent and Gateway logs showing that the SignalR connection started and the device registered.
+
+### 5. Pair and start an Android phone over Wi-Fi
+
+Android 11 or newer can pair without a USB cable. Enable **Developer options → Wireless debugging → Pair device with pairing code**, then run:
+
+```powershell
+adb pair 192.168.1.50:37123
+adb connect 192.168.1.50:41277
+adb devices
+```
+
+Use the connected serial reported by `adb devices` to start the independent Android process:
+
+```powershell
+.\run-android-agent.bat 192.168.1.50:41277 http://127.0.0.1:5227
+```
+
+Equivalent environment-based startup:
+
+```powershell
+$env:AndroidAdb__Serial = "192.168.1.50:41277"
+$env:AndroidAdb__GatewayUrl = "http://127.0.0.1:5227"
+dotnet run --project .\src\LocalMcp.Agent.AndroidAdb
+```
+
+The generated device id is stable for the ADB serial (for example `android-192.168.1.50-41277`). Set `AndroidAdb__DeviceId` to override it. The Android process is not started by the Desktop app or existing installer, so a phone disconnect or ADB failure cannot stop the Windows Agent.
+
+Connect the MCP client to `http://localhost:5227/mcp/android/a`. When exactly one Android device is online, tool calls may omit `deviceId`; with multiple phones, call `android_device_list` and pass the selected id. Execution tools still require the Gateway's `dev:execute` authorization and normal device activation/license checks.
+
+Do not expose an ADB port directly to the public Internet. Wireless ADB should stay on a trusted LAN or a controlled private VPN.
 
 ### Desktop control center
 
@@ -345,6 +455,17 @@ pwsh --version
 ```
 
 Also confirm the Agent is not running elevated.
+
+### Chrome DevTools tools do not appear or fail to connect
+
+Confirm Node.js and `npx` are on PATH:
+
+```powershell
+node --version
+npx --version
+```
+
+Then open Chrome with the target profile, visit `chrome://inspect/#remote-debugging`, enable **Allow remote debugging for this browser instance**, start the Gateway, and accept Chrome's permission prompt. Use `http://localhost:5227/healthz/chrome-devtools` for a structured status report. If AgentBridge reports that the MCP server restarted, Chrome may show the permission prompt again.
 
 ### A UI control cannot be found
 

@@ -1,0 +1,372 @@
+.step-card-task .step-visual-task {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 14px;
+  color: inherit;
+  background-image:
+    linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px),
+    radial-gradient(260px circle at 50% 50%,rgba(76,81,180,.1),transparent 70%);
+  background-size: 24px 24px,24px 24px,100% 100%;
+}
+
+.step-card-task .step-visual-task::before,
+.step-card-task .step-visual-task::after {
+  display: none;
+}
+
+.task-note,
+.task-terminal {
+  position: relative;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  overflow: hidden;
+  transition: transform 220ms ease,border-color 220ms ease,box-shadow 220ms ease;
+}
+
+.task-note {
+  display: flex;
+  width: 96px;
+  height: 78px;
+  padding: 17px 10px 8px;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(145,91,255,.78);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg,rgba(112,67,215,.18),transparent 58%),
+    #101321;
+  box-shadow: 0 12px 24px rgba(0,0,0,.27),0 0 16px rgba(105,73,255,.09);
+}
+
+.task-note-dot {
+  position: absolute;
+  top: 7px;
+  left: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #a875ff;
+  box-shadow: 0 0 8px rgba(168,117,255,.7);
+}
+
+.task-note strong {
+  color: #f7f5ff;
+  font: 600 9px/1.28 "Segoe UI","Arial",sans-serif;
+  letter-spacing: 0;
+  text-shadow: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.task-note small {
+  width: fit-content;
+  padding: 3px 5px;
+  border-radius: 3px;
+  color: #b9a8ff;
+  background: rgba(119,77,255,.18);
+  font: 800 5px/1 "Cascadia Code",Consolas,monospace;
+  letter-spacing: .08em;
+}
+
+.task-connector {
+  position: relative;
+  display: block;
+  flex: 0 0 28px;
+  height: 1px;
+  background: linear-gradient(90deg,rgba(126,85,255,.18),#8369ff 45%,#7193ff 78%,rgba(113,147,255,.12));
+  box-shadow: 0 0 10px rgba(105,99,255,.38);
+}
+
+.task-connector::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-top: 1px solid #92a4ff;
+  border-right: 1px solid #92a4ff;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.task-connector i {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #a98bff;
+  box-shadow: 0 0 8px rgba(157,118,255,.8);
+  transform: translateY(-50%);
+  animation: task-packet 2.2s linear infinite;
+}
+
+.task-terminal {
+  width: 138px;
+  height: 78px;
+  border: 1px solid rgba(103,123,211,.64);
+  border-radius: 8px;
+  background: #090e17;
+  box-shadow: 0 12px 24px rgba(0,0,0,.3),0 0 16px rgba(68,90,210,.08);
+}
+
+.task-terminal-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 17px;
+  padding: 0 7px;
+  border-bottom: 1px solid rgba(255,255,255,.045);
+  background: rgba(255,255,255,.025);
+}
+
+.task-terminal-top i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #59647d;
+}
+
+.task-terminal-top i:first-child {
+  background: #806ff5;
+}
+
+.task-terminal-content {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 6px 6px;
+  padding: 10px 9px;
+}
+
+.task-terminal-content b {
+  grid-row: 1 / 5;
+  color: #e7ecff;
+  font: 700 10px/1 "Cascadia Code",Consolas,monospace;
+}
+
+.code-line {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: #252d42;
+}
+
+.code-line.green {
+  width: 62%;
+  background: linear-gradient(90deg,#68dba8,#397f66);
+}
+
+.code-line.wide { width: 88%; }
+.code-line.purple { width: 54%; background: #40397f; }
+.code-line.short { width: 72%; background: #29324b; }
+
+.step-card-task:hover .task-note,
+.step-card-task:hover .task-terminal {
+  transform: translateY(-2px);
+}
+
+@keyframes task-packet {
+  from { transform: translate(0,-50%); }
+  to { transform: translate(21px,-50%); }
+}
+
+/* Step 03: evidence list + approval shield */
+.step-card-review .step-visual-review {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 0 14px;
+  color: inherit;
+  background-image:
+    linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px),
+    radial-gradient(260px circle at 66% 50%,rgba(76,81,180,.12),transparent 70%);
+  background-size: 24px 24px,24px 24px,100% 100%;
+}
+
+.step-card-review .step-visual-review::before,
+.step-card-review .step-visual-review::after {
+  display: none;
+}
+
+.evidence-panel {
+  width: 118px;
+  overflow: hidden;
+  border: 1px solid rgba(102,116,168,.2);
+  border-radius: 9px;
+  background: linear-gradient(145deg,rgba(72,82,141,.1),transparent 62%),#0d121c;
+  box-shadow: 0 14px 28px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.02);
+}
+
+.evidence-item {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 8px;
+  min-height: 39px;
+  padding: 6px 8px;
+}
+
+.evidence-item + .evidence-item {
+  border-top: 1px solid rgba(255,255,255,.045);
+}
+
+.evidence-item > span:last-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.evidence-item strong {
+  color: #f7f8ff;
+  font: 600 9px/1.2 "Segoe UI","Arial",sans-serif;
+  letter-spacing: 0;
+  text-shadow: none;
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.evidence-item small {
+  overflow: hidden;
+  color: #aab2c2;
+  font: 500 8px/1.25 "Arial","Segoe UI",sans-serif;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-shadow: none;
+  white-space: nowrap;
+  -webkit-font-smoothing: auto;
+  text-rendering: auto;
+}
+
+.evidence-item-icon {
+  position: relative;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid rgba(102,91,202,.28);
+  border-radius: 4px;
+  color: #8378e8;
+  background: rgba(92,73,180,.1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+  font: 700 7px/1 "Cascadia Code",Consolas,monospace;
+}
+
+.evidence-icon-image::before {
+  content: "";
+  width: 11px;
+  height: 8px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background: linear-gradient(135deg,transparent 45%,currentColor 46% 53%,transparent 54%) 1px 3px / 8px 5px no-repeat;
+}
+
+.evidence-icon-image::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.evidence-icon-log::before {
+  content: "";
+  width: 9px;
+  height: 11px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  background:
+    linear-gradient(currentColor,currentColor) 2px 3px / 5px 1px no-repeat,
+    linear-gradient(currentColor,currentColor) 2px 6px / 5px 1px no-repeat,
+    linear-gradient(currentColor,currentColor) 2px 9px / 3px 1px no-repeat;
+}
+
+.review-ready {
+  display: grid;
+  width: 82px;
+  justify-items: center;
+  gap: 10px;
+}
+
+.review-shield {
+  position: relative;
+  display: grid;
+  width: 62px;
+  height: 70px;
+  place-items: center;
+  clip-path: polygon(50% 0,92% 14%,90% 57%,73% 81%,50% 100%,27% 81%,10% 57%,8% 14%);
+  background: linear-gradient(145deg,#7b62ff,#466fdb);
+  filter: drop-shadow(0 0 13px rgba(94,83,255,.35));
+}
+
+.review-shield::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  clip-path: inherit;
+  background: radial-gradient(circle at 50% 38%,rgba(91,77,206,.22),transparent 66%),#0a0f19;
+}
+
+.review-shield i {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 12px;
+  border-left: 4px solid #738bff;
+  border-bottom: 4px solid #738bff;
+  transform: translateY(-2px) rotate(-45deg);
+  filter: drop-shadow(0 0 6px rgba(96,117,255,.45));
+}
+
+.review-ready-label {
+  width: 78px;
+  padding: 5px 6px;
+  border: 1px solid rgba(52,183,139,.14);
+  border-radius: 4px;
+  color: #4bd0a3;
+  background: rgba(24,118,89,.1);
+  text-align: center;
+  font: 700 6px/1 "Segoe UI","Arial",sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 0 14px rgba(30,153,113,.08);
+}
+
+.step-card-review:hover .review-shield {
+  filter: drop-shadow(0 0 18px rgba(94,83,255,.48));
+}
+
+.review-shield {
+  transition: filter 220ms ease,transform 220ms ease;
+}
+
+.step-card-review:hover .review-shield {
+  transform: translateY(-2px);
+}
+
+@media (max-width: 520px) {
+  .step-card-task .step-visual-task {
+    gap: 7px;
+    padding-inline: 8px;
+  }
+  .task-note { width: 88px; }
+  .task-connector { flex-basis: 22px; }
+  .task-terminal { width: 126px; }
+
+  .step-card-review .step-visual-review {
+    gap: 12px;
+    padding-inline: 8px;
+  }
+  .evidence-panel { width: 110px; }
+  .review-ready { width: 74px; }
+  .review-shield { width: 56px; height: 64px; }
+  .review-ready-label { width: 72px; }
+}

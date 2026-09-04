@@ -23,7 +23,8 @@ public sealed class DeviceToolsTests
 
     private static DeviceTools BuildTools(
         IAgentConnectionRegistry registry,
-        bool authenticated = true)
+        bool authenticated = true,
+        IDeviceResolver? deviceResolver = null)
     {
         // Build a real ASP.NET Core DI container with authorization
         var services = new ServiceCollection();
@@ -42,6 +43,17 @@ public sealed class DeviceToolsTests
         var provider = services.BuildServiceProvider();
         var authService = provider.GetRequiredService<IAuthorizationService>();
         var logger = provider.GetRequiredService<ILogger<DeviceTools>>();
+        if (deviceResolver is null)
+        {
+            deviceResolver = Substitute.For<IDeviceResolver>();
+            deviceResolver.Resolve(Arg.Any<string?>()).Returns(call =>
+            {
+                var requested = call.Arg<string?>();
+                return string.IsNullOrWhiteSpace(requested)
+                    ? DeviceResolution.Failed("INVALID_REQUEST", "deviceId parameter is required.")
+                    : DeviceResolution.Resolved(requested.Trim());
+            });
+        }
 
         // Build HttpContext with authenticated or anonymous user
         var principal = authenticated
@@ -53,7 +65,7 @@ public sealed class DeviceToolsTests
         var httpContext = new DefaultHttpContext { User = principal };
         var accessor = new HttpContextAccessor { HttpContext = httpContext };
 
-        return new DeviceTools(registry, authService, logger, accessor);
+        return new DeviceTools(registry, deviceResolver, authService, logger, accessor);
     }
 
     private static string GetResponseText(CallToolResult result)
@@ -200,6 +212,23 @@ public sealed class DeviceToolsTests
 
         Assert.False(result.IsError);
         var doc = JsonDocument.Parse(GetResponseText(result));
+        Assert.True(doc.RootElement.GetProperty("online").GetBoolean());
+    }
+
+    [Fact]
+    public async Task DeviceStatus_OmittedDeviceId_UsesResolvedActiveDevice()
+    {
+        var registry = Substitute.For<IAgentConnectionRegistry>();
+        registry.GetConnectionId("device-1").Returns("conn-abc");
+        var resolver = Substitute.For<IDeviceResolver>();
+        resolver.Resolve(null).Returns(DeviceResolution.Resolved("device-1"));
+
+        var tools = BuildTools(registry, deviceResolver: resolver);
+        var result = await tools.GetDeviceStatusAsync(null);
+
+        Assert.False(result.IsError);
+        var doc = JsonDocument.Parse(GetResponseText(result));
+        Assert.Equal("device-1", doc.RootElement.GetProperty("deviceId").GetString());
         Assert.True(doc.RootElement.GetProperty("online").GetBoolean());
     }
 

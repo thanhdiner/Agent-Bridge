@@ -143,6 +143,7 @@ public sealed partial class GatewayConnection : IAsyncDisposable
                         nameof(GitDiffCommand) => JsonSerializer.Deserialize<GitDiffCommand>(rawJson, JsonOptions.Default),
                         nameof(GitLogCommand) => JsonSerializer.Deserialize<GitLogCommand>(rawJson, JsonOptions.Default),
                         nameof(GitShowCommand) => JsonSerializer.Deserialize<GitShowCommand>(rawJson, JsonOptions.Default),
+                        nameof(GitPushCommand) => JsonSerializer.Deserialize<GitPushCommand>(rawJson, JsonOptions.Default),
                         nameof(GitRestoreFileCommand) => JsonSerializer.Deserialize<GitRestoreFileCommand>(rawJson, JsonOptions.Default),
                         nameof(GitRefreshIndexCommand) => JsonSerializer.Deserialize<GitRefreshIndexCommand>(rawJson, JsonOptions.Default),
                         nameof(ProjectCheckCommand) => JsonSerializer.Deserialize<ProjectCheckCommand>(rawJson, JsonOptions.Default),

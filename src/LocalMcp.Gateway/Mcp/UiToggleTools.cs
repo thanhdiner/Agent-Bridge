@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -36,7 +37,7 @@ public sealed class UiToggleTools
         OpenWorld = false),
      Description("Turns on, turns off, or toggles one Windows UI Automation control through TogglePattern, scrolls it into view when supported, and verifies the resulting state. Requires dev:execute scope.")]
     public async Task<CallToolResult> ToggleAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Action: on, off, or toggle (default: toggle)")] string action = UiToggleActions.Toggle,
         [Description("Exact automationId; either automationId or name is required")] string? automationId = null,
@@ -47,8 +48,6 @@ public sealed class UiToggleTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (!ValidText(windowHandle, 32))
             return Error("INVALID_REQUEST", "windowHandle is invalid.");
         if (string.IsNullOrWhiteSpace(automationId) && string.IsNullOrWhiteSpace(name))
@@ -62,7 +61,7 @@ public sealed class UiToggleTools
         var command = new UiToggleCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             Action = normalizedAction,
@@ -111,3 +110,4 @@ public sealed class UiToggleTools
         IsError = true
     };
 }
+

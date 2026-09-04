@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,16 +41,13 @@ public sealed class BatchReadTools
         OpenWorld = false),
      Description("Reads between 1 and 20 UTF-8 text files in one bounded request. Each path is evaluated independently, input order is preserved, and per-file plus total response byte limits are enforced. Requires files:read scope.")]
     public async Task<CallToolResult> BatchReadAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The absolute UTF-8 text file paths to read (1 to 20 entries)")] List<string> paths,
         [Description("Maximum UTF-8 content bytes returned per file (default: 262144, hard limit: 1048576)")] int maxBytesPerFile = 262144,
         [Description("Maximum UTF-8 content bytes returned across the batch (default: 2097152, hard limit: 8388608)")] long maxTotalBytes = 2097152)
     {
         if (!await AuthorizeScopeAsync())
             return CreateErrorResult("FORBIDDEN", "Access denied. Required scope: files:read");
-
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
 
         if (paths is null || paths.Count < 1 || paths.Count > 20)
             return CreateErrorResult("INVALID_REQUEST", "paths must contain between 1 and 20 entries.");
@@ -63,7 +61,7 @@ public sealed class BatchReadTools
         var command = new BatchReadCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             Paths = paths.ToList(),
             MaxBytesPerFile = maxBytesPerFile,
@@ -117,3 +115,4 @@ public sealed class BatchReadTools
             IsError = true
         };
 }
+

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Security.Claims;
@@ -16,17 +17,20 @@ namespace LocalMcp.Gateway.Mcp;
 public sealed class DeviceTools
 {
     private readonly IAgentConnectionRegistry _registry;
+    private readonly IDeviceResolver _deviceResolver;
     private readonly IAuthorizationService _authorizationService;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly ILogger<DeviceTools> _logger;
 
     public DeviceTools(
         IAgentConnectionRegistry registry,
+        IDeviceResolver deviceResolver,
         IAuthorizationService authorizationService,
         ILogger<DeviceTools> logger,
         IHttpContextAccessor? httpContextAccessor = null)
     {
         _registry = registry;
+        _deviceResolver = deviceResolver;
         _authorizationService = authorizationService;
         _logger = logger;
         _httpContextAccessor = httpContextAccessor;
@@ -63,18 +67,22 @@ public sealed class DeviceTools
     [McpServerTool(Name = "device_status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
      Description("Returns the online/offline status of a specific agent device by its deviceId. Requires a valid authenticated session (McpAuthenticatedPolicy).")]
     public async Task<CallToolResult> GetDeviceStatusAsync(
-        [Description("The unique identifier of the agent device to check")] string deviceId)
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId)
     {
         if (!await AuthorizeScopeAsync("McpAuthenticatedPolicy"))
         {
             return CreateErrorResult("FORBIDDEN", "Access denied. A valid authenticated session is required.");
         }
 
-        // Validate deviceId
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return CreateErrorResult("INVALID_REQUEST", "deviceId parameter is required.");
+        var deviceResolution = _deviceResolver.Resolve(deviceId);
+        if (!deviceResolution.Success || string.IsNullOrWhiteSpace(deviceResolution.DeviceId))
+        {
+            return CreateErrorResult(
+                deviceResolution.ErrorCode ?? "INVALID_REQUEST",
+                deviceResolution.ErrorMessage ?? "No active device could be resolved.");
+        }
 
-        deviceId = deviceId.Trim();
+        deviceId = deviceResolution.DeviceId.Trim();
 
         if (deviceId.Length > 256)
             return CreateErrorResult("INVALID_REQUEST", "deviceId must be at most 256 characters.");
@@ -134,3 +142,5 @@ public sealed class DeviceTools
         [property: JsonPropertyName("deviceId")] string DeviceId,
         [property: JsonPropertyName("online")] bool Online);
 }
+
+

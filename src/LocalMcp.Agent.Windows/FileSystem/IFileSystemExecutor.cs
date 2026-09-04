@@ -111,6 +111,17 @@ public interface IFileSystemExecutor
         CancellationToken cancellationToken
     );
 
+    Task<CommandResult<GitPushResult>> GitPublishAsync(
+        string path,
+        string? remote,
+        string? branch,
+        bool setUpstream,
+        int timeoutSeconds,
+        int maxOutputBytes,
+        Guid commandId,
+        CancellationToken cancellationToken
+    );
+
     Task<CommandResult<GitRefreshIndexResult>> GitRefreshIndexAsync(
         string path,
         string pathSpec,

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using LocalMcp.BuildingBlocks.Serialization;
@@ -40,7 +41,7 @@ public sealed class AppLaunchTools
         OpenWorld = true),
      Description("Launches one allowlisted or allowed-root Windows GUI .exe directly without a shell. Arguments are passed as an array. Optionally waits for a new or title-changed top-level window. Does not elevate. Requires dev:execute scope.")]
     public async Task<CallToolResult> LaunchAppAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("Absolute .exe path inside AllowedRoots, an exact allowlisted path, or an allowlisted Windows system executable name")] string executable,
         [Description("Optional argument array passed directly to the process (maximum 64 entries)")] List<string>? arguments = null,
         [Description("Optional existing working directory inside AllowedRoots; defaults to the executable directory")] string? workingDirectory = null,
@@ -51,15 +52,13 @@ public sealed class AppLaunchTools
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (string.IsNullOrWhiteSpace(executable))
             return Error("INVALID_REQUEST", "executable parameter is required.");
 
         var command = new AppLaunchCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             Executable = executable,
             Arguments = arguments ?? [],
@@ -113,3 +112,4 @@ public sealed class AppLaunchTools
             IsError = true
         };
 }
+

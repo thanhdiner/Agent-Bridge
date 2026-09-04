@@ -1,14 +1,31 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using LocalMcp.Gateway;
 using LocalMcp.Gateway.Connections;
 using LocalMcp.Gateway.Hubs;
+using LocalMcp.Gateway.Mcp;
 using LocalMcp.Gateway.Security;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add Gateway services
 builder.Services.AddGatewayServices(builder.Configuration);
 builder.Services.AddHostedService<ManagedRuntimeControlService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+// Visibility manager.
 
 // Add SignalR
 builder.Services.AddSignalR(options =>
@@ -20,7 +37,104 @@ builder.Services.AddSignalR(options =>
 // Configure MCP Server
 builder.Services.AddMcpServer()
     .WithHttpTransport()
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly()
+    .WithListToolsHandler(async (context, cancellationToken) =>
+    {
+        await Task.CompletedTask;
+        var toolCollection = context.Server.ServerOptions!.ToolCollection!;
+        var services = context.Server.Services ?? throw new InvalidOperationException("MCP server services are unavailable.");
+        var localToolCache = services.GetRequiredService<LocalToolPrimitiveCache>();
+        var localPrimitives = toolCollection.ToArray();
+        if (localPrimitives.Length > 0)
+        {
+            localToolCache.Remember(localPrimitives);
+        }
+
+        var localTools = localToolCache.ListProtocolTools();
+        var router = services.GetRequiredService<IExternalMcpRouter>();
+        var visibilityStore = services.GetRequiredService<ToolVisibilityStore>();
+        var connection = ResolveMcpConnection(services);
+        var externalSnapshot = router.GetCatalogSnapshot();
+        var externalTools = externalSnapshot.Tools.ToList();
+        var filteredTools = McpShardRuntime.ExportToolsForConnection(localTools, externalTools, visibilityStore, connection);
+        var visibleLocalToolCount = filteredTools.Count(tool => !router.IsExternalToolName(tool.Name));
+        var visibleExternalToolCount = filteredTools.Count(tool => router.IsExternalToolName(tool.Name));
+        var logger = services.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("LocalMcp.Gateway.Mcp.CompositeTools");
+
+        visibilityStore.RememberCatalog(localTools, externalTools, externalSnapshot.Servers);
+        ToolRuntimeHelpers.SuppressSdkLocalToolAppend(toolCollection, logger);
+
+        logger.LogInformation(
+            "Exporting MCP tools for connection {Connection}: local={LocalToolCount}, externalServers={ExternalServerCount}, external={ExternalToolCount}, totalAvailable={TotalToolCount}, shardExported={ShardExportedToolCount}, localVisible={VisibleLocalToolCount}, externalVisible={VisibleExternalToolCount}",
+            connection,
+            localTools.Count,
+            externalSnapshot.Servers.Count,
+            externalTools.Count,
+            localTools.Count + externalTools.Count,
+            filteredTools.Count,
+            visibleLocalToolCount,
+            visibleExternalToolCount);
+
+        return new ListToolsResult
+        {
+            Tools = filteredTools.ToList()
+        };
+    })
+    .WithCallToolHandler(async (context, cancellationToken) =>
+    {
+        var services = context.Server.Services ?? throw new InvalidOperationException("MCP server services are unavailable.");
+        var router = services.GetRequiredService<IExternalMcpRouter>();
+        var requestedName = context.Params.Name;
+        if (string.IsNullOrWhiteSpace(requestedName))
+        {
+            return new CallToolResult
+            {
+                IsError = true,
+                Content = [new TextContentBlock { Text = "Error [INVALID_REQUEST]: Tool name is required." }]
+            };
+        }
+
+        async Task<CallToolResult> InvokeLocalToolAsync(CallToolRequestParams request, CancellationToken token)
+        {
+            var localToolCache = services.GetRequiredService<LocalToolPrimitiveCache>();
+            if (localToolCache.TryGetPrimitive(request.Name, out var cachedLocalTool) && cachedLocalTool is not null)
+            {
+                return await ToolRuntimeHelpers.InvokeLocalPrimitiveAsync(cachedLocalTool, context, token);
+            }
+
+            if (context.Server.ServerOptions!.ToolCollection!.TryGetPrimitive(request.Name, out var localTool))
+            {
+                if (localTool is not null)
+                {
+                    localToolCache.Remember(new object[] { localTool });
+                    return await ToolRuntimeHelpers.InvokeLocalPrimitiveAsync(localTool, context, token);
+                }
+            }
+
+            return new CallToolResult
+            {
+                IsError = true,
+                Content =
+                [
+                    new TextContentBlock
+                    {
+                        Text = $"Error [UNKNOWN_TOOL]: Tool '{request.Name}' is not registered as a local or external MCP tool."
+                    }
+                ]
+            };
+        }
+
+        var visibilityStore = services.GetRequiredService<ToolVisibilityStore>();
+        var connection = ResolveMcpConnection(services);
+        return await McpShardRuntime.CallToolAsync(
+            context.Params,
+            connection,
+            visibilityStore,
+            router,
+            InvokeLocalToolAsync,
+            cancellationToken);
+    });
 
 var app = builder.Build();
 var deviceActivationStore = app.Services.GetRequiredService<DeviceActivationStore>();
@@ -54,26 +168,160 @@ if (securityOptions.PublicExposure && !securityOptions.AuthenticationEnabled)
 }
 // ──────────────────────────────────────────────────────────────────────────
 
+// Intercept GET probe requests on /mcp endpoints before UseRouting short-circuits with 405
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        (path.Equals("/mcp", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/a", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/android/a", StringComparison.OrdinalIgnoreCase)))
+    {
+        var security = context.RequestServices.GetRequiredService<IOptions<SecurityOptions>>().Value;
+        if (security.AuthenticationEnabled)
+        {
+            var authService = context.RequestServices.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationService>();
+            var authResult = await authService.AuthenticateAsync(context, Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme);
+            if (!authResult.Succeeded)
+            {
+                var isAndroid = path.EndsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase);
+                var isB = path.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase);
+                var isA = path.EndsWith("/mcp/a", StringComparison.OrdinalIgnoreCase);
+                var metadataSuffix = isAndroid
+                    ? "/.well-known/oauth-protected-resource/mcp/android/a"
+                    : isB
+                        ? "/.well-known/oauth-protected-resource/mcp/b"
+                        : isA
+                            ? "/.well-known/oauth-protected-resource/mcp/a"
+                            : "/.well-known/oauth-protected-resource";
+
+                var endpointRealm = isAndroid
+                    ? $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/android/a"
+                    : isB
+                        ? $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/b"
+                        : $"{security.PublicBaseUrl.TrimEnd('/')}/mcp/a";
+                var metadataUrl = $"{security.PublicBaseUrl.TrimEnd('/')}{metadataSuffix}";
+                var scopesStr = string.Join(" ", security.OAuth.RequiredScopes.Distinct());
+                context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+                context.Response.Headers.Append("WWW-Authenticate", $"Bearer realm=\"{endpointRealm}\", resource_metadata=\"{metadataUrl}\", scope=\"{scopesStr}\"");
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"unauthorized\",\"message\":\"Authentication required\"}");
+                return;
+            }
+        }
+
+        context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"ok\",\"transport\":\"streamable-http\"}");
+        return;
+    }
+
+    await next(context);
+});
+
+// Sanitize ChatGPT / MCP client per-request metadata that triggers protocol version mismatch in SDK
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (HttpMethods.IsPost(context.Request.Method) &&
+        (path.Equals("/mcp", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/a", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/b", StringComparison.OrdinalIgnoreCase) ||
+         path.Equals("/mcp/android/a", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Request.EnableBuffering();
+        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+        var bodyText = await reader.ReadToEndAsync();
+        context.Request.Body.Position = 0;
+
+        if (!string.IsNullOrWhiteSpace(bodyText) &&
+            bodyText.Contains("_meta") &&
+            bodyText.Contains("clientCapabilities"))
+        {
+            try
+            {
+                var node = JsonNode.Parse(bodyText);
+                if (node is JsonObject obj &&
+                    obj.TryGetPropertyValue("params", out var paramsNode) &&
+                    paramsNode is JsonObject paramsObj &&
+                    paramsObj.TryGetPropertyValue("_meta", out var metaNode) &&
+                    metaNode is JsonObject metaObj)
+                {
+                    var keysToRemove = metaObj
+                        .Select(kv => kv.Key)
+                        .Where(k => k.Contains("clientCapabilities", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    if (keysToRemove.Count > 0)
+                    {
+                        foreach (var key in keysToRemove)
+                        {
+                            metaObj.Remove(key);
+                        }
+
+                        var sanitizedJson = node.ToJsonString();
+                        var bytes = Encoding.UTF8.GetBytes(sanitizedJson);
+                        context.Request.Body = new MemoryStream(bytes);
+                    }
+                }
+            }
+            catch
+            {
+                context.Request.Body.Position = 0;
+            }
+        }
+    }
+
+    await next(context);
+});
+
 app.UseRouting();
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
 // ── Protected Resource Metadata (RFC 9728) ─────────────────────────────────
-var metadataHandler = (IOptions<SecurityOptions> options) =>
+var metadataHandler = (IOptions<SecurityOptions> options, HttpContext context) =>
 {
     var security = options.Value;
+    var publicUrl = security.PublicBaseUrl.TrimEnd('/');
+    var path = context.Request.Path.Value ?? string.Empty;
+
+    string targetResource;
+    if (context.Request.Query.TryGetValue("resource", out var reqResource) && !string.IsNullOrWhiteSpace(reqResource))
+    {
+        targetResource = reqResource.ToString();
+    }
+    else if (path.EndsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase))
+    {
+        targetResource = $"{publicUrl}/mcp/android/a";
+    }
+    else if (path.EndsWith("/mcp/b", StringComparison.OrdinalIgnoreCase))
+    {
+        targetResource = $"{publicUrl}/mcp/b";
+    }
+    else
+    {
+        targetResource = $"{publicUrl}/mcp/a";
+    }
+
     var response = new
     {
-        resource = security.PublicBaseUrl,
-        authorization_servers = new[] { security.OAuth.Authority },
+        resource = targetResource,
+        authorization_servers = new[] { security.OAuth.Authority.TrimEnd('/') },
         scopes_supported = new[] { "files:read", "files:write", "dev:execute" },
-        resource_documentation = $"{security.PublicBaseUrl}/docs"
+        resource_documentation = $"{publicUrl}/docs"
     };
     return Results.Json(response, contentType: "application/json");
 };
 
 app.MapGet("/.well-known/oauth-protected-resource", metadataHandler).AllowAnonymous();
 app.MapGet("/.well-known/oauth-protected-resource/mcp", metadataHandler).AllowAnonymous();
+app.MapGet("/.well-known/oauth-protected-resource/mcp/a", metadataHandler).AllowAnonymous();
+app.MapGet("/.well-known/oauth-protected-resource/mcp/b", metadataHandler).AllowAnonymous();
+app.MapGet("/.well-known/oauth-protected-resource/mcp/android/a", metadataHandler).AllowAnonymous();
 // ──────────────────────────────────────────────────────────────────────────
 
 // Local supervisor health probes. The Desktop app binds the Gateway to loopback.
@@ -107,12 +355,64 @@ app.MapGet("/healthz/agent/{deviceId}", (
     });
 }).AllowAnonymous();
 
+app.MapGet("/healthz/chrome-devtools", async (
+    IExternalMcpRouter router,
+    CancellationToken cancellationToken) =>
+{
+    var report = await router.CheckHealthAsync(cancellationToken);
+    return Results.Json(report);
+}).AllowAnonymous();
+
+app.MapGet("/api/tools/visibility", async (
+    ToolVisibilityStore visibilityStore,
+    LocalToolPrimitiveCache localToolCache,
+    IExternalMcpRouter router,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    await Task.CompletedTask;
+    var logger = loggerFactory.CreateLogger("LocalMcp.Gateway.Mcp.ToolVisibility");
+    var localTools = localToolCache.ListProtocolTools();
+    if (localTools.Count == 0)
+        localTools = LocalToolCatalog.DiscoverFromAssembly(typeof(Program).Assembly);
+    var externalSnapshot = router.GetCatalogSnapshot();
+    visibilityStore.RememberCatalog(localTools, externalSnapshot.Tools, externalSnapshot.Servers);
+    logger.LogInformation(
+        "Tool Visibility catalog refreshed: local={LocalToolCount}, externalServers={ExternalServerCount}, external={ExternalToolCount}, totalAvailable={TotalAvailableToolCount}",
+        localTools.Count,
+        externalSnapshot.Servers.Count,
+        externalSnapshot.Tools.Count,
+        localTools.Count + externalSnapshot.Tools.Count);
+    return Results.Json(visibilityStore.GetSnapshot());
+}).AllowAnonymous();
+
+app.MapPut("/api/tools/visibility", async (
+    ToolVisibilityUpdateRequest request,
+    ToolVisibilityStore visibilityStore,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var snapshot = await visibilityStore.SaveAsync(request, cancellationToken);
+        return Results.Json(snapshot);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new
+        {
+            error = "TOOL_CONNECTION_LIMIT_EXCEEDED",
+            message = ex.Message
+        });
+    }
+}).AllowAnonymous();
+
 app.MapGet("/api/devices", (
     IAgentConnectionRegistry registry,
     IPreferredDeviceStore preferredDeviceStore) =>
 {
     var preferredDeviceId = preferredDeviceStore.GetPreferredDeviceId();
     var devices = registry.GetActiveDeviceInfos()
+        .Where(device => string.Equals(device.Platform, "windows", StringComparison.OrdinalIgnoreCase))
         .OrderBy(device => string.IsNullOrWhiteSpace(device.DisplayName) ? device.DeviceId : device.DisplayName, StringComparer.OrdinalIgnoreCase)
         .Select(device => new
         {
@@ -262,14 +562,40 @@ app.MapGet("/api/device-activation/current", (HttpContext httpContext) =>
 // Map SignalR Hub
 app.MapHub<AgentHub>("/hubs/agent").RequireAuthorization("AgentPolicy");
 
-// Map MCP endpoints (Streamable HTTP Transport — default path: POST /)
-app.MapMcp().RequireAuthorization("McpAuthenticatedPolicy");
+// Map MCP endpoints (Streamable HTTP Transport)
+// Keep the legacy MCP path as Connection A so older ChatGPT connectors fail less abruptly.
+app.MapMcp("/mcp").RequireAuthorization("McpAuthenticatedPolicy");
+app.MapMcp("/mcp/a").RequireAuthorization("McpAuthenticatedPolicy");
+app.MapMcp("/mcp/b").RequireAuthorization("McpAuthenticatedPolicy");
+app.MapMcp("/mcp/android/a").RequireAuthorization("McpAuthenticatedPolicy");
+
+// Handle GET probe requests for MCP endpoints to return 401 OAuth Challenge instead of 405 Method Not Allowed
+app.MapGet("/mcp", () => Results.Ok(new { status = "ok", connection = "A", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
+app.MapGet("/mcp/a", () => Results.Ok(new { status = "ok", connection = "A", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
+app.MapGet("/mcp/b", () => Results.Ok(new { status = "ok", connection = "B", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
+app.MapGet("/mcp/android/a", () => Results.Ok(new { status = "ok", connection = "AndroidA", transport = "streamable-http" })).RequireAuthorization("McpAuthenticatedPolicy");
 
 static DateTimeOffset? TryParseDateTimeOffset(string? value) =>
     DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+
+static string ResolveMcpConnection(IServiceProvider services)
+{
+    var path = services.GetRequiredService<IHttpContextAccessor>().HttpContext?.Request.Path.Value ?? string.Empty;
+    if (path.StartsWith("/mcp/android/a", StringComparison.OrdinalIgnoreCase))
+        return ToolVisibilityStore.ConnectionAndroidA;
+
+    return path.StartsWith("/mcp/b", StringComparison.OrdinalIgnoreCase)
+        ? ToolVisibilityStore.ConnectionB
+        : ToolVisibilityStore.ConnectionA;
+}
 
 app.Run();
 
 // Make the implicit Program class visible to integration tests
 public partial class Program { }
+
+
+
+
+
 

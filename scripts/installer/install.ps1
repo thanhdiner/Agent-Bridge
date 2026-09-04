@@ -43,7 +43,8 @@ function Get-AgentBridgeProcess {
     $names = @(
         'AgentBridge.Desktop.exe',
         'LocalMcp.Gateway.exe',
-        'LocalMcp.Agent.Windows.exe'
+        'LocalMcp.Agent.Windows.exe',
+        'LocalMcp.Agent.AndroidAdb.exe'
     )
 
     Get-CimInstance Win32_Process |
@@ -140,6 +141,19 @@ if (!$NoDesktopShortcut) {
     $desktopDirectory = [Environment]::GetFolderPath('DesktopDirectory')
     $desktopShortcut = Join-Path $desktopDirectory 'AgentBridge.lnk'
     New-Shortcut -ShortcutPath $desktopShortcut -TargetPath $desktopExe -WorkingDirectory $installDirectory
+}
+
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+New-Item -Path $runKey -Force | Out-Null
+New-ItemProperty -Path $runKey `
+    -Name 'AgentBridge Desktop' `
+    -PropertyType String `
+    -Value ('"{0}" --hidden' -f $desktopExe) `
+    -Force | Out-Null
+
+$legacyStartupShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'AgentBridge Desktop.lnk'
+if (Test-Path -LiteralPath $legacyStartupShortcut -PathType Leaf) {
+    Remove-Item -LiteralPath $legacyStartupShortcut -Force
 }
 
 Write-Host "AgentBridge installed to:"

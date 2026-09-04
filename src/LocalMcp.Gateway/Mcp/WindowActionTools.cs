@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -44,7 +45,7 @@ public sealed class WindowActionTools
         OpenWorld = false),
      Description("Brings one live top-level Windows window to the foreground and restores it first when minimized. Requires dev:execute scope.")]
     public async Task<CallToolResult> FocusWindowAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle)
     {
         var validation = await ValidateAsync(deviceId, windowHandle);
@@ -55,7 +56,7 @@ public sealed class WindowActionTools
             new WindowFocusCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 WindowHandle = windowHandle
             },
@@ -70,7 +71,7 @@ public sealed class WindowActionTools
         OpenWorld = false),
      Description("Moves and resizes one live top-level Windows window. Minimized or maximized windows can be restored before applying bounds. Requires dev:execute scope.")]
     public async Task<CallToolResult> MoveWindowAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Target left coordinate in virtual-screen pixels")] int x,
         [Description("Target top coordinate in virtual-screen pixels")] int y,
@@ -90,7 +91,7 @@ public sealed class WindowActionTools
             new WindowMoveCommand
             {
                 CommandId = Guid.NewGuid(),
-                DeviceId = deviceId,
+                DeviceId = deviceId ?? "",
                 CreatedAt = DateTimeOffset.UtcNow,
                 WindowHandle = windowHandle,
                 X = x,
@@ -110,7 +111,7 @@ public sealed class WindowActionTools
         OpenWorld = false),
      Description("Captures one live top-level Windows window as a bounded PNG image. Uses off-screen rendering first and a screen-region fallback when necessary. Does not write a file. Requires dev:execute scope.")]
     public async Task<CallToolResult> CaptureWindowAsync(
-        [Description("The unique identifier of the target agent device")] string deviceId,
+        [Description("Optional internal target device id. Omit to use the active desktop agent."), Optional, DefaultParameterValue(null)] string? deviceId,
         [Description("The target native window handle as a decimal string or 0x-prefixed hexadecimal string")] string windowHandle,
         [Description("Maximum output width in pixels (default: 1920, hard limit: 4096)")] int maxWidth = 1920,
         [Description("Maximum output height in pixels (default: 1080, hard limit: 4096)")] int maxHeight = 1080)
@@ -124,7 +125,7 @@ public sealed class WindowActionTools
         var command = new WindowScreenshotCommand
         {
             CommandId = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = deviceId ?? "",
             CreatedAt = DateTimeOffset.UtcNow,
             WindowHandle = windowHandle,
             MaxWidth = maxWidth,
@@ -204,12 +205,10 @@ public sealed class WindowActionTools
         };
     }
 
-    private async Task<CallToolResult?> ValidateAsync(string deviceId, string windowHandle)
+    private async Task<CallToolResult?> ValidateAsync(string? deviceId, string windowHandle)
     {
         if (!await AuthorizedAsync())
             return Error("FORBIDDEN", "Access denied. Required scope: dev:execute");
-        if (string.IsNullOrWhiteSpace(deviceId))
-            return Error("INVALID_REQUEST", "deviceId parameter is required.");
         if (string.IsNullOrWhiteSpace(windowHandle) || windowHandle.Length > 32 || windowHandle.Any(char.IsControl))
             return Error("INVALID_REQUEST", "windowHandle is required and must be at most 32 characters without control characters.");
         return null;
@@ -257,3 +256,5 @@ public sealed class WindowActionTools
             IsError = true
         };
 }
+
+

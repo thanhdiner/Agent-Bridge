@@ -1,0 +1,53 @@
+/* Founder card refinements */
+.cta-offer{border-color:rgba(151,132,255,.28)}
+.cta-offer-name{display:grid;gap:3px;font-size:14px;color:#f6f7fb}
+.cta-offer-batch{font-size:8px;color:#b9adff}
+.cta-offer-status{display:inline-flex;align-items:center;gap:8px;color:#8f97aa;font-size:7px;font-weight:850;letter-spacing:.1em;text-transform:uppercase}
+.cta-offer-status::before{content:"";width:14px;height:2px;border-radius:999px;background:linear-gradient(90deg,#a58fff,#57a3ff);box-shadow:0 0 10px rgba(124,92,252,.18)}
+.cta-offer-status i{display:none}
+.cta-offer-body{padding:20px 0 15px;border-bottom:1px solid rgba(255,255,255,.08)}
+.cta-license-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;color:#9ca4b5;font-size:10px;line-height:1.25}
+.cta-includes-head{display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding:0 2px 9px;color:#c7ccda;font-size:8px;font-weight:900;letter-spacing:.07em;text-transform:uppercase}
+.cta-includes-head small{color:#626b7d;font-size:7px;font-weight:800;letter-spacing:.06em}
+.cta-offer .cta-includes{display:grid;gap:0;margin:0;padding:0;border-top:1px solid rgba(255,255,255,.075);border-bottom:1px solid rgba(255,255,255,.075)}
+.cta-offer .cta-includes li{position:relative;display:grid;grid-template-columns:18px 1fr;align-items:center;gap:10px;min-height:0;padding:11px 2px;border:0;border-bottom:1px solid rgba(255,255,255,.06);border-radius:0;background:transparent;color:#c8ceda;transition:background 180ms ease}
+.cta-offer .cta-includes li:last-child{border-bottom:0}
+.cta-offer .cta-includes li:hover{background:linear-gradient(90deg,rgba(124,92,252,.06),transparent 72%)}
+@media (prefers-reduced-motion: reduce){.cta-offer,.cta-offer .cta-includes li,.cta-offer .cta-includes li>span{transition:none}}
+.cta-offer .cta-includes li>span{display:block;width:12px;height:3px;border:0;border-radius:999px;background:linear-gradient(90deg,#a58fff,#57a3ff);box-shadow:none;transition:width 180ms ease}.cta-offer .cta-includes li:nth-child(2)>span{background:linear-gradient(90deg,#57a3ff,#65e8c5)}.cta-offer .cta-includes li:nth-child(3)>span{background:linear-gradient(90deg,#65e8c5,#78e9a4)}.cta-offer .cta-includes li:hover>span{width:16px}
+.cta-offer .cta-includes li>div{display:grid;gap:2px}
+.cta-offer .cta-includes strong{color:#f0f4fb;font-size:10.5px;font-weight:750;line-height:1.25;text-shadow:none}
+.cta-offer .cta-includes small{color:#aeb8c9;font-size:9px;font-weight:650;line-height:1.35;text-shadow:none}
+.cta-offer-bottom{padding-top:16px}
+x
+{}
+
+.final-cta .cta-secondary{
+  display:inline-flex;
+  min-height:52px;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  padding:0 22px;
+  border:1px solid transparent;
+  border-radius:14px;
+  color:#d8ddeb;
+  background:
+    linear-gradient(#12151c,#12151c) padding-box,
+    linear-gradient(115deg,rgba(255,255,255,.14),rgba(91,171,255,.9),rgba(151,124,255,.98),rgba(224,108,255,.72),rgba(255,255,255,.14)) border-box;
+  background-size:100% 100%,260% 100%;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 10px 24px rgba(0,0,0,.18);
+  font-size:14px;
+  font-weight:900;
+  animation:cta-secondary-spotlight 5.6s linear infinite;
+  transition:transform 180ms ease,color 160ms ease,box-shadow 180ms ease;
+}
+.final-cta .cta-secondary:hover{
+  color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 14px 30px rgba(0,0,0,.24);
+  transform:translateY(-2px);
+  animation-duration:3.8s;
+}
+@keyframes cta-secondary-spotlight{
+  to{background-position:0 0,260% 0}
+}

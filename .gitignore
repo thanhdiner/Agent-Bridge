@@ -32,3 +32,12 @@ endpoints.txt
 type_info.txt
 policies.txt
 mcp_types_dump.txt
+
+# AgentBridge developer workflow runtime
+.agentbridge/checkpoints.jsonl
+.agentbridge/sessions/
+.agentbridge/visual-regression/
+.tmp-mcp-reflect/
+ab-cmdstart-test.log
+scripts/installer/payload/
+

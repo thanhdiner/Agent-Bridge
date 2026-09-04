@@ -26,7 +26,8 @@ public sealed record SupervisorSnapshot(
     string DeviceId,
     string GatewayUrl,
     string LogsDirectory,
-    DateTimeOffset UpdatedAtUtc)
+    DateTimeOffset UpdatedAtUtc,
+    string PublicTunnelUrl = "")
 {
     public static SupervisorSnapshot Initial(string gatewayUrl, string logsDirectory) => new(
         new ManagedServiceStatus(
@@ -46,14 +47,15 @@ public sealed record SupervisorSnapshot(
         new ManagedServiceStatus(
             ManagedServiceState.Stopped,
             "Stopped",
-            "Cloudflare Tunnel has not started yet.",
+            "Tunnel has not started yet.",
             null,
             false,
             false),
         "Preparing device identity...",
         gatewayUrl,
         logsDirectory,
-        DateTimeOffset.UtcNow);
+        DateTimeOffset.UtcNow,
+        string.Empty);
 }
 
 public sealed record LaunchTarget(
