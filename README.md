@@ -35,11 +35,14 @@ The bridge is designed around explicit boundaries:
 | PowerShell | Run bounded PowerShell 7 commands, start observable sessions, poll status, and cancel process trees | `powershell_exec`, `powershell_start`, `powershell_status`, `powershell_cancel` |
 | Developer workflows | Build and diagnose extensions, trace DOM activity, supervise process trees, run repository dev sessions, compare UI captures, and save lightweight task checkpoints | `extension_dev_workflow`, `browser_extension_inspect`, `dom_event_trace`, `process_tree_supervisor`, `dev_session_run`, `visual_regression_compare`, `repo_task_checkpoint` |
 | Chrome DevTools MCP | Attach to the currently opened Chrome profile through `chrome-devtools-mcp --autoConnect`, cache the discovered tools, and reuse one persistent MCP session | `chrome-devtools.*` |
+| Chrome extension targets | Inspect live extension side panels, service workers, and iframe targets through a persistent CDP connection to the same Chrome instance | `chrome_targets_list`, `chrome_target_snapshot`, `chrome_target_evaluate` |
 | Android over ADB | Discover a paired Android phone, inspect state and UI hierarchy, capture screenshots, tap, swipe, type safe text, press allowlisted keys, and open apps | `android_device_list`, `android_get_state`, `android_screenshot`, `android_ui_tree`, `android_tap`, `android_swipe` |
 
 The Gateway currently registers the complete tool surface from `src/LocalMcp.Gateway/Mcp/`. Aliases such as `ui_get_text` and `ui_hotkey` keep the public API readable while reusing the existing execution core.
 
 Chrome DevTools tools are proxied from the external `chrome-devtools` MCP server and are namespaced as `chrome-devtools.<tool>` to avoid conflicts with local AgentBridge tools.
+
+`chrome_targets_list` covers targets missing from the upstream page picker, including live side panels and extension service workers. Pass a `targetId` to `chrome_target_snapshot` to get frame IDs and accessibility nodes; pass that target ID and optionally a `frameId` to `chrome_target_evaluate` to run a JavaScript function. Cross-origin frames running in a separate process appear as their own targets. These tools require the `dev:execute` scope and reuse one CDP connection after Chrome's remote-debugging approval. Set `AGENTBRIDGE_CHROME_USER_DATA_DIR` if Chrome uses a non-default user-data directory.
 
 ### Developer workflow profiles
 
