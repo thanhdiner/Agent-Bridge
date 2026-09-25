@@ -452,6 +452,7 @@ public sealed class ToolVisibilityStore
             return "Developer Workflows";
 
         if (lower.StartsWith("chrome-devtools.", StringComparison.Ordinal) ||
+            lower.StartsWith("chrome_target", StringComparison.Ordinal) ||
             lower.StartsWith("playwright.", StringComparison.Ordinal) ||
             lower.StartsWith("puppeteer.", StringComparison.Ordinal))
             return "Browser";
@@ -516,6 +517,8 @@ public sealed class ToolVisibilityStore
     private static string ResolveRisk(string name)
     {
         var lower = name.ToLowerInvariant();
+        if (lower == "chrome_target_evaluate")
+            return "dangerous";
         if (lower is
             "extension_dev_workflow" or
             "process_tree_supervisor" or
