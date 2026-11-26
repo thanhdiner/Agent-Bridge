@@ -1,4 +1,12 @@
-# AgentBridge
+<h1 align="center">
+  <img src="docs/assets/agentbridge-banner.svg" alt="AgentBridge" width="100%">
+</h1>
+
+<p align="center">
+  <a href="#quick-start"><img src="docs/assets/quick-start.svg" alt="Quick Start"></a>
+  <a href="#current-user-windows-package"><img src="docs/assets/build-installer.svg" alt="Build the Windows installer"></a>
+  <a href="#architecture"><img src="docs/assets/architecture.svg" alt="Architecture"></a>
+</p>
 
 A Windows-first MCP bridge that lets AI agents inspect, control, and automate a real desktop through guarded filesystem, process, window, screen, UI Automation, clipboard, and PowerShell tools.
 

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="106" height="26" viewBox="0 0 106 26" role="img" aria-labelledby="title">
+  <title id="title">QUICK START</title>
+  <path fill="#DAC7FF" d="M0 0h106v26H0z"/>
+  <path fill="#473761" d="M0 0h25v26H0z"/>
+  <path d="M9 7l8 6-8 6z" fill="none" stroke="#fff" stroke-width="1.4"/>
+  <text x="32" y="17" fill="#231833" font-family="monospace" font-size="10.5" font-weight="700">QUICK START</text>
+</svg>

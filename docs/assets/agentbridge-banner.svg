@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="168" viewBox="0 0 114 16.8" role="img" aria-labelledby="title" shape-rendering="crispEdges">
+  <title id="title">AgentBridge</title>
+  <defs>
+    <path id="a" fill-rule="evenodd" d="M1 0h5v1h1v8H5V6H2v3H0V1h1zm1 2v2h3V2z"/>
+    <path id="b" fill-rule="evenodd" d="M0 0h6v1h1v3H6v1h1v3H6v1H0zm2 2v1.5h3V2zm0 3.5V7h3V5.5z"/>
+    <path id="d" fill-rule="evenodd" d="M0 0h5v1h1v1h1v5H6v1H5v1H0zm2 2v5h3V2z"/>
+    <path id="e" fill-rule="evenodd" d="M0 0h7v2H2v1.5h4v2H2V7h5v2H0z"/>
+    <path id="g" fill-rule="evenodd" d="M1 0h6v2H2v5h3V5.5H4v-2h3V8H6v1H1V8H0V1h1z"/>
+    <path id="i" fill-rule="evenodd" d="M0 0h7v2H4.5v5H7v2H0V7h2.5V2H0z"/>
+    <path id="n" fill-rule="evenodd" d="M0 0h2v1h1v2h1v2h1V0h2v9H5V8H4V6H3V4H2v5H0z"/>
+    <path id="r" fill-rule="evenodd" d="M0 0h6v1h1v4H5v1h1v1h1v2H5V8H4V7H3V6H2v3H0zm2 2v2h3V2z"/>
+    <path id="t" fill-rule="evenodd" d="M0 0h7v2H4.5v7h-2V2H0z"/>
+    <g id="agent">
+      <use href="#a" x="0"/>
+      <use href="#g" x="8"/>
+      <use href="#e" x="16"/>
+      <use href="#n" x="24"/>
+      <use href="#t" x="32"/>
+    </g>
+    <g id="bridge">
+      <use href="#b" x="0"/>
+      <use href="#r" x="8"/>
+      <use href="#i" x="16"/>
+      <use href="#d" x="24"/>
+      <use href="#g" x="32"/>
+      <use href="#e" x="40"/>
+    </g>
+  </defs>
+  <path fill="#161322" d="M0 0h114v16.8H0z"/>
+  <path fill="#BAA8FF" d="M8 3.5h1.5V5H8v1.5H6.5V8H8v1.5h1.5V11H8V9.5H6.5V8H5V6.5h1.5V5H8z"/>
+  <path fill="#BAA8FF" d="M12 3.5h1.5V5H15v1.5h1.5V8H15v1.5h-1.5V11H12V9.5h1.5V8H15V6.5h-1.5V5H12z"/>
+  <path fill="#9BD9FF" d="M5 13h3v-1h6v1h2.5v1.5H13v-1H9v1H5z"/>
+  <use href="#agent" x="20.5" y="4.25" fill="#6F57A5"/>
+  <use href="#bridge" x="61" y="4.25" fill="#4486B4"/>
+  <use href="#agent" x="20" y="3.5" fill="#DAC7FF"/>
+  <use href="#bridge" x="60.5" y="3.5" fill="#A6DFFF"/>
+</svg>
